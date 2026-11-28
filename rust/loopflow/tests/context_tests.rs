@@ -5,13 +5,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use loopflow_execution::context_block::{ContextDelivery, ContextMoment};
+use loopflow_execution::harness::Mode;
 use loopflow_execution::ops::resolve_work_binding;
 use loopflow_execution::prompt::format_prompt;
 use loopflow_execution::prompt::gather_context;
 use loopflow_execution::prompt::DocumentSource;
 use loopflow_execution::prompt::GatherContextOpts;
 use loopflow_execution::prompt::PromptComponents;
-use loopflow_execution::prompt::Surface;
 use loopflow_execution::prompt::{gather_documents, GatherSpec};
 use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
 use tempfile::TempDir;
@@ -76,7 +76,7 @@ fn gather_context_with_skill() {
         skill: Some("implement".to_string()),
         message: None,
         operate: false,
-        surface: Surface::Headless,
+        mode: Mode::Headless,
         files: vec![],
         docs: vec![],
         wave: None,
@@ -102,7 +102,7 @@ fn gather_context_with_inline_prompt() {
         skill: None,
         message: Some("Fix the bug in main.rs".to_string()),
         operate: false,
-        surface: Surface::Cli,
+        mode: Mode::Interactive,
         files: vec![],
         docs: vec![],
         wave: None,
@@ -135,7 +135,7 @@ fn gather_context_includes_explicit_readme_docs_target() {
         skill: Some("implement".to_string()),
         message: None,
         operate: false,
-        surface: Surface::Headless,
+        mode: Mode::Headless,
         files: vec![],
         docs: vec!["README.md".to_string()],
         wave: None,
@@ -174,7 +174,7 @@ fn gather_context_includes_scratch_docs() {
         skill: Some("implement".to_string()),
         message: None,
         operate: false,
-        surface: Surface::Headless,
+        mode: Mode::Headless,
         files: vec![],
         docs: vec![],
         wave: None,
@@ -217,7 +217,7 @@ fn gather_context_with_wave() {
         skill: Some("implement".to_string()),
         message: None,
         operate: false,
-        surface: Surface::Headless,
+        mode: Mode::Headless,
         files: vec![],
         docs: vec![],
         wave: Some("auth".to_string()),
@@ -230,11 +230,11 @@ fn gather_context_with_wave() {
 }
 
 // =============================================================================
-// Surface
+// Mode
 // =============================================================================
 
 #[test]
-fn gather_context_preserves_surface() {
+fn gather_context_keeps_the_mode() {
     let _env = support::EnvGuard::new(&[]);
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
@@ -242,36 +242,16 @@ fn gather_context_preserves_surface() {
     write_skill(repo, "debug", "Fix it.");
     make_commit(repo, "initial");
 
-    let auto = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("debug".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Headless,
-        files: vec![],
-        docs: vec![],
-        wave: None,
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    let interactive = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("debug".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Cli,
-        files: vec![],
-        docs: vec![],
-        wave: None,
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    assert_eq!(auto.surface, Surface::Headless);
-    assert_eq!(interactive.surface, Surface::Cli);
+    for mode in [Mode::Headless, Mode::Interactive] {
+        let components = gather_context(&GatherContextOpts {
+            repo_root: repo.to_path_buf(),
+            skill: Some("debug".to_string()),
+            mode,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(components.mode, mode);
+    }
 }
 
 // =============================================================================
@@ -293,7 +273,7 @@ fn format_prompt_includes_skill_content() {
         skill: Some("implement".to_string()),
         message: None,
         operate: false,
-        surface: Surface::Headless,
+        mode: Mode::Headless,
         files: vec![],
         docs: vec![],
         wave: None,
@@ -321,7 +301,7 @@ fn format_prompt_includes_auto_mode_header() {
         skill: Some("implement".to_string()),
         message: None,
         operate: false,
-        surface: Surface::Headless,
+        mode: Mode::Headless,
         files: vec![],
         docs: vec![],
         wave: None,
@@ -355,7 +335,7 @@ fn format_prompt_includes_wave_context() {
         skill: Some("implement".to_string()),
         message: None,
         operate: false,
-        surface: Surface::Headless,
+        mode: Mode::Headless,
         files: vec![],
         docs: vec![],
         wave: Some("payments".to_string()),

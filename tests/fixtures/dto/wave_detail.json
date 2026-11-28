@@ -395,6 +395,7 @@
           "outlook": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "pr": {
@@ -428,13 +429,15 @@
         "graph_source": null,
         "section": "backlog",
         "lifecycle": "unstarted",
+        "working_group": null,
         "selection_states": [
           "open",
           "unstarted",
           "backlog"
         ],
         "owned_by_you": false,
-        "runs_on": null
+        "runs_on": null,
+        "breakpoint_arrival": null
       },
       {
         "task": {
@@ -583,18 +586,21 @@
           "outlook": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "pr": null,
         "graph_source": null,
         "section": "backlog",
         "lifecycle": "unstarted",
+        "working_group": null,
         "selection_states": [
           "unstarted",
           "backlog"
         ],
         "owned_by_you": false,
-        "runs_on": null
+        "runs_on": null,
+        "breakpoint_arrival": null
       }
     ],
     "truncated": false

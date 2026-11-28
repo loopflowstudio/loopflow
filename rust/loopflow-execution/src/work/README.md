@@ -17,7 +17,7 @@ ordinary focus leaves the primary Session as its face.
 
 Repository scope comes from the current repository or `--repo`/`--repository`.
 The bounded syntax supports `wave:`, `task:`, `query:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|error|unstarted|idle|active|moving|backlog|working|done|auto`
+`state:open|available|busy|blocked|error|unstarted|idle|active|moving|paused|backlog|working|done|auto`
 (`available`, `busy`, `blocked`, `error` read Task Sessions; the rest the Task; `auto` is
 an open Task whose auto setting is on). `working`,
 `backlog` and `done` are the board's sections; `open` is any owned

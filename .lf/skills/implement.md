@@ -4,16 +4,21 @@ docs: scripts/testing.md
 ---
 ## In this repository
 
-**A number on screen holds still.** Show progress until a count or total
-finishes loading, then draw the final value once; never let it climb live.
+**App writes go through `PendingChanges.make`.** Flip the control in the click
+and revert on refusal; use `PendingChanges.request` only for writes with no
+visible state, never Task actions or `"… requested"` waits.
 
-**One spinner per pane.** Delay briefly on an empty pane so fast opens never
-flash, then center a regular-size spinner. Over existing content, keep the body
-clear and show progress in the toolbar strip.
+**A number on screen holds still.** Show progress while loading, then draw the
+final count once.
 
-**Plain icon buttons show hover and state.** Give an icon-only `.plain` button
-a hover highlight and tooltip explaining what it does; when it toggles a view or
-mode, show its on/off state clearly.
+**One spinner per pane.** Delay on an empty pane so fast opens don't flash, then
+center one; over content, show progress in the toolbar.
+
+**Plain icon buttons show hover and state.** Give icon-only `.plain` buttons
+hover, a tooltip, and on/off state when they toggle.
+
+**Inputs read as inputs.** Frame borderless text or search fields (`SearchBox`,
+or `palette.surface` with `palette.borderStrong`), never bare on `palette.background`.
 
 **Desktop confirmations are sheets, not `.confirmationDialog`.** On macOS,
 `.confirmationDialog` with a `.destructive` button promotes Cancel to the

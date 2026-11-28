@@ -1,23 +1,30 @@
-/// What a Task offers from where it stands, on the Mac's Workflow bar and in
-/// the phone's "Task actions" menu: the step that moves it and its auto
-/// setting. Rust owns the position and whether a run can start; both surfaces
-/// draw this and decide nothing themselves.
+/// The actions offered by the Task workspace on both Mac and iPhone.
 public struct TaskActions: Equatable {
-    /// `lf task run` under the name where the Task stands gives it.
-    public struct Run: Equatable {
-        /// "Start" or "Run": the button's word and the Notice's.
-        public let label: String
-        /// The command the button stands for.
-        public let help: String
-        public var arrival: String? = nil
+    public enum Pause: Equatable, Sendable {
+        case pause, unpause
     }
 
-    /// The Task's auto setting, named in the Notice by the action it offers.
+    public let control: WorkflowControl?
+    public let pause: Pause?
+    public let runRefusal: String?
+    public let primaryRefusal: String?
+    public let auto: Auto?
+    public let completeReady: Bool
+    public let steps: [String]
+    public let breakpoints: Set<String>
+    public let breakpointArrival: String?
+    public let breakpointBlocker: String?
+    /// The Graph's top-level steps as the workflow track draws them.
+    public let track: [TaskGraph.Step]
+    /// Where the control's label stands in the track: the step it replaces,
+    /// or `track.count` past the last one at the end.
+    public let chip: Int
+    /// Rust's sentence for where the Task stands, or where you take part.
+    public let sentence: String?
+
+    /// The Task's auto setting.
     public enum Auto: Equatable {
         case on, off
-
-        /// The button that changes it.
-        public var offer: String { self == .on ? "Stop Auto-Ship" : "Auto-Ship" }
 
         public func help(issue: String) -> String {
             self == .on
@@ -26,51 +33,65 @@ public struct TaskActions: Equatable {
         }
     }
 
-    /// Nil while a run carries the Task, at its Graph's end, or before its reading arrives.
-    public let run: Run?
-    /// Nil on a completed Task with auto off: nothing is left to ship.
-    public let auto: Auto?
-    /// Why Rust would refuse a run now. It disables `run` and "Auto-Ship", never "Stop Auto-Ship".
-    public let runRefusal: String?
-
-    /// `work` is the Task's reading, nil until one arrives; `execution` is the
-    /// same reading's auto mark, and the row's state stands in until then.
-    public init(work: TaskOverview?, row: RoadmapTask, execution: TaskExecution?) {
-        let issue = row.task.identifier
-        if let graph = work?.graph {
-            run = graph.runAction(issue: issue)
-        } else if work != nil {
-            // A reading with no Graph: the first run takes one up.
-            run = Run(label: "Start", help: "lf task run \(issue)")
-        } else {
-            run = nil
-        }
-        let on = execution.map { $0.auto?.state == .on } ?? row.selectionStates.contains(.auto)
+    /// `autoPending` is the switch's change the Machine has not shown yet.
+    public init(work: TaskOverview?, row: RoadmapTask, execution: TaskExecution?, outline: WorkflowOutline? = nil,
+                autoPending: Bool? = nil) {
+        let graph = work?.graph
+        let held = row.lifecycle == .paused
+        let on = autoPending ?? execution.map { $0.auto?.state == .on } ?? row.selectionStates.contains(.auto)
         auto = on ? .on : row.isCompleted ? nil : .off
         runRefusal = row.runControl.unavailable
-    }
+        completeReady = row.lifecycle == .done || row.pr?.phase == .merged || graph?.control.action == .done
 
-    /// Why `auto`'s button is disabled; turning auto off is never refused here.
-    public var autoRefusal: String? { auto == .on ? nil : runRefusal }
+        if row.isCompleted {
+            control = WorkflowControl(action: .done, label: row.lifecycle == .abandoned ? "Abandoned" : "Done")
+        } else if let graph {
+            // A pending lifecycle edit can reach the row before its new Graph reading.
+            let graphHeld = graph.control.action == .pausing || graph.control.action == .unpause || graph.control.action == .resume
+            control = graphHeld == held ? graph.control : nil
+        } else if work == nil {
+            control = nil
+        } else if held {
+            control = WorkflowControl(action: .resume, label: "Paused: \(outline?.steps.first?.name ?? "start")")
+        } else if completeReady {
+            control = WorkflowControl(action: .done, label: "Done")
+        } else {
+            control = outline?.start ?? WorkflowControl(action: .run, label: "Run")
+        }
+        primaryRefusal = (control?.action == .run || control?.action == .continue || row.runControl.pausing) ? runRefusal : nil
+        if let graph, case .breakpoint(_, let arrival, let blocked) = graph.position {
+            breakpointArrival = arrival
+            breakpointBlocker = blocked && !held ? graph.control.label : nil
+        } else {
+            breakpointArrival = nil
+            breakpointBlocker = nil
+        }
+        breakpoints = Set(graph?.breakpoints ?? outline?.breakpoints ?? [])
+        pause = held ? .unpause : row.lifecycle.isWorking ? .pause : nil
 
-    /// Why an offered action is disabled, said once for both; nil when none is.
-    public var refusal: String? { run != nil || auto == .off ? runRefusal : nil }
-}
+        if let graph {
+            track = graph.steps
+            let ended = graph.position == .at(step: TaskGraph.end) || control?.action == .done
+            chip = graph.currentStep ?? (ended ? graph.steps.count : 0)
+            sentence = graph.sentence
+        } else {
+            track = outline?.steps ?? []
+            chip = control?.action == .done ? track.count : 0
+            sentence = outline?.sentence
+        }
 
-public extension TaskGraph {
-    /// What `lf task run` does from where the Task stands, named for it; `nil`
-    /// while a run carries the Task or once it is at `end`.
-    func runAction(issue: String) -> TaskActions.Run? {
-        let help = "lf task run \(issue)"
-        switch position {
-        case .at(TaskGraph.start): return .init(label: "Start", help: help)
-        case .at(TaskGraph.end): return nil
-        case .breakpoint(_, _, true): return nil
-        case .breakpoint(_, let arrival, false):
-            return .init(label: "Continue", help: "\(help) --at-arrival \(arrival)", arrival: arrival)
-        case .at(let step): return .init(label: "Run", help: "\(help): continue after \(step)")
-        case .run(_, _, _, true): return nil
-        case .run(_, let at, _, false): return .init(label: "Run", help: "\(help): run again at \(at)")
+        if let graph {
+            steps = graph.startFromSteps
+        } else if let outline {
+            var seen: Set<String> = [TaskGraph.start]
+            let stops = Set(outline.breakpoints)
+            steps = [TaskGraph.start] + outline.steps.map(\.name).filter {
+                !stops.contains($0) && seen.insert($0).inserted
+            }
+        } else {
+            steps = []
         }
     }
+
+    public var autoRefusal: String? { auto == .on ? nil : runRefusal }
 }

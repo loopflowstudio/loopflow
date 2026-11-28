@@ -365,11 +365,13 @@ pub fn matching_task_pr_merge_request(
         }
         let branch = current_branch(repo)?;
         let head = rev_parse(repo, "HEAD")?;
-        let pr = store
+        let Some(pr) = store
             .active_task_pr(&task.id)
             .await
             .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-            .ok_or_else(|| task_error(format!("Task {} has no active PR", task.identifier)))?;
+        else {
+            return Ok(None);
+        };
         if pr.is_settled() || branch.as_deref() != Some(pr.branch.as_str()) {
             return Ok(None);
         }
@@ -717,13 +719,26 @@ async fn resolve_task_pr_upstream(
     default_branch: &str,
 ) -> OpsResult<(String, String)> {
     if let Some(parent_id) = task.parent_pr_id.as_ref() {
-        let parent = store
-            .get_task_pr(parent_id)
-            .await
-            .map_err(|error| task_error(format!("failed to read stack parent: {error}")))?
-            .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
-        let parent_live = parent.merge_commit.is_none() && parent.abandoned_at.is_none();
-        if parent_live {
+        let read_parent = || async {
+            store
+                .get_task_pr(parent_id)
+                .await
+                .map_err(|error| task_error(format!("failed to read stack parent: {error}")))?
+                .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))
+        };
+        let live = |parent: &TaskPr| parent.merge_commit.is_none() && parent.abandoned_at.is_none();
+        let mut parent = read_parent().await?;
+        if live(&parent) {
+            // A parent that merged since the last observation has a deleted
+            // branch; ask GitHub before fetching it, as `task_stack` does.
+            if let Some(mut parent_task) =
+                store.get_task(&parent.task_id).await.map_err(task_error)?
+            {
+                reconcile_task_pr(store, &mut parent_task).await?;
+                parent = read_parent().await?;
+            }
+        }
+        if live(&parent) {
             return resolve_upstream_base(repo, &parent.branch);
         }
     }

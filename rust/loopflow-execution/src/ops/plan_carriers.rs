@@ -1,18 +1,19 @@
 //! A plan without Linear or Asana travels by a hub ([`super::plan_hub`]), a
 //! Git remote ([`super::plan_git`]) or both. This is when the two run
-//! together. [`send`] follows a save and reads only what was not taken.
+//! together. [`send`] follows a save: the hub sends and reads, Git pushes
+//! and reads only while something it brought was not taken.
 //! [`sync`] reads and sends: when asked, before a claim or a new Wave, and
 //! after a command the Machine server answers. [`read`] asks the hub alone,
 //! for a read nobody asked for.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Result};
 
 use loopflow_model::durable::{RepositoryId, TaskId};
-use loopflow_storage::sqlite::plan_carriers::NotTaken;
+use loopflow_storage::sqlite::plan_carriers::{Carrier, NotTaken, PlanCarrier};
 use loopflow_storage::sqlite::planning_scope_checks::ScopeCheck;
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -41,29 +42,88 @@ pub(super) fn owned_repositories(store: &SqliteStore) -> Result<BTreeSet<String>
 
 /// Background exchanges share an attempt across the server and all Graphs in
 /// this checkout. Give Git its own deadline so an offline hub cannot starve it.
+/// Returns `Ok(None)` without writing `planning_scope_checks` when the
+/// repository directory is missing, connected to a tracker, has no carrier, or
+/// its only carrier (Git) is currently backed off.
 pub(super) async fn poll_owned(
     store: &crate::store::Store,
     repo: &str,
     window: i64,
-) -> Result<i64> {
+) -> Result<Option<i64>> {
+    let has_hub = match super::plan_hub::hub(&store.sqlite) {
+        Ok(hub) => hub.is_some(),
+        Err(error) => {
+            tracing::debug!(%repo, error = %format!("{error:#}"), "owned plan hub lookup failed");
+            false
+        }
+    };
+    let now = SystemTime::now();
+    poll_owned_with(
+        store,
+        repo,
+        window,
+        now,
+        has_hub,
+        || read(store, repo),
+        |until| {
+            on_thread(store, repo, move |sqlite, repo| {
+                super::plan_git::exchange_background(sqlite, repo, Some(until))
+            })
+        },
+    )
+    .await
+}
+
+async fn poll_owned_with<FH, FG>(
+    store: &crate::store::Store,
+    repo: &str,
+    window: i64,
+    now: SystemTime,
+    has_hub: bool,
+    run_hub: impl FnOnce() -> FH,
+    run_git: impl FnOnce(Instant) -> FG,
+) -> Result<Option<i64>>
+where
+    FH: std::future::Future<Output = Result<()>>,
+    FG: std::future::Future<Output = Result<()>>,
+{
+    if !Path::new(repo).is_dir() || crate::ops::tracker::connected(repo) {
+        return Ok(None);
+    }
+    let git_due = super::plan_git::remote(Path::new(repo)).is_some()
+        && !super::plan_git::is_backed_off(&store.sqlite, repo, now);
+    if !has_hub && !git_due {
+        return Ok(None);
+    }
+    let now_ts = unix_secs(now);
     let scope = format!("plan:{repo}");
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
     if let ScopeCheck::Recent { attempted_at } =
-        store.sqlite.begin_scope_check(&scope, now, window)?
+        store.sqlite.begin_scope_check(&scope, now_ts, window)?
     {
-        return Ok(attempted_at);
+        return Ok(Some(attempted_at));
     }
     let until = Instant::now() + WAIT;
-    let git = on_thread(store, repo, move |sqlite, repo| {
-        super::plan_git::exchange(sqlite, repo, Some(until))
-    });
-    let (hub, git) = tokio::join!(read(store, repo), git);
+    let hub = async {
+        if has_hub {
+            run_hub().await
+        } else {
+            Ok(())
+        }
+    };
+    let git = async {
+        if git_due {
+            run_git(until).await
+        } else {
+            Ok(())
+        }
+    };
+    let (hub, git) = tokio::join!(hub, git);
     for result in [hub, git] {
         if let Err(error) = result {
             tracing::debug!(%repo, error = %format!("{error:#}"), "owned plan exchange pending");
         }
     }
-    Ok(now)
+    Ok(Some(now_ts))
 }
 
 /// [`exchange`] for `repo`, when it has no Linear or Asana, for as long as
@@ -101,9 +161,9 @@ pub(super) async fn on_thread(
 }
 
 /// After a save in `repo`, which has no Linear or Asana: each carrier takes
-/// the records past its cursor and reads only while something it brought was
-/// not taken, the two at once and for
-/// [`WAIT`] at most. A carrier that fails or runs out of time keeps its
+/// the records past its cursor, the two at once and for [`WAIT`] at most.
+/// The hub reads as it sends; Git reads only while something it brought was
+/// not taken. A carrier that fails or runs out of time keeps its
 /// records unsent for the next [`sync`]; the first failure is returned.
 pub(crate) async fn send(store: &crate::store::Store, repo: &str) -> Result<()> {
     let until = Instant::now() + WAIT;
@@ -160,35 +220,210 @@ pub(super) fn carrier_error(result: &Result<()>) -> Option<String> {
         .map(|error| format!("{error:#}"))
 }
 
-/// A clone this Machine has not met reads its remote's plan when first
-/// asked what the plan is (`lf task list`, `lf repo tracker`), before the
-/// command opens the store it reads. See [`super::plan_git::first_exchange`].
+/// How long an offline first read waits before trying again on a later read.
+const FIRST_READ_COOLDOWN_SECS: i64 = 60;
+
+/// A clone that has not read its plan from either current carrier reads it when
+/// a non-subscribing CLI command first asks what the plan is (`lf task list`,
+/// `lf repo tracker`, `lf plan list`, `lf plan board`, `lf wave list`,
+/// `lf wave show`, `lf wave status`, `lf wave plan`), before the command opens
+/// the store it reads. Served requests skip this and exchange after replying.
 pub async fn before_first_read(directory: &Path) {
-    let Ok(Some((store, repo))) = carried(directory) else {
+    if crate::journal::request::active() {
+        return;
+    }
+    let Ok(repo) = crate::repository::discover(directory).map(|r| r.to_string()) else {
+        return;
+    };
+    if crate::ops::tracker::connected(&repo) {
+        return;
+    }
+    let path = crate::store::default_db_path();
+    if !path.exists() {
+        let Some(remote) = super::plan_git::remote(Path::new(&repo)) else {
+            return;
+        };
+        let repo_for_fetch = repo.clone();
+        let exchanged = crate::journal::request::spawn_blocking(move || {
+            let seen = super::plan_git::fetch_seen(
+                Path::new(&repo_for_fetch),
+                &remote,
+                Some(Instant::now() + WAIT),
+            )?;
+            if seen.is_empty() {
+                return Ok(());
+            }
+            // Start the post-open deadline after creating and migrating the store so
+            // first-time schema setup does not starve reading the fetched plan refs.
+            let store = crate::store::open_sqlite(&path)?;
+            super::plan_git::exchange_seen(
+                &store,
+                &repo_for_fetch,
+                &remote,
+                &seen,
+                Some(Instant::now() + WAIT),
+            )
+        })
+        .await
+        .map_err(Into::into)
+        .and_then(|result| result);
+        went_on(&repo, exchanged);
+        return;
+    }
+    let Ok(store) = crate::store::open_sqlite(&path) else {
         return;
     };
     let until = Instant::now() + WAIT;
-    let exchanged = {
-        let repo = repo.clone();
-        crate::journal::request::spawn_blocking(move || {
-            super::plan_git::first_exchange(&store, &repo, until).map(drop)
-        })
-    };
-    went_on(
-        &repo,
-        exchanged.await.unwrap_or_else(|error| Err(error.into())),
-    );
+    let exchanged = first_read_at(&store, &repo, until, unix_secs(SystemTime::now())).await;
+    went_on(&repo, exchanged.map(drop));
 }
 
-/// The store and repository of `directory`, when this Machine has a store
-/// and the repository has no Linear or Asana.
-fn carried(directory: &Path) -> Result<Option<(SqliteStore, String)>> {
-    let repo = crate::repository::discover(directory)?.to_string();
+fn unix_secs(time: SystemTime) -> i64 {
+    time.duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+pub(super) async fn first_read_at(
+    store: &SqliteStore,
+    repo: &str,
+    until: Instant,
+    now: i64,
+) -> Result<bool> {
+    first_read_with(
+        store,
+        repo,
+        until,
+        now,
+        |store, repo, until| {
+            let (store, repo) = (store.clone(), repo.to_owned());
+            async move {
+                crate::journal::request::spawn_blocking(move || {
+                    super::plan_git::exchange(&store, &repo, Some(until))
+                })
+                .await?
+            }
+        },
+        |store, repo, until| {
+            let (store, repo) = (store.clone(), repo.to_owned());
+            async move {
+                crate::journal::request::spawn_blocking(move || {
+                    super::plan_hub::exchange(&store, &repo, Why::Read(until))
+                })
+                .await?
+            }
+        },
+    )
+    .await
+}
+
+pub(super) async fn first_read_with<FG, FH>(
+    store: &SqliteStore,
+    repo: &str,
+    until: Instant,
+    now: i64,
+    run_git: impl FnOnce(&SqliteStore, &str, Instant) -> FG,
+    run_hub: impl FnOnce(&SqliteStore, &str, Instant) -> FH,
+) -> Result<bool>
+where
+    FG: std::future::Future<Output = Result<()>>,
+    FH: std::future::Future<Output = Result<()>>,
+{
+    let git_peer = super::plan_git::remote(Path::new(repo));
+    let hub_peer = match super::plan_hub::hub(store) {
+        Ok(Some(hub)) => store.repository_id(repo)?.map(|_| hub.id),
+        Ok(None) => None,
+        Err(error) => {
+            tracing::debug!(%repo, error = %format!("{error:#}"), "first read hub lookup failed");
+            None
+        }
+    };
+    let current_row = |carrier, peer: Option<&str>| -> Result<Option<PlanCarrier>> {
+        let Some(peer) = peer else {
+            return Ok(None);
+        };
+        Ok(store
+            .plan_carrier(repo, carrier)?
+            .filter(|held| held.peer == peer))
+    };
+    let git_row = current_row(Carrier::Git, git_peer.as_deref())?;
+    let hub_row = current_row(Carrier::Hub, hub_peer.as_ref().map(|id| id.as_str()))?;
+    let (has_git, has_hub) = (git_peer.is_some(), hub_peer.is_some());
+
+    if (!has_git && !has_hub)
+        || git_row.as_ref().is_some_and(PlanCarrier::has_read)
+        || hub_row.as_ref().is_some_and(PlanCarrier::has_read)
+    {
+        return Ok(false);
+    }
+
+    let scope = format!("plan-first-read:{repo}");
+    let all_errored = (!has_git || git_row.as_ref().is_some_and(|held| held.error.is_some()))
+        && (!has_hub || hub_row.as_ref().is_some_and(|held| held.error.is_some()));
+    let mut stamped = false;
+    if all_errored {
+        match store.begin_scope_check(&scope, now, FIRST_READ_COOLDOWN_SECS)? {
+            ScopeCheck::Recent { .. } => return Ok(false),
+            ScopeCheck::Started { .. } => stamped = true,
+        }
+    }
+
+    let git = async {
+        if has_git {
+            Some(run_git(store, repo, until).await)
+        } else {
+            None
+        }
+    };
+    let hub = async {
+        if has_hub {
+            Some(run_hub(store, repo, until).await)
+        } else {
+            None
+        }
+    };
+    let (git, hub) = tokio::join!(git, hub);
+
+    let mut succeeded = false;
+    let mut first_error = None;
+    for result in [git, hub].into_iter().flatten() {
+        match result {
+            Ok(()) => succeeded = true,
+            Err(error) if error.is::<NotTaken>() => {
+                succeeded = true;
+                went_on(repo, Err(error));
+            }
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                } else {
+                    went_on(repo, Err(error));
+                }
+            }
+        }
+    }
+    if succeeded {
+        if let Some(error) = first_error {
+            went_on(repo, Err(error));
+        }
+        return Ok(true);
+    }
+    if !stamped {
+        let _ = store.begin_scope_check(&scope, now, 0);
+    }
+    Err(first_error.expect("at least one carrier ran"))
+}
+
+/// The store for `repo` when the repository has no Linear or Asana and
+/// something carries its plan: a Git remote, or a store that may name a hub.
+fn carried_store(repo: &str) -> Result<Option<SqliteStore>> {
     let path = crate::store::default_db_path();
-    if !path.exists() || crate::ops::tracker::connected(&repo) {
+    if crate::ops::tracker::connected(repo)
+        || (!path.exists() && super::plan_git::remote(Path::new(repo)).is_none())
+    {
         return Ok(None);
     }
-    Ok(Some((crate::store::open_sqlite(&path)?, repo)))
+    Ok(Some(crate::store::open_sqlite(&path)?))
 }
 
 /// A command that read the plan first goes on without it.
@@ -199,11 +434,26 @@ fn went_on(repo: &str, exchanged: Result<()>) {
 }
 
 /// After a command on this Machine's server answers: one exchange for its
-/// repository, on a thread of its own. Commands arriving while one runs, or
-/// within [`QUIET`] of the last, share it.
+/// repository. Commands arriving while one runs, or within [`QUIET`] of the
+/// last, are debounced *before* spawning a task or opening a store.
 pub fn after_command(directory: PathBuf) {
-    std::thread::spawn(move || {
-        if let Err(error) = exchange_after_command(&directory) {
+    let Ok(repo) = crate::repository::discover(&directory).map(|r| r.to_string()) else {
+        return;
+    };
+    {
+        let mut turns = TURNS.lock().expect("plan turns are never poisoned");
+        let turn = turns.entry(repo.clone()).or_default();
+        if turn.running {
+            turn.again = true;
+            return;
+        }
+        if turn.finished.is_some_and(|at| at.elapsed() < QUIET) {
+            return;
+        }
+        turn.running = true;
+    }
+    crate::runtime::handle().spawn_blocking(move || {
+        if let Err(error) = exchange_after_command(&repo) {
             tracing::debug!(error = %format!("{error:#}"), "plan exchange after a command failed");
         }
     });
@@ -220,31 +470,39 @@ struct Turn {
 
 static TURNS: Mutex<BTreeMap<String, Turn>> = Mutex::new(BTreeMap::new());
 
-fn exchange_after_command(directory: &Path) -> Result<()> {
-    let Some((store, repo)) = carried(directory)? else {
+fn exchange_after_command(repo: &str) -> Result<()> {
+    struct FinishGuard<'a> {
+        repo: &'a str,
+        completed: bool,
+    }
+    impl Drop for FinishGuard<'_> {
+        fn drop(&mut self) {
+            if !self.completed {
+                let mut turns = TURNS.lock().expect("plan turns are never poisoned");
+                let turn = turns.entry(self.repo.to_owned()).or_default();
+                turn.running = false;
+                turn.again = false;
+                turn.finished = Some(Instant::now());
+            }
+        }
+    }
+    let mut guard = FinishGuard {
+        repo,
+        completed: false,
+    };
+    let Some(store) = carried_store(repo)? else {
         return Ok(());
     };
-    {
-        let mut turns = TURNS.lock().expect("plan turns are never poisoned");
-        let turn = turns.entry(repo.clone()).or_default();
-        if turn.running {
-            turn.again = true;
-            return Ok(());
-        }
-        if turn.finished.is_some_and(|at| at.elapsed() < QUIET) {
-            return Ok(());
-        }
-        turn.running = true;
-    }
     loop {
-        let result = exchange(&store, &repo, None);
+        let result = exchange(&store, repo, None);
         let mut turns = TURNS.lock().expect("plan turns are never poisoned");
-        let turn = turns.entry(repo.clone()).or_default();
+        let turn = turns.entry(repo.to_owned()).or_default();
         if std::mem::take(&mut turn.again) && result.is_ok() {
             continue;
         }
         turn.running = false;
         turn.finished = Some(Instant::now());
+        guard.completed = true;
         return result;
     }
 }
@@ -285,5 +543,218 @@ pub(super) fn lock(
             }
             Err(_) => std::thread::sleep(Duration::from_millis(20)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{poll_owned, poll_owned_with};
+    use loopflow_test_support::TestRepo;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_owned_skips_local_only_repository_without_writing_scope_check() {
+        let root = tempfile::tempdir().unwrap();
+        let repo_dir = root.path().join("local-only");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        git(&repo_dir, &["init", "-q"]);
+        let repo = repo_dir
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let sqlite =
+            crate::store::opening::open_ephemeral(&root.path().join("loopflow.db")).unwrap();
+        let store = crate::store::Store { sqlite };
+
+        let spawns_before = crate::observe::thread_spawns();
+        let attempted = poll_owned(&store, &repo, 30).await.unwrap();
+        let spawns_after = crate::observe::thread_spawns();
+
+        assert_eq!(attempted, None);
+        assert_eq!(
+            spawns_after - spawns_before,
+            0,
+            "local-only poll_owned must spawn nothing"
+        );
+        assert_eq!(
+            store
+                .sqlite
+                .last_scope_attempt(&format!("plan:{repo}"))
+                .unwrap(),
+            None,
+            "local-only poll_owned must not write planning_scope_checks"
+        );
+
+        // Missing directory also writes nothing.
+        let missing = root
+            .path()
+            .join("deleted-repo")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(poll_owned(&store, &missing, 30).await.unwrap(), None);
+        assert_eq!(
+            store
+                .sqlite
+                .last_scope_attempt(&format!("plan:{missing}"))
+                .unwrap(),
+            None
+        );
+
+        // Adding a remote is observed immediately on the next poll.
+        let origin = TestRepo::new();
+        git(
+            &repo_dir,
+            &[
+                "remote",
+                "add",
+                "origin",
+                origin.bare_path().to_str().unwrap(),
+            ],
+        );
+        let attempted = poll_owned(&store, &repo, 30).await.unwrap();
+        assert!(attempted.is_some());
+        assert_eq!(
+            store
+                .sqlite
+                .last_scope_attempt(&format!("plan:{repo}"))
+                .unwrap(),
+            attempted
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_owned_backs_off_unreachable_git_without_blocking_hub() {
+        let root = tempfile::tempdir().unwrap();
+        let origin = TestRepo::new();
+        let clone = root.path().join("clone");
+        git(
+            root.path(),
+            &[
+                "clone",
+                "-q",
+                origin.bare_path().to_str().unwrap(),
+                clone.to_str().unwrap(),
+            ],
+        );
+        let repo = clone.canonicalize().unwrap().to_string_lossy().into_owned();
+        let sqlite =
+            crate::store::opening::open_ephemeral(&root.path().join("loopflow.db")).unwrap();
+        let store = crate::store::Store { sqlite };
+
+        // Make the remote unreachable.
+        let away = origin.bare_path().with_extension("away");
+        std::fs::rename(origin.bare_path(), &away).unwrap();
+
+        let hub_calls = Arc::new(AtomicUsize::new(0));
+        let git_calls = Arc::new(AtomicUsize::new(0));
+        let t0 = UNIX_EPOCH + Duration::from_secs(1_000);
+
+        let run_once = |now: SystemTime, has_hub: bool| {
+            let store_ref = &store;
+            let repo_str = repo.clone();
+            let hub_calls = Arc::clone(&hub_calls);
+            let git_calls = Arc::clone(&git_calls);
+            async move {
+                poll_owned_with(
+                    store_ref,
+                    &repo_str,
+                    0,
+                    now,
+                    has_hub,
+                    || {
+                        hub_calls.fetch_add(1, Ordering::SeqCst);
+                        async { Ok(()) }
+                    },
+                    |until| {
+                        git_calls.fetch_add(1, Ordering::SeqCst);
+                        let sqlite = store_ref.sqlite.clone();
+                        let repo_inner = repo_str.clone();
+                        async move {
+                            super::super::plan_git::exchange_background_at(
+                                &sqlite,
+                                &repo_inner,
+                                Some(until),
+                                now,
+                            )
+                        }
+                    },
+                )
+                .await
+            }
+        };
+
+        // Tick 1: both hub and Git run; Git fails -> 2-minute backoff.
+        assert!(run_once(t0, true).await.unwrap().is_some());
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(git_calls.load(Ordering::SeqCst), 1);
+
+        // Tick 2 (+30 s): Git is backed off, but hub still runs.
+        assert!(run_once(t0 + Duration::from_secs(30), true)
+            .await
+            .unwrap()
+            .is_some());
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(git_calls.load(Ordering::SeqCst), 1);
+
+        // Tick 3 (+60 s, no hub): Git backed off and no hub -> skipped completely,
+        // no planning_scope_checks update.
+        assert_eq!(
+            run_once(t0 + Duration::from_secs(60), false).await.unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .sqlite
+                .last_scope_attempt(&format!("plan:{repo}"))
+                .unwrap(),
+            Some(1_030)
+        );
+        assert_eq!(git_calls.load(Ordering::SeqCst), 1);
+
+        // Tick 4 (+120 s): 2-minute backoff elapsed -> Git retries and fails -> 4-minute backoff.
+        let t1 = t0 + Duration::from_secs(120);
+        assert!(run_once(t1, true).await.unwrap().is_some());
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 3);
+        assert_eq!(git_calls.load(Ordering::SeqCst), 2);
+
+        // Tick 5 (+239 s after t1): still inside 4-minute backoff; hub still runs.
+        assert!(run_once(t1 + Duration::from_secs(239), true)
+            .await
+            .unwrap()
+            .is_some());
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 4);
+        assert_eq!(git_calls.load(Ordering::SeqCst), 2);
+
+        // Restoring the remote and running an explicit exchange bypasses and clears backoff.
+        std::fs::rename(&away, origin.bare_path()).unwrap();
+        super::super::plan_git::exchange(&store.sqlite, &repo, None).unwrap();
+
+        // Next background poll even 1 s later sees backoff cleared and runs Git.
+        assert!(
+            run_once(t1 + Duration::from_secs(240) - Duration::from_secs(1), true)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(hub_calls.load(Ordering::SeqCst), 5);
+        assert_eq!(git_calls.load(Ordering::SeqCst), 3);
     }
 }

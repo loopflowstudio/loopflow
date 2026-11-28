@@ -12,6 +12,7 @@ targets, projects and new Tasks are out of scope: report gaps, don't file them.
 
 Read `lf wave show --json`, `lf session list --json` and `lf wt list --json`,
 and join Tasks and Sessions to worktrees by the ids and paths they return.
+Leave paused Tasks, their branches and their checkouts alone during cleanup and operation.
 Then look for what has no future:
 
 - Open PRs of yours: `gh pr list --author @me --state open --json number,title,headRefName,url,isDraft,mergeStateStatus,updatedAt`.

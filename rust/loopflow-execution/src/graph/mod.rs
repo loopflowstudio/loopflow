@@ -431,9 +431,11 @@ impl<'a> DefinitionLoader<'a> {
                     self.load_graph(selected).map(Target::Graph)
                 } else {
                     catalog
-                        .exact(selected)
-                        .expect("selected definition is a skill")
-                        .load()
+                        .load_source(
+                            catalog
+                                .exact(selected)
+                                .expect("selected definition is a skill"),
+                        )
                         .map(Target::Skill)
                 };
             }
@@ -909,7 +911,7 @@ fn parse_graph_mapping(
     }
     if map.contains_key(key("human")) {
         return Err(LoadError::InvalidGraph(
-            "`human:` is retired; write `interactive: <skill>`".to_string(),
+            "`human:` is retired; put `- break` after the step".to_string(),
         ));
     }
     if map.contains_key(key("id")) {
@@ -998,13 +1000,12 @@ fn parse_skill_value(value: &Value, interactive: bool) -> Result<Step, LoadError
             }
             if map.contains_key(key("human")) {
                 return Err(LoadError::InvalidGraph(
-                    "`human:` is retired; write the item as `interactive: <skill>`".to_string(),
+                    "`human:` is retired; put `- break` after the step".to_string(),
                 ));
             }
             if map.contains_key(key("interactive")) {
                 return Err(LoadError::InvalidGraph(
-                    "a step is interactive by its item; write it as `interactive: <skill>`"
-                        .to_string(),
+                    "put `- break` after the step to review its result".to_string(),
                 ));
             }
             let mut step: SkillMapping =
@@ -1442,11 +1443,11 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("cycle detected"));
-        fs::write(repo.path().join(".lf/graphs/team-ship.yml"), "- gate\n").unwrap();
+        fs::write(repo.path().join(".lf/graphs/team-ship.yml"), "- qa\n").unwrap();
         let graph = super::load_authored_graph("team/ship", repo.path()).unwrap();
         assert_eq!(graph.name, "team/ship");
         let steps = compile_graph(&graph, repo.path()).unwrap();
-        assert!(matches!(&steps[..], [ConcreteStep::Skill(skill)] if skill.skill.name == "gate"));
+        assert!(matches!(&steps[..], [ConcreteStep::Skill(skill)] if skill.skill.name == "qa"));
         assert_eq!(
             super::load_authored_graph("team-ship", repo.path())
                 .unwrap()
@@ -1593,10 +1594,7 @@ mod tests {
         assert!(error.to_string().contains("retired"), "{error}");
         fs::write(graphs.join("item.yaml"), "- human: explore\n").unwrap();
         let error = load_graph("item", tmp.path()).unwrap_err();
-        assert!(
-            error.to_string().contains("interactive: <skill>"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("- break"), "{error}");
     }
 
     #[test]
@@ -1620,10 +1618,7 @@ mod tests {
         let pursue = compile_graph(&load_graph("pursue", tmp.path()).unwrap(), tmp.path()).unwrap();
         assert_eq!(
             edges(&pursue),
-            [
-                ("realign".to_string(), 2),
-                ("concept-review".to_string(), 5)
-            ]
+            [("implement".to_string(), 1), ("realign".to_string(), 3)]
         );
 
         // A block's last step returns to its first; nesting needs no names.
@@ -2343,7 +2338,7 @@ Design the feature.
             name: "test-or".to_string(),
             description: None,
             items: vec![
-                Step::new(Target::Skill(Skill::named("gate"))),
+                Step::new(Target::Skill(Skill::named("qa"))),
                 Step::new(Target::Xor(XorDef {
                     router: None,
                     paths: {
@@ -2585,15 +2580,16 @@ Design the feature.
     }
 
     #[test]
-    fn deliver_graph_gates_then_lands_and_waits() {
+    fn deliver_graph_reflects_then_lands_and_waits() {
         let tmp = TempDir::new().unwrap();
         let graph = load_graph("deliver", tmp.path()).unwrap();
         let items = compile_graph(&graph, tmp.path()).unwrap();
-        assert_eq!(items.len(), 3);
+        assert_eq!(items.len(), 2);
         assert!(
-            matches!(&items[2], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix")
+            matches!(&items[1], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix")
         );
         assert!(load_graph("deploy", tmp.path()).is_err());
         assert!(load_graph("ship", tmp.path()).is_err());
+        assert!(load_graph("queue", tmp.path()).is_err());
     }
 }

@@ -1560,9 +1560,7 @@ fn title_case(slug: &str) -> String {
 }
 
 fn block_on_linear<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|err| OpsError::Message(format!("failed to create async runtime: {err}")))?;
-    rt.block_on(future)
+    crate::runtime::block_on(future)
 }
 
 fn linear_error(err: LinearError) -> OpsError {

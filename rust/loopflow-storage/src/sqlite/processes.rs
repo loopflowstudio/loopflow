@@ -1,15 +1,30 @@
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::path::Path;
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use fs2::FileExt;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
-use crate::process::{AgentProcess, AttachingLf, LfProcess, ProcessEntry, SessionAttachment};
+use crate::process::{
+    AgentProcess, AgentProcessState, AttachingLf, LfProcess, ProcessEntry, SessionAttachment,
+};
 use crate::{StoreError, StoreResult};
+use loopflow_model::durable::TaskId;
 use loopflow_model::id::{AgentProcessId, AgentSessionId, AttachmentToken, LfProcessId};
 
 use super::{SessionCaller, SqliteStore};
+
+/// Active execution, Session, and creation owners used by hourly file retention.
+#[derive(Debug, Default)]
+pub struct ActiveFileOwners {
+    pub active_process_ids: HashSet<String>,
+    pub live_session_agents: HashMap<String, Option<i64>>,
+    pub active_session_ids: HashSet<String>,
+    pub active_fence_locators: HashSet<String>,
+    pub active_creation_requests: HashSet<String>,
+    pub active_checkouts: Vec<PathBuf>,
+    pub latest_migration_applied_at: Option<i64>,
+}
 
 /// Saved endpoint and native identity; liveness is observed by the caller.
 #[derive(Debug)]
@@ -253,7 +268,7 @@ impl SessionTransfer<'_> {
 #[derive(Debug)]
 pub struct AgentProcessSettlement<'a> {
     store: &'a SqliteStore,
-    expected: crate::process::AgentProcessState,
+    expected: AgentProcessState,
     _dispatch: File,
 }
 
@@ -291,19 +306,17 @@ pub(super) const PROCESS_SELECT: &str =
     e.caller_agent_process_id,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e";
 
-/// Every Session's agent that has not ended, as `read_agent_state` reads it.
-const SESSION_AGENTS: &str = "SELECT s.agent_process_id,s.id,s.agent_started_at,s.agent_ended_at,
+/// Current agent columns in the order `read_agent_state` reads them.
+const AGENT_STATE: &str = "SELECT s.agent_process_id,s.id,s.agent_started_at,s.agent_ended_at,
     s.agent_pid,s.agent_os_started_at,
     s.agent_launcher_lf_process_id,s.attached_lf_process_id,s.attachment_token,
     s.attached_pid,s.attached_os_started_at,s.provider,COALESCE(s.agent_interactive,s.interactive),
     (s.agent_spawn_state IS 'reserved' AND s.agent_pid IS NULL)
-    FROM agent_sessions s WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL
-    ORDER BY s.agent_process_id";
+    FROM agent_sessions s";
+const UNENDED_AGENT: &str = "s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL";
 
-fn read_agent_state(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<crate::process::AgentProcessState> {
-    Ok(crate::process::AgentProcessState {
+fn read_agent_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentProcessState> {
+    Ok(AgentProcessState {
         id: row.get(0)?,
         session_id: row.get(1)?,
         started_at: row.get(2)?,
@@ -410,20 +423,19 @@ fn attachment_in(
 ) -> StoreResult<Option<SessionAttachment>> {
     let canonical = loopflow_model::id::canonical_session(session);
     let session = canonical.as_str();
-    let row = conn
-        .query_row(
-            "SELECT attached_lf_process_id,attachment_token,agent_launcher_lf_process_id,
-             agent_process_id FROM agent_sessions WHERE id=?1",
-            [session],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<AttachmentToken>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<AgentProcessId>>(3)?,
-                ))
-            },
-        )
+    let mut query = conn.prepare_cached(
+        "SELECT attached_lf_process_id,attachment_token,agent_launcher_lf_process_id,
+         agent_process_id FROM agent_sessions WHERE id=?1",
+    )?;
+    let row = query
+        .query_row([session], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<AttachmentToken>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<AgentProcessId>>(3)?,
+            ))
+        })
         .optional()?
         .ok_or(StoreError::NotFound)?;
     let Some(token) = row.1 else {
@@ -610,7 +622,7 @@ impl SqliteStore {
         if !crate::migration_runner::migration_is_applied(&conn, "process_rows_on_owners")? {
             return Ok(Vec::new());
         }
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT 'Graph run',lf_process_id,pid,os_started_at,started_at FROM graph_processes
                  WHERE ended_at IS NULL AND pid IS NOT NULL
              UNION ALL SELECT 'Graph step',lf_process_id,pid,os_started_at,started_at
@@ -634,6 +646,128 @@ impl SqliteStore {
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Whether any Graph run, Graph step, Task carrier, or Session agent is unfinished.
+    pub fn has_unfinished_execution(&self) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM graph_processes WHERE ended_at IS NULL)
+                 OR EXISTS(SELECT 1 FROM graph_process_steps WHERE ended_at IS NULL)
+                 OR EXISTS(SELECT 1 FROM task_graphs WHERE lf_process_id IS NOT NULL AND run_pid IS NOT NULL)
+                 OR EXISTS(SELECT 1 FROM agent_sessions WHERE agent_process_id IS NOT NULL AND agent_ended_at IS NULL)",
+        )?;
+        Ok(query.query_row([], |row| row.get::<_, bool>(0))?)
+    }
+
+    /// Active execution, Session, and creation owners used by hourly file retention.
+    pub fn active_file_owners(&self) -> StoreResult<ActiveFileOwners> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut owners = ActiveFileOwners::default();
+
+        {
+            let mut stmt = conn.prepare_cached(
+                "SELECT id, fence_locator FROM agent_sessions WHERE completed_at IS NULL",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let id: String = row.get(0)?;
+                let locator: String = row.get(1)?;
+                owners.active_process_ids.insert(id.clone());
+                owners.active_session_ids.insert(id);
+                owners.active_fence_locators.insert(locator);
+            }
+        }
+        {
+            let mut stmt = conn.prepare_cached(
+                "SELECT id, fence_locator, agent_process_id, attached_lf_process_id,
+                        agent_launcher_lf_process_id, agent_started_at, cwd
+                 FROM agent_sessions
+                 WHERE agent_process_id IS NOT NULL AND agent_ended_at IS NULL",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let id: String = row.get(0)?;
+                let locator: String = row.get(1)?;
+                let agent_process_id: Option<String> = row.get(2)?;
+                let attached_lf_process_id: Option<String> = row.get(3)?;
+                let launcher_lf_process_id: Option<String> = row.get(4)?;
+                let started_at: Option<i64> = row.get(5)?;
+                let cwd: Option<String> = row.get(6)?;
+                owners.active_process_ids.insert(id.clone());
+                owners.active_session_ids.insert(id.clone());
+                owners.active_fence_locators.insert(locator);
+                owners.live_session_agents.insert(id, started_at);
+                for pid in [
+                    agent_process_id,
+                    attached_lf_process_id,
+                    launcher_lf_process_id,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    owners.active_process_ids.insert(pid);
+                }
+                if let Some(cwd) = cwd {
+                    owners.active_checkouts.push(PathBuf::from(cwd));
+                }
+            }
+        }
+        {
+            let mut stmt = conn.prepare_cached(
+                "SELECT lf_process_id, cwd FROM graph_processes WHERE ended_at IS NULL",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let id: String = row.get(0)?;
+                let cwd: Option<String> = row.get(1)?;
+                owners.active_process_ids.insert(id);
+                if let Some(cwd) = cwd {
+                    owners.active_checkouts.push(PathBuf::from(cwd));
+                }
+            }
+        }
+        {
+            let mut stmt = conn.prepare_cached(
+                "SELECT lf_process_id FROM graph_process_steps WHERE ended_at IS NULL",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                owners.active_process_ids.insert(row.get(0)?);
+            }
+        }
+        {
+            let mut stmt = conn.prepare_cached(
+                "SELECT lf_process_id FROM task_graphs WHERE lf_process_id IS NOT NULL AND run_pid IS NOT NULL",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                owners.active_process_ids.insert(row.get(0)?);
+            }
+        }
+        {
+            let mut stmt = conn.prepare_cached(
+                "SELECT launcher_lf_process_id FROM desktop_shells WHERE jobs_settled = 0 AND launcher_lf_process_id IS NOT NULL",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                owners.active_process_ids.insert(row.get(0)?);
+            }
+        }
+        {
+            let mut stmt = conn.prepare_cached(
+                "SELECT request_id FROM creation_receipts
+                 WHERE milestone NOT IN ('admitted', 'started')
+                   AND NOT (milestone = 'filed' AND run = 0)",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                owners.active_creation_requests.insert(row.get(0)?);
+            }
+        }
+        owners.latest_migration_applied_at =
+            crate::migration_runner::latest_migration_applied_at(&conn)?;
+        Ok(owners)
     }
 
     /// Fixtures read what a released lf wrote; this lf writes no Process row.
@@ -1053,7 +1187,7 @@ impl SqliteStore {
         self.lock_session_fence(session, true)
     }
 
-    fn session_fence_file(&self, session: &str) -> StoreResult<File> {
+    fn session_fence_path(&self, session: &str) -> StoreResult<PathBuf> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let database = conn.path().map(str::to_owned).ok_or_else(|| {
             StoreError::InvalidData("Session dispatch requires a file-backed store".into())
@@ -1067,43 +1201,35 @@ impl SqliteStore {
             .optional()?
             .ok_or(StoreError::NotFound)?;
         drop(conn);
-        crate::canonical_ids::session_fence_file(Path::new(&database), &locator)
+        crate::canonical_ids::session_fence_path(Path::new(&database), &locator)
     }
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn try_lock_session_attachment(&self, session: &str) -> StoreResult<Option<File>> {
-        let file = self.session_fence_file(session)?;
-        match file.try_lock_exclusive() {
-            Ok(()) => Ok(Some(file)),
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
-            Err(error) => Err(StoreError::InvalidData(error.to_string())),
-        }
+        let path = self.session_fence_path(session)?;
+        crate::lock_file::try_lock_exclusive_verified(&path)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
     fn lock_session_fence(&self, session: &str, shared: bool) -> StoreResult<File> {
-        let file = self.session_fence_file(session)?;
+        let path = self.session_fence_path(session)?;
         // A synchronous caller must never wait indefinitely on a dispatch whose
         // reactor it might be driving. This bound uses the OS clock, not Tokio.
-        let deadline = Instant::now() + Duration::from_secs(15);
-        loop {
-            let locked = if shared {
-                FileExt::try_lock_shared(&file)
+        crate::lock_file::lock_with_timeout_verified(
+            &path,
+            !shared,
+            Duration::from_secs(15),
+            Duration::from_millis(10),
+        )
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::WouldBlock {
+                StoreError::InvalidData(format!(
+                    "Session {session} dispatch is still busy; retry after the current send finishes"
+                ))
             } else {
-                file.try_lock_exclusive()
-            };
-            match locked {
-                Ok(()) => return Ok(file),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    if Instant::now() >= deadline {
-                        return Err(StoreError::InvalidData(format!(
-                            "Session {session} dispatch is still busy; retry after the current send finishes"
-                        )));
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) => return Err(StoreError::InvalidData(error.to_string())),
+                StoreError::InvalidData(error.to_string())
             }
-        }
+        })
     }
 
     /// Serialize native dispatch with attachment transfer without blocking history
@@ -1140,9 +1266,11 @@ impl SqliteStore {
     }
 
     /// Every Session's agent that has not ended, attached or released.
-    pub fn agent_processes(&self) -> StoreResult<Vec<crate::process::AgentProcessState>> {
+    pub fn agent_processes(&self) -> StoreResult<Vec<AgentProcessState>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(SESSION_AGENTS)?;
+        let mut query = conn.prepare(&format!(
+            "{AGENT_STATE} WHERE {UNENDED_AGENT} ORDER BY s.agent_process_id"
+        ))?;
         let rows = query
             .query_map([], read_agent_state)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1150,27 +1278,51 @@ impl SqliteStore {
     }
 
     /// The agent `id`, ended or not, while it is its Session's current one.
-    pub fn agent_state(
-        &self,
-        id: &AgentProcessId,
-    ) -> StoreResult<Option<crate::process::AgentProcessState>> {
+    pub fn agent_state(&self, id: &AgentProcessId) -> StoreResult<Option<AgentProcessState>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                &SESSION_AGENTS
-                    .replace("s.agent_ended_at IS NULL", "s.agent_process_id=?1")
-                    .replace(" ORDER BY s.agent_process_id", ""),
+                &format!("{AGENT_STATE} WHERE s.agent_process_id=?1"),
                 [id],
                 read_agent_state,
             )
             .optional()?)
     }
 
+    /// Headless providers launched for a step of this Task's Graph.
+    pub fn task_worker_agents(&self, task: &TaskId) -> StoreResult<Vec<AgentProcessState>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "{AGENT_STATE} INDEXED BY agent_sessions_unended_agent WHERE {UNENDED_AGENT}
+             AND s.agent_started_at IS NOT NULL AND s.completed_at IS NULL
+             AND NOT COALESCE(s.agent_interactive,s.interactive)
+             AND (SELECT g.task_id FROM graph_processes g WHERE g.lf_process_id={})=?1",
+            super::sessions::SESSION_GRAPH
+        ))?;
+        let rows = query.query_map([task.as_str()], read_agent_state)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Another unended agent claiming the same OS identity rules out signaling it.
+    pub fn agent_shares_identity(
+        &self,
+        agent: &AgentProcessId,
+        pid: u32,
+        birth: i64,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
+                      WHERE {UNENDED_AGENT} AND s.agent_pid=?2 AND s.agent_os_started_at=?3 AND s.agent_process_id!=?1)"),
+            params![agent, pid, birth], |row| row.get(0),
+        )?)
+    }
+
     /// Acquire the Session fence and compare the complete saved process image.
     /// The returned claim keeps takeover excluded through external termination.
     pub fn begin_agent_settlement(
         &self,
-        expected: &crate::process::AgentProcessState,
+        expected: &AgentProcessState,
     ) -> StoreResult<Option<AgentProcessSettlement<'_>>> {
         let dispatch = self.lock_session_attachment(&expected.session_id)?;
         let matches: bool = {
@@ -2031,5 +2183,53 @@ mod bridge_tests {
             store.agent_endpoint(&attachment.agent_process_id).unwrap(),
             Some("ws://127.0.0.1:4500".into())
         );
+    }
+
+    #[test]
+    fn has_unfinished_execution_tracks_graphs_and_agents() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
+        assert!(!store.has_unfinished_execution().unwrap());
+
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled,repo,cwd,started_at)
+                 VALUES('gp-1','code','{}','/repo','/repo',1)",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(store.has_unfinished_execution().unwrap());
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE graph_processes SET ended_at=2 WHERE lf_process_id='gp-1'",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(!store.has_unfinished_execution().unwrap());
+
+        store.test_session("sess-1", &crate::session_record::new_artifact_key());
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET agent_process_id='ap-1',agent_pid=4242,agent_started_at=1
+                 WHERE id='sess-1'",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(store.has_unfinished_execution().unwrap());
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET agent_ended_at=2 WHERE id='sess-1'",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(!store.has_unfinished_execution().unwrap());
     }
 }

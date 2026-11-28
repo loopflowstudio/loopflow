@@ -144,6 +144,7 @@
         }
       },
       "run_control": {
+        "pausing": false,
         "unavailable": "Task is complete"
       },
       "runtime": {
@@ -263,9 +264,11 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
       "lifecycle": "done",
+      "working_group": null,
       "selection_states": [
         "done"
-      ]
+      ],
+      "breakpoint_arrival": null
     },
     "status": {
       "comments": {
@@ -429,7 +432,10 @@
         "work": {
           "graph": {
             "current_step": null,
-            "breakpoints": [],
+            "control": {
+              "action": "done",
+              "label": "Done"
+            },
             "name": "delivery",
             "position": {
               "kind": "at",
@@ -445,7 +451,8 @@
                 "breakpoint": false,
                 "name": "task complete FIX-1"
               }
-            ]
+            ],
+            "breakpoints": []
           },
           "graph_processes": [
             {
@@ -549,7 +556,10 @@
       "overview": {
         "graph": {
           "current_step": null,
-          "breakpoints": [],
+          "control": {
+            "action": "done",
+            "label": "Done"
+          },
           "name": "delivery",
           "position": {
             "kind": "at",
@@ -565,7 +575,8 @@
               "breakpoint": false,
               "name": "task complete FIX-1"
             }
-          ]
+          ],
+          "breakpoints": []
         },
         "graph_processes": [
           {
@@ -768,6 +779,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {
@@ -887,9 +899,11 @@
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "lifecycle": "done",
+        "working_group": null,
         "selection_states": [
           "done"
-        ]
+        ],
+        "breakpoint_arrival": null
       },
       "sync": {
         "actions": [
@@ -1131,6 +1145,7 @@
         }
       },
       "run_control": {
+        "pausing": false,
         "unavailable": "Task is complete"
       },
       "runtime": {
@@ -1250,9 +1265,11 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
       "lifecycle": "done",
+      "working_group": null,
       "selection_states": [
         "done"
-      ]
+      ],
+      "breakpoint_arrival": null
     },
     "status": {
       "comments": {
@@ -1416,7 +1433,10 @@
         "work": {
           "graph": {
             "current_step": 1,
-            "breakpoints": [],
+            "control": {
+              "action": "pause",
+              "label": "task complete FIX-1"
+            },
             "name": "delivery",
             "position": {
               "at": "task complete FIX-1",
@@ -1435,7 +1455,8 @@
                 "breakpoint": false,
                 "name": "task complete FIX-1"
               }
-            ]
+            ],
+            "breakpoints": []
           },
           "graph_processes": [
             {
@@ -1523,7 +1544,10 @@
       "overview": {
         "graph": {
           "current_step": 1,
-          "breakpoints": [],
+          "control": {
+            "action": "pause",
+            "label": "task complete FIX-1"
+          },
           "name": "delivery",
           "position": {
             "at": "task complete FIX-1",
@@ -1542,7 +1566,8 @@
               "breakpoint": false,
               "name": "task complete FIX-1"
             }
-          ]
+          ],
+          "breakpoints": []
         },
         "graph_processes": [
           {
@@ -1729,6 +1754,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {
@@ -1848,9 +1874,11 @@
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "lifecycle": "done",
+        "working_group": null,
         "selection_states": [
           "done"
-        ]
+        ],
+        "breakpoint_arrival": null
       },
       "sync": {
         "actions": [
@@ -2092,6 +2120,7 @@
         }
       },
       "run_control": {
+        "pausing": false,
         "unavailable": null
       },
       "runtime": {
@@ -2175,11 +2204,13 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
       "lifecycle": "moving",
+      "working_group": "active",
       "selection_states": [
         "open",
         "moving",
         "working"
-      ]
+      ],
+      "breakpoint_arrival": null
     },
     "status": {
       "comments": {
@@ -2335,7 +2366,10 @@
         "work": {
           "graph": {
             "current_step": 1,
-            "breakpoints": [],
+            "control": {
+              "action": "pause",
+              "label": "task complete FIX-1"
+            },
             "name": "delivery",
             "position": {
               "at": "task complete FIX-1",
@@ -2354,7 +2388,8 @@
                 "breakpoint": false,
                 "name": "task complete FIX-1"
               }
-            ]
+            ],
+            "breakpoints": []
           },
           "graph_processes": [
             {
@@ -2442,7 +2477,10 @@
       "overview": {
         "graph": {
           "current_step": 1,
-          "breakpoints": [],
+          "control": {
+            "action": "pause",
+            "label": "task complete FIX-1"
+          },
           "name": "delivery",
           "position": {
             "at": "task complete FIX-1",
@@ -2461,7 +2499,8 @@
               "breakpoint": false,
               "name": "task complete FIX-1"
             }
-          ]
+          ],
+          "breakpoints": []
         },
         "graph_processes": [
           {
@@ -2648,6 +2687,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "runtime": {
@@ -2731,11 +2771,13 @@
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "lifecycle": "moving",
+        "working_group": "active",
         "selection_states": [
           "open",
           "moving",
           "working"
-        ]
+        ],
+        "breakpoint_arrival": null
       },
       "sync": {
         "actions": [

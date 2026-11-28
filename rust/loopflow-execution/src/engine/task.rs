@@ -30,14 +30,16 @@ pub enum TaskRun {
         issue: String,
         /// The graph and where the run set out: `code from implement`.
         run: String,
-        /// The run may merge the PR: auto is on, or no breakpoint is
-        /// left ahead, and nobody turned auto off.
+        /// The run can reach a merging step before stopping, and nobody turned
+        /// auto off.
         merges: bool,
         graph_process: LfProcessId,
         /// Where the run's output goes once its launcher lets go; null while a
         /// terminal (`-b`, `-i`) keeps it.
         log: Option<PathBuf>,
     },
+    /// Auto is off and the Graph reached its landing step.
+    Waiting { issue: String, step: String },
     /// Nothing remained: the Task is at `end`.
     Ended { issue: String },
 }
@@ -62,6 +64,7 @@ impl TaskRun {
                 log.display()
             )),
             Self::Running { log: None, .. } => None,
+            Self::Waiting { issue, step } => Some(format!("Task {issue} waits at {step}")),
             Self::Ended { issue } => Some(format!("Task {issue} reached the end of its graph")),
         }
     }
@@ -250,6 +253,25 @@ pub fn report(
     crate::ops::task::task_comment(&repo, issue, wave, Some(message), false).map_err(written)
 }
 
+/// Lift the hold on this Machine, optionally starting a fresh run at the saved cursor.
+pub fn unpause(
+    directory: &Path,
+    issue: &str,
+    start: bool,
+    agent: Option<&str>,
+    approve: bool,
+    environment: &[(String, String)],
+    merges: fn(&[String]) -> bool,
+) -> Result<Option<TaskRun>> {
+    if !start {
+        crate::ops::task::pause::unpause(issue, merges).map_err(written)?;
+        return Ok(None);
+    }
+    let mut args = run_flags(agent, approve);
+    args.extend(["task", "unpause", issue, "--run", "--json"].map(str::to_owned));
+    launch::start_with(directory, &args, environment)
+}
+
 /// `task.interrupt`: stop the Task's live Graph or Task run and its scheduled
 /// automation, as `lf task interrupt <issue>` does. The receipt says what the
 /// interrupt reached, or that nothing ran.
@@ -265,8 +287,8 @@ pub fn ownership(directory: &Path, issue: &str, change: OwnershipChange) -> Resu
 }
 
 /// One `task.wait` reading: the Task now and whether it reached `until`.
-pub fn waited(issue: &str, until: TaskWaitUntil) -> Result<Waited> {
-    match crate::ops::task::task_wait_now(issue, until) {
+pub fn waited(issue: &str, until: TaskWaitUntil, merges: fn(&[String]) -> bool) -> Result<Waited> {
+    match crate::ops::task::task_wait_now(issue, until, merges) {
         Ok(Some((task, reached))) => Ok(Waited { reached, task }),
         Ok(None) => Err(missing(issue)),
         Err(error) => Err(Error::refused(&error.into(), ErrorCode::Unavailable)),
@@ -275,8 +297,13 @@ pub fn waited(issue: &str, until: TaskWaitUntil) -> Result<Waited> {
 
 /// `lf task wait`: read until the Task reaches `until` or `timeout` passes,
 /// and return the last reading.
-pub fn wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> Result<Waited> {
-    match crate::ops::task::task_wait(issue, until, timeout) {
+pub fn wait(
+    issue: &str,
+    until: TaskWaitUntil,
+    timeout: Option<Duration>,
+    merges: fn(&[String]) -> bool,
+) -> Result<Waited> {
+    match crate::ops::task::task_wait(issue, until, timeout, merges) {
         Ok(Some((task, reached))) => Ok(Waited { reached, task }),
         Ok(None) => Err(missing(issue)),
         Err(error) => Err(Error::refused(&error.into(), ErrorCode::Unavailable)),
@@ -288,14 +315,15 @@ pub fn wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> Res
 pub fn subscribe_wait(
     issue: String,
     until: TaskWaitUntil,
+    merges: fn(&[String]) -> bool,
     transport: Transport,
 ) -> anyhow::Result<Option<Subscription>> {
     crate::read_stream::start(
         crate::read_stream::Watch::State,
         (issue, until),
-        |store, (issue, until): (String, TaskWaitUntil)| async move {
+        move |store, (issue, until): (String, TaskWaitUntil)| async move {
             let store = crate::read_stream::require_store(store)?;
-            match crate::ops::task::task_wait_reading(&store, &issue, until).await? {
+            match crate::ops::task::task_wait_reading(&store, &issue, until, merges).await? {
                 Some((task, reached)) => Ok(Waited { reached, task }),
                 None => Err(missing(&issue).into()),
             }
@@ -308,7 +336,7 @@ fn written(error: impl Into<anyhow::Error>) -> Error {
     Error::written(&error.into())
 }
 
-fn missing(issue: &str) -> Error {
+pub(super) fn missing(issue: &str) -> Error {
     Error::new(ErrorCode::NotFound, format!("no Task exists for {issue:?}"))
         .with(serde_json::json!({ "task": issue }))
 }
@@ -326,13 +354,7 @@ pub struct TaskRunRequest {
 
 impl TaskRunRequest {
     pub fn argv(&self, issue: &str) -> Vec<String> {
-        let mut args = Vec::new();
-        if self.approve {
-            args.push("--batch".into());
-        }
-        if let Some(agent) = &self.agent {
-            args.extend(["--agent".into(), agent.clone()]);
-        }
+        let mut args = run_flags(self.agent.as_deref(), self.approve);
         args.extend(["task", "run", issue].map(str::to_owned));
         args.extend(self.graph.iter().cloned());
         for (flag, value) in [
@@ -351,6 +373,17 @@ impl TaskRunRequest {
         args.push("--json".into());
         args
     }
+}
+
+fn run_flags(agent: Option<&str>, approve: bool) -> Vec<String> {
+    let mut args = Vec::new();
+    if approve {
+        args.push("--batch".into());
+    }
+    if let Some(agent) = agent {
+        args.extend(["--agent".into(), agent.into()]);
+    }
+    args
 }
 
 pub fn spell_auto_on(issue: &str) -> Vec<String> {

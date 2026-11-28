@@ -53,7 +53,12 @@ fn workspace_plan(
             expression => expression.clone(),
         },
     };
-    let mut plan = selections::plan_selection(store, repository, inventory)?;
+    let mut plan = selections::plan_selection(
+        store,
+        repository,
+        inventory,
+        crate::lf::navigation::command_merges,
+    )?;
     plan.selection = selected;
     Ok(plan)
 }
@@ -383,9 +388,9 @@ fn remote_open(
     if args.no_focus {
         argv.push("--no-focus".into());
     }
-    let bytes = tokio::runtime::Runtime::new()?.block_on(
-        loopflow_execution::machine::ssh::request(&machine, &argv, None),
-    )?;
+    let bytes = loopflow_execution::runtime::block_on(loopflow_execution::machine::ssh::request(
+        &machine, &argv, None,
+    ))?;
     serde_json::from_slice(&bytes)
         .context("Remote workspace receipt is unavailable; creation may have succeeded")
 }
@@ -514,7 +519,10 @@ fn started(content: &ViewContent) -> bool {
     content.states.iter().any(|state| {
         matches!(
             state,
-            SelectionState::Idle | SelectionState::Active | SelectionState::Moving
+            SelectionState::Idle
+                | SelectionState::Active
+                | SelectionState::Moving
+                | SelectionState::Paused
         )
     })
 }
@@ -573,6 +581,7 @@ mod tests {
     #[test]
     fn only_started_unfinished_tasks_open_as_tabs() {
         let mut content = ViewContent {
+            working_group: None,
             work: WorkWorkspaceKey {
                 repository: "r".into(),
                 kind: WorkWorkspaceKind::Task,
@@ -591,6 +600,7 @@ mod tests {
         for (state, expected) in [
             (SelectionState::Unstarted, false),
             (SelectionState::Idle, true),
+            (SelectionState::Paused, true),
             (SelectionState::Moving, true),
             (SelectionState::Done, false),
         ] {

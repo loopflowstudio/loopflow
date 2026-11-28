@@ -184,6 +184,7 @@
           "reason": "Inspect earlier Graphs before continuing"
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task checkout is on another Machine"
         }
       },

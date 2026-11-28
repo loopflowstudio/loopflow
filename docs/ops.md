@@ -14,9 +14,9 @@ code host today; you need [`gh`](https://cli.github.com) signed in.
 ### Land and repair CI automatically
 
 ```bash
-lf land --wait-and-fix                 # sync, mark ready, enable auto-merge, repair CI until merged
+lf land --wait-and-fix                 # sync, clear scratch/, enable auto-merge, repair CI until merged
 lf --task LOO-12 land --wait-and-fix   # same, from any directory
-lf task auto on LOO-12                 # auto on, then remaining Graph steps: reflect → gate → land --wait-and-fix
+lf task auto on LOO-12                 # auto on, then remaining Graph steps: reflect → land --wait-and-fix
 ```
 
 `lf land --wait-and-fix` polls the PR every 15 seconds and launches a `ci-fix`
@@ -57,32 +57,32 @@ lf reviews                                    # each review and the exact commit
 lf checks --required                          # required checks only (exits 8 while pending; --logs for failures)
 ```
 
-### Review while CI runs (`lf gate`)
+### Working notes (`scratch/`) and CI
 
 ```bash
-lf gate                  # publish first so CI starts, then review the diff while CI runs
+lf pr publish        # checkpoint PR: keeps scratch/ notes on the branch
+lf pr submit         # syncs, removes branch-added scratch/ files, pushes once
+lf scratch clear     # remove branch-added scratch/ files on your own
 ```
 
 ```text
-Tests that matter most
-- retry_budget::stops_at_three      the limit this change moves
-- refresh::expired_token_retries    most-edited file; a 401 used to be swallowed
-- ship_api::acceptance              the design's acceptance check
-
-4c1e9a2  superseded. CI passed 14 checks; says nothing about the fix below.
-b70d3f5  CI pending: rust-test, tests-result. Passing: rust-lint, python-test.
-         Skipped: macos (paths not reached). Local: refresh:: passed.
-         Fixed in review: refresh dropped the retry count after a 401.
-Auto-merge not requested.
+$ lf scratch clear
+Cleared 2 added scratch files.
 ```
 
-`gate` commits a coherent candidate, syncs, publishes a ready PR so CI starts
-immediately, and verifies that the relevant suites actually queued (not
-skipped). While CI runs, it reviews security, correctness, failure handling,
-interfaces, and docs, fixing in-scope issues in one batch push. It names the
-2–5 highest-value tests and reports CI status strictly per commit (never
-carrying a green check from an older head). Customize it with
-`lf skill customize gate`.
+`lf pr publish` leaves `scratch/` files in place, so repositories that defer
+full CI while `scratch/` has notes stay quiet during `ship-review`.
+
+`lf pr submit`, `lf pr arm`, and `lf land` sync with the base branch first,
+remove branch-added files under `scratch/` once on the head they are about to
+push, and push that single clean head so CI runs the full matrix right away.
+Pre-existing files under `scratch/`, edits to them, and `.gitkeep` stay; if
+clearing leaves no authored changes, delivery stops before pushing.
+
+During a merge conflict, `scratch/` stays on disk so you or `sync-conflicts`
+can read `scratch/plan.md`, and `lf sync --abort` leaves the branch and notes
+untouched. Conflicts limited to notes inherited from a landed stack parent
+resolve automatically without launching an agent.
 
 ## Checkouts and stacked PRs
 
@@ -334,6 +334,7 @@ Asana, Doppler and OpenCode. See [Native authentication](subscriptions.md).
 |---|---|
 | `lf land [--wait-and-fix]` | Enable auto-merge; with `--wait-and-fix`, watch and repair CI until merged |
 | `lf pr publish` / `open` / `submit` / `arm` / `abandon` | PR lifecycle at each commitment level |
+| `lf scratch clear` | Remove branch-added files under `scratch/` (keeps pre-existing files and `.gitkeep`) |
 | `lf pr reconcile` | Settle recorded landings once; recover a Task's missing PR |
 | `lf task auto on\|off [ISSUE]` | Turn [auto](orchestration.md#auto) on and run the Task to merge / off: wait at the next breakpoint or merging step |
 | `lf repo ci [--since 7d]` | Report CI failures and automated repairs |
@@ -341,7 +342,7 @@ Asana, Doppler and OpenCode. See [Native authentication](subscriptions.md).
 | `lf commit`, `lf sync [TASK\|BRANCH]`, `lf wt …` | Git operations with Task and stack awareness |
 | `lf machine …`, `lf pool …`, `lf ondemand …` | SSH machines, pools, and cloud rentals |
 | `lf machine login\|logins\|logout` | What each Machine is signed in to |
-| `lf server status`, `lf install` | Local client server and updates |
+| `lf server status`, `lf server diagnostics`, `lf install` | Local client server, runtime counters, and updates |
 
 Full flags: [`lf pr`](lf-reference.md#lf-pr), [`lf repo`](lf-reference.md#lf-repo),
 [`lf wt`](lf-reference.md#lf-wt), [`lf machine`](lf-reference.md#lf-machine).

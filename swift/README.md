@@ -91,9 +91,9 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 ```
 
 Working Tasks lists owned, started, unfinished Tasks on any Machine this store
-records. Drag in the repository sidebar or Working Tasks grid to save an order.
-Turn on **Sort by status** in a repository or Wave sidebar to group Tasks by
-activity. [Sidebar order, filters and shortcuts](../docs/surfaces.md#working-tasks-in-the-sidebar).
+records. The sidebar groups them into **Active**, **Shipping**, and **Paused**.
+Drag within a group or in the Working Tasks grid to save an order. Turn on
+**Sort by status** to sort each group by conversation activity. [Sidebar order, filters and shortcuts](../docs/surfaces.md#working-tasks-in-the-sidebar).
 
 Click a Wave to see its Working Tasks and subwaves. Its backlog holds the open
 work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks
@@ -394,32 +394,27 @@ your Ghostty configuration at launch, ignores its `theme =` setting and leaves
 the file untouched.
 Source and license notices ship offline with the catalogue.
 
-Under the jump bar, the workflow bar reads where the Task stands:
+Under the jump bar, the workflow track shows the Task’s steps. The step it stands at
+grows into a chip that says what is happening there.
 
 ```text
-code  plan  build  👤ship-review  deliver  👤verify   build is running implement. You are next needed at ship-review.   [Auto-Ship]  …
+[⏸]  plan  build · implement ▾  👤ship-review  deliver            Auto ◉  ✓
 ```
 
-The Graph's name, then its top-level steps in order, a person before each step
-that waits for you. Steps already passed are quieter; the step the Task stands
-in is strong, in the working colour while it runs and in the waiting colour
-when it has stopped or is waiting for you. A step that appears in more than one
-part of the Graph (`concept-review` runs in both `plan` and `build`) marks the
-part it is running in. The sentence is the one `lf task status` prints. In a
-narrow window the steps go and the sentence stays.
+Click ⏸ to pause the worker and keep talking in the Task conversation; the chip reads
+**Paused: build · implement**. Click ▶ to resume the interrupted step. At a human stop, ▶ lifts
+the hold and the Task waits there for you. Once you finish the review, the chip reads
+**ship-review · next: deliver** and ▶ runs deliver. A failed or interrupted run offers
+its saved step again.
 
-When the Task can move, one button says how: **Start** before it has run,
-**Continue** at a breakpoint, and **Run** once its Graph has stopped. **Auto-Ship** turns the Task's auto setting
-on and runs it, as `lf task auto on` does: its run continues through each
-breakpoint and lands the PR. Turning it on raises the Notice "LOO-5
-Auto-Ship requested · Undo"; Undo is Stop Auto-Ship (`lf task auto off`), and
-so is the button, which reads **Stop Auto-Ship** while auto is on. While auto is on,
-the sentence names auto instead of you, and the Task's board card and sidebar
-row carry an Auto badge. Open a Dashboard with `state:auto` to watch those Tasks.
-
-Everything else is in **…**, the same list as the sidebar row's context menu:
-**Start from…** (or **Start with…** before the Task has a Graph), Complete or
-Reopen, Claim or Unassign, Move, Copy ID and link, and **Abandon…**.
+Click any other step to start from it. Click the chip to pick a starting point,
+interrupt a running step, or pause at review; the same menu has Claim or Unassign and
+**Abandon…**. On a narrow pane only ▶, the chip and its menu stay. The Auto switch runs
+through the remaining human steps when armed. You can switch it off while paused.
+The checkmark completes the Task and lights up when its PR merges or its Graph reaches
+the end. If a post-merge step stops after merge, **Run: `<step>`** is still available beside the
+checkmark. Right-click the Task in the sidebar for conversations, Wave moves, links and
+copy actions.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -428,7 +423,7 @@ Reopen, Claim or Unassign, Move, Copy ID and link, and **Abandon…**.
 ⌘⌥←/→/↑/↓   focus the visual neighbor
 ⌘⇧Return    zoom the focused pane
 ⌘W / ⌘⇧T    close the selected tab / undo close
-⌘F          find in the focused terminal
+⌘F          find in the focused pane (terminal or Files)
 ```
 
 Panes sit in rounded islands with small gutters; drag a gutter to resize.
@@ -436,7 +431,7 @@ Panes sit in rounded islands with small gutters; drag a gutter to resize.
 
 The focused pane has a quiet raised edge. Copying selected text or a command
 block briefly confirms the number of copied lines without moving focus.
-Find reserves its own row above the terminal, so it never covers a match.
+Find reserves its own row above the terminal or document, so it never covers a match.
 Return / Shift-Return select the next / previous match; Escape closes Find.
 Search and terminal state stay with their retained pane when switching Work.
 
@@ -585,34 +580,59 @@ Markdown, SVG or HTML file's header shows its line Diff instead, until you
 switch back or close the window. An image too large to show says so with its
 size, and one that can't be decoded says that; the other side still shows.
 
-Click a line number (Shift-click extends) to write a comment under those lines;
-Return keeps it there. **Send to conversation** (Command-Return) puts every
-comment into the conversation's unsent input as one line, each naming its file,
-lines and side, and sending stays yours. A comment follows its lines when the
-worker edits above them; when the lines themselves change it says so, keeps its
-place and is still sent. Comments last as long as the window. **Copy** takes
-the selected lines without patch markers, as does a line's context menu, which
-also copies the selection or the new code shown; selecting text never takes
-the + and −. **Reference in conversation** types
-`path:L4-6 (after, working tree on <sha>)` alone. Files' Diff has the
-same comments, skipped lines and Send.
+Click a line number to comment, Shift-click to extend the range, and press
+Return to keep the comment. **Send to conversation** (⌘↩) places the whole
+batch from Read and Diff in the conversation’s unsent input. Each comment
+names its file, lines and source (working file, draft or comparison side).
+Comments follow moved lines. If an anchor disappears or becomes ambiguous,
+the original reference stays with the comment. A failed insertion keeps the
+batch in the window. **Copy** takes the selected lines without patch markers.
+**Reference in conversation** inserts just the address, for example
+`path:L4-6 (after, working tree on <sha>)`.
 
-**Files** holds open documents and their Read, Edit and Diff controls. One menu
-names the open file and, once several are open, where it sits among them
-(**TaskRow.swift** 1 of 3), and switches between them or closes it; under it,
-the Machine as a place (This Mac), then the checkout and folder in mono. Files starts with
-its chooser closed. Click the file-browser toggle or press Command-P for
-**scratch** and the Task's checkout tree, read from the Task's Machine as you
-open folders, 500 entries at a time (**Load more** for the rest). `M`, `R` and
-`U` mark files changed from the branch's recorded parent commit; `•` marks the
-folders holding them. ↑/↓ move, → opens a folder, ← closes it, Return opens the
-file. Search matches scratch, the folders you have opened and changed files. A
-folder that can't be read says why under it, with **Retry**. Expanded folders
-and scroll stay put across page and Task switches. Selection closes the dropdown; pin it to keep the list alongside the document
-(Control-Command-B). Escape dismisses the dropdown. Sidebar selection switches
-the whole Task workspace; selections inside a Task can focus its companion.
-Resizing or closing the browser is remembered while the window stays open;
-layouts are not yet restored after quitting the app.
+In **Files**, press **⌘P** and type part of a nested filename. Arrow keys
+preview the source beside the results when the pane is wide enough. Return
+opens the file and Escape restores your place. An empty search lists open
+files first. Matching paths favor scratch, changed and open files. Choose
+**Changed** to search just the whole Task’s changes.
+
+| In the focused Files pane | Action |
+|---|---|
+| ⌘F | Find in the current reader or editor. Return and Shift-Return step matches. |
+| ⇧⌘F | Search the checkout for text. From Find, carry the current query into Grep. |
+| ⇧⌘O | Open the current file’s outline, including unsaved edits. |
+| ⌘-click, or click then `gd` | Jump to a declaration. Choose from the list when several match. |
+| Click then `gr` | List whole-word references on the checkout’s Machine. |
+| ⌘[ / ⌘] | Return to the call line or jump forward. An empty history falls through to Desktop navigation. |
+| ⌃⌘E | Toggle Edit for this file. |
+
+In Read, click an identifier to underline the occurrence that `gd` or `gr` will use.
+
+Each Grep result highlights its occurrence. Previewing or opening a hit on a
+long line scrolls it into view when the displayed revision matches. Grep opens
+numbered source for Markdown and HTML too. Escape from Grep returns
+to the current Find match. Definitions resolve in the live document first,
+then on the Machine that owns the checkout.
+
+Click a breadcrumb folder to browse its siblings or the filename to switch or
+close open files. The breadcrumb shows the enclosing symbol as you read code.
+The **…** menu holds the full path, Machine and narrow-pane controls.
+
+The 236 pt sidebar docks at 620 pt. Below that width it closes after a pick.
+
+- **Open & Scratch** holds open files, unsaved drafts, scratch files and update
+  dots. Files keeps the twelve most recent clean jump destinations. Closing a
+  dirty file leaves its draft here.
+- **Changed in Task** shows whole-Task line totals even while Diff shows a
+  single step. Untracked files above 1,000,000 bytes appear by name.
+- **Checkout** reads folders from their Machine, 500 entries per page. Choose
+  **Load more**, **Retry** or **Show Ignored** as needed. ↑/↓ move, → expands
+  and ← collapses. Return opens a file. Single-child folders share one row
+  once the listing is complete. Expansion and scroll survive Task switches.
+
+Sidebar selection switches the whole Task workspace; selections inside a Task
+can focus its companion. Resizing or closing the browser is remembered while the
+window stays open; layouts are not yet restored after quitting the app.
 
 Open **•••** or press Command-/ for the selected Task’s actions. Row context
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
@@ -660,17 +680,24 @@ Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pa
 ⇧⌘T restores the last closed tab's identity and history. Close ends its shell
 and jobs; New Shell starts fresh execution.
 
-**Read** is where documents open: Markdown renders formatted, HTML as a live
-page that runs its scripts but never reaches the network, and an image as the
-picture, whatever its extension. Links open in the
-browser. **Edit** retains editable UTF-8 drafts and selection in this window;
-**Diff** shows the draft comparison read-only.
+New files open in **Read**. Code has selectable, colored lines and change marks.
+Markdown renders formatted, HTML runs offline with external links opening in the
+browser, and images show their dimensions and size. Read includes your unsaved
+edits. Each file remembers its mode. Returning to **Edit** restores the caret,
+selection and Undo. In a file’s **Diff**, `[` and `]` step through its changes,
+including edits in the draft.
 
-When an agent writes a `scratch/**/*.md` or `.html` file, Files reloads it if it
-is showing, or follows it. It takes the view only when nothing is selected, when
-the current document was itself followed, or when you haven't touched Files for
-two minutes. Edit, Diff, an unsaved draft or keyboard focus in Files keep your
-view; the page then opens as a tab beside it.
+The first visit to an empty Files pane opens the newest scratch Markdown or
+HTML page, then falls back to the first changed file or the picker. Later
+scratch writes mark the file in **Open & Scratch** and offer a dismissible
+**Updated · Open** bar in Files. A page already open in Read updates in place.
+Visible HTML keeps its reading position and reloads after 800 ms of quiet.
+
+`lf desktop files src/parser.rs:24-31` presents those lines and records the
+previous position. Add `--mode diff` to open the comparison. During editing
+or Diff review, **Presented · Open** lets you choose when to switch. Dismiss
+the bar to keep the file in the rail for later. Presenting from a zoomed
+conversation opens Files beside it and keeps terminal focus.
 
 Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
@@ -752,14 +779,14 @@ When the selected Task's lifecycle becomes completed or abandoned, it stays
 visible with a green **Done** or red **Abandoned** header. Navigating away restores the ordinary
 sidebar filters. **Back** (⌘[) returns to the retained workspace and its sidebar
 row, preserving conversations, files and drafts without starting execution.
-**Start from…** in **…** lists `start` and the Task's breakpoints; picking
-one runs `lf task run ISSUE --from STEP` as a child of the app. **Complete** changes Task status independently: the row leaves the list in the
+Open the step label to pick a stage or human step. Each pick runs
+`lf task run ISSUE --from STEP`. **Complete** changes Task status independently: the row leaves the list in the
 click and the next Task opens. A refused completion brings the row back with a
 Notice saying why; completing again never replays the Graph.
 Linear completion leaves the displayed Workflow and live Processes intact.
 Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
 the last recorded graph with its actions disabled. Only a successful Task reading
-with no captured Workflow offers **Start**, which runs `lf -b task run ISSUE`.
+with no captured Workflow offers its first step, which runs `lf task run ISSUE`.
 
 Use **⌘T** for a new shell tab and **View → Toggle Files** for Files.
 Choose **Graph processes** in **⌘K** to open the Graph process log. It lists every Graph process in the
@@ -1019,17 +1046,8 @@ roadmap, the Now list or a Wave's page, opens it in its
 repository window rather than creating another Task workspace in a sheet.
 A Wave on the roadmap is a section under its name, divided from the next by a
 line. A Wave's page shows its name and objective, followed by its Project and Tasks.
-Wave Chat loads the active backing's bounded history before SSE, keeps it visible
-through reconnects, and rolls equivalent operational failures into one
-disclosed notice. Cold launch does not start a chat transcript read.
-Local-backed conversations compose in the app. Discord-backed conversations
-mirror the same source-linked transcript and open Discord to reply; they never
-create a parallel local thread. Prior backing epochs remain selectable and
-read-only, and backing delivery trouble stays visible above the transcript.
-Commands, tools, file edits, and loop bookkeeping stay in the journal;
-decisions, deliveries, and actionable failures remain visible. The detail pane
-reads the Wave's plan, Tasks, decisions, PR delivery, and Task conditions
-from `lf wave plan <wave> --json`.
+The detail pane reads the Wave's plan, Tasks, decisions, PR delivery, and Task
+conditions from `lf wave plan <wave> --json`.
 
 Beside each Task's row, **Start** (**Run** once its Graph has run),
 **Open PR** and **Worktree** start its legal Graph, open its PR, and open the
@@ -1050,7 +1068,8 @@ codebase tree, and registry health.
   to their Wave. The Wave's planning row retains the plan and its history;
   it has no separate operator.
 - **Task workspace presentation** reads `lf task changes --json`,
-  `lf task diff --json` and `lf task file --json`.
+  `lf task diff --json`, `lf task file --json`, `lf task files --json`,
+  `lf task find --json`, `lf task grep --json` and `lf task symbols --json`.
   Lifecycle mutations remain `lf task run` and `lf task interrupt`; review stages use
   the Task's persisted graph position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
@@ -1273,7 +1292,7 @@ scripts/test_desktop.sh --filter DesktopHeadlessTests
 uv run python scripts/test.py --swift
 ```
 
-Gate and CI build the app and inspect production views and controls without
+CI builds the app and inspects production views and controls without
 launching a window. Display/terminal integration is opt-in with
 `LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
 See [Testing](#testing) for the full commands and CLI prerequisite.
@@ -1395,7 +1414,8 @@ targets. `files`, `graph-log` and `browse` select browser
 tabs without changing focus or zoom. Each web page tab retains its `WKWebView`
 until the tab closes; `page-back`, `page-forward` and `reload`
 (⌘R, the page's toolbar) act on the addressed page. ⌘[ and ⌘] stay Desktop
-navigation. A shell tab runs `lf desktop shell <task> --id <tab>`, which the local
+navigation outside a non-empty Files jump stack (where `files-back` and
+`files-forward` step file jumps first). A shell tab runs `lf desktop shell <task> --id <tab>`, which the local
 server starts wherever the Task runs; the tab keeps that Machine after a move,
 and Close names it (`--started-on`). Disconnects never replay shell commands.
 
@@ -1457,7 +1477,7 @@ runs model and production-view tests through `scripts/test_desktop.sh`, which
 denies WindowServer connections even on a logged-in host. No Automation
 permission is needed. Only macOS's setuid `/bin/ps` leaves the sandbox so CLI
 process observation still works. `DesktopHeadlessTests` checks the four Work states and
-selection through the real button action. Gate and CI use this same suite.
+selection through the real button action. CI uses this same suite.
 
 Window/Metal/PTY integration tests are optional display-session diagnostics:
 
@@ -1491,7 +1511,7 @@ After upgrading GhosttyKit or its bundled shell integration, run
 shell output for prompt headers, command boundaries and exit status.
 
 `scripts/prove_wave_surface_states.sh` is an optional demo capture: it launches
-windows and therefore needs a display session. It is not in gate or CI.
+windows and therefore needs a display session. It is not in CI.
 
 `scripts/test_desktop.sh` runs `swift test` under `scripts/swift_test_limit.py`,
 which reads the event stream and ends the whole run, naming the test, when one

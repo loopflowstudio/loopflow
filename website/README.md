@@ -47,7 +47,7 @@ cd website && uv run python dev.py sync-docs   # Refresh generated docs copy
 ```
 
 After changing `docs/dev/index.md` or its website rendering, regenerate the
-portable HTML before gate and include it in the same change:
+portable HTML before landing and include it in the same change:
 
 ```bash
 cd website

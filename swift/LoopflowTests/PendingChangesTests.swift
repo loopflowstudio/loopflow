@@ -70,7 +70,8 @@ struct PendingChangesTests {
         json["projection"] = ["visible": members, "suppressed": []]
         json["contents"] = members.enumerated().map { index, member in
             ["work": member["work"]!, "title": "Task \(index + 1)", "states": states, "identifier": "LOO-\(index + 1)",
-             "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "open_children": 0, "face": NSNull(),
+             "breakpoint_arrival": NSNull(),
+             "working_group": states.contains("auto") ? "shipping" : "active", "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "open_children": 0, "face": NSNull(),
              "pane_revision": NSNull()]
         }
         let value = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
@@ -108,6 +109,44 @@ struct PendingChangesTests {
     private func complete(_ changes: PendingChanges, _ issue: String) {
         changes.make(.complete(task: issue), subject: issue, verb: "completed",
                      write: .taskComplete(directory: "/repo", issue: issue, children: nil), notices: notices, show: nil)
+    }
+
+    @Test func pauseKeepsTheWorkingRowAndARefusalRestoresItsGroup() async throws {
+        let changes = changes()
+        let row = try task("LOO-2")
+        let started = try plan(["open", "working", "moving", "busy", "auto"])
+        changes.setPause(.pause, issue: row.task.identifier, directory: "/repo", notices: notices, show: nil) {}
+        #expect(changes.controlRequest(for: row.task.identifier) == "Pausing…")
+        let held = try #require(changes.apply(to: [row], readAt: at(4)).first)
+        #expect(held.section == .working && held.workingGroup == .paused && held.lifecycle == .paused && held.runtime?.owner == row.runtime?.owner)
+        #expect(held.selectionStates.contains(.paused) && !held.selectionStates.contains(.moving))
+        let contents = try #require(changes.apply(to: started)?.contents)
+        #expect(Set(contents[1].states) == [.open, .working, .paused, .busy, .auto]
+                && contents[1].workingGroup == .paused)
+        #expect(contents[1].status?.word == "Busy")
+        #expect(contents[0].states.contains(.working))
+        await machine.fail(ServerError(code: "conflict", message: "Task moved", data: .null))
+        #expect(changes.apply(to: started)?.contents == started.value?.contents)
+        #expect(changes.apply(to: [row], readAt: at(4)) == [row])
+
+        changes.setPause(.unpause, issue: held.task.identifier, directory: "/repo", notices: notices, show: nil) {}
+        let released = try #require(changes.apply(to: [held], readAt: at(4)).first)
+        #expect(released.section == .working && released.selectionStates.contains(.idle) && !released.selectionStates.contains(.paused))
+        let unpaused = changes.apply(to: contents, readAt: at(4))
+        #expect(Set(unpaused[1].states) == [.open, .working, .busy, .idle, .auto])
+        #expect(unpaused[1].workingGroup == .paused)
+        await machine.answer(nil)
+    }
+
+    @Test func anAnsweredPauseStaysPendingUntilAReadingShowsIt() async throws {
+        let changes = changes()
+        changes.read("plan", try plan(at: 4))
+        changes.setPause(.pause, issue: "LOO-2", directory: "/repo", notices: notices, show: nil) {}
+        await machine.answer(at(5))
+        // Between the answer and the reading that shows the hold, the control stays settling.
+        #expect(changes.controlRequest(for: "LOO-2") == PendingChanges.pausing)
+        changes.read("plan", try plan(at: 5))
+        #expect(changes.controlRequest(for: "LOO-2") == nil)
     }
 
     @Test func completeHidesTheRowUntilACoveringReading() async throws {
@@ -179,6 +218,33 @@ struct PendingChangesTests {
                      write: .taskClaim(directory: "/repo", issue: "LOO-1"), notices: notices, show: nil)
         changes.read("tasks", try plan())
         await machine.answer(Revisions([:]))
+        #expect(changes.changes.isEmpty)
+    }
+
+    @Test func aPendingWorkflowChangeStaysUntilTheTaskStreamCoversItsAnswer() async throws {
+        let changes = changes()
+        changes.read("planning", Reading.available("plan", readAt: Revisions(["planning": 4, "processes": 4])))
+        changes.read("task", Reading.available("work", readAt: Revisions(["planning": 4, "processes": 4])))
+        changes.make(.pause(task: "LOO-1"), subject: "LOO-1", verb: "paused",
+                     write: .taskPause(directory: "/repo", issue: "LOO-1"), notices: notices, show: nil)
+        await machine.answer(Revisions(["planning": 5, "processes": 5]))
+        // Planning catches up first; the task stream is still at 4, so the chip keeps "Pausing…" instead of flashing.
+        changes.read("planning", Reading.available("plan", readAt: Revisions(["planning": 5, "processes": 5])))
+        #expect(changes.controlRequest(for: "LOO-1") == PendingChanges.pausing)
+        // Once the task stream covers the answer, the pending change drops.
+        changes.read("task", Reading.available("work", readAt: Revisions(["planning": 5, "processes": 5])))
+        #expect(changes.controlRequest(for: "LOO-1") == nil)
+        #expect(changes.changes.isEmpty)
+
+        // Ending the task stream (switching away from the Task) releases any change held only by it.
+        changes.read("task", Reading.available("work", readAt: Revisions(["planning": 5])))
+        changes.make(.run(task: "LOO-1"), subject: "LOO-1", verb: "started",
+                     write: .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: nil, agent: nil, approve: false, atArrival: nil, decision: nil, reason: nil),
+                     notices: notices, show: nil)
+        await machine.answer(Revisions(["planning": 6]))
+        changes.read("planning", Reading.available("plan", readAt: Revisions(["planning": 6])))
+        #expect(changes.controlRequest(for: "LOO-1") == PendingChanges.starting)
+        changes.ended("task")
         #expect(changes.changes.isEmpty)
     }
 
@@ -281,10 +347,26 @@ struct PendingChangesTests {
 
     @Test func requestedShowsInTheClickAndARefusalPostsOverIt() async throws {
         let changes = changes()
-        changes.request("Auto-Ship", subject: "LOO-5", write: .taskAutoOn(directory: "/repo", issue: "LOO-5"), notices: notices)
-        #expect(notices.current?.text == "LOO-5 Auto-Ship requested")
+        changes.request("Keep theirs", subject: "LOO-5", write: .taskReopen(directory: "/repo", issue: "LOO-5"), notices: notices)
+        #expect(notices.current?.text == "LOO-5 Keep theirs requested")
         await machine.fail(ServerError(code: "conflict", message: "it has no checkout", data: .null))
-        #expect(notices.current?.text == "LOO-5 Auto-Ship couldn't be requested: it has no checkout")
+        #expect(notices.current?.text == "LOO-5 Keep theirs couldn't be requested: it has no checkout")
+    }
+
+    @Test func autoTurnsInTheClickAndARefusalTurnsItBack() async throws {
+        let changes = changes()
+        let row = try task("LOO-2")
+        changes.make(.auto(task: "LOO-2", on: true), subject: "LOO-2", verb: "put on auto",
+                     write: .taskAutoOn(directory: "/repo", issue: "LOO-2"), notices: notices, show: nil)
+        #expect(changes.autoRequest(for: "LOO-2") == true && notices.current == nil)
+        let shipping = try #require(changes.apply(to: [row], readAt: at(4)).first)
+        #expect(shipping.selectionStates.contains(.auto))
+        let contents = try #require(changes.apply(to: try plan())?.contents)
+        #expect(contents[1].states.contains(.auto) && contents[1].workingGroup == .shipping)
+        await machine.fail(ServerError(code: "conflict", message: "it has no checkout", data: .null))
+        #expect(changes.autoRequest(for: "LOO-2") == nil)
+        #expect(changes.apply(to: [row], readAt: at(4)) == [row])
+        #expect(notices.current?.text == "LOO-2 couldn't be put on auto: it has no checkout")
     }
 
     @Test func revisionsCoverOnlyWhenEveryDomainIsReached() {
@@ -303,7 +385,7 @@ struct PendingChangesTests {
 
     @Test func aNewEventReplacesTheLastAndARefreshedOneRestarts() {
         let center = NoticeCenter()
-        center.post(Notice("LOO-5 Auto-Ship requested"))
+        center.post(Notice("LOO-5 completed"))
         center.post(Notice("Tasks couldn't be read: offline", key: "task_list"))
         #expect(center.current?.text == "Tasks couldn't be read: offline")
         let posted = center.posted

@@ -66,15 +66,18 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "completed": {
     "task": {
@@ -357,14 +360,17 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": "Task is complete"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "stale": {
     "task": {
@@ -612,16 +618,19 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "moving",
+    "working_group": "active",
     "selection_states": [
       "open",
       "moving",
       "working"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "unavailable": {
     "task": {
@@ -714,16 +723,19 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "open",
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "user_wait": {
     "task": {
@@ -972,16 +984,19 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "open",
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "dirty": {
     "task": {
@@ -1074,16 +1089,19 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "open",
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "authored_commits": {
     "task": {
@@ -1330,6 +1348,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -1362,11 +1381,13 @@
     },
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "open",
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "breakpoint": {
     "task": {

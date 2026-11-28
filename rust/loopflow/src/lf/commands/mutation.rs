@@ -72,7 +72,7 @@ fn execute(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>)
             .as_deref()
             .map(|task| {
                 let repo = selected_task_repository(cli, directory, Some(task))?;
-                tokio::runtime::Runtime::new()?.block_on(async {
+                loopflow_execution::runtime::block_on(async {
                     let store = loopflow_execution::store::open_existing_store()
                         .await?
                         .context("planning registry unavailable")?;
@@ -342,7 +342,7 @@ fn wave(repo: &Path, command: &WaveCommand, io: &mut CommandIo<'_>) -> Result<()
             objective,
             json,
         } => {
-            let added = tokio::runtime::Runtime::new()?.block_on(
+            let added = loopflow_execution::runtime::block_on(
                 loopflow_execution::ops::wave_lifecycle::add(repo, wave, objective.as_deref()),
             )?;
             if *json {

@@ -70,7 +70,7 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 - break                 # review the plan before implementation starts
 - implement             # commits its work on the branch
 - audit                 # runs on Codex per its frontmatter
-- gate                  # publishes the PR so CI starts, then reviews while CI runs
+- cmd: land --wait-and-fix  # syncs, clears scratch, and merges when CI passes
 ```
 
 ```bash
@@ -80,9 +80,9 @@ lf task run <ID> ship-api       # review the finished plan in the Task conversat
 lf -b task run <ID> ship-api    # carry the proposed plan straight into implementation
 ```
 
-Built-in Graphs (`feature`, `code`, `auto`, `research`, `optimize`) work out of
+Built-in Graphs (`feature`, `code`, `quick`, `research`, `optimize`) work out of
 the box and are templates you can customize (`lf graph customize feature`).
-Extend built-in Skills with `extends: builtin` instead of forking them.
+Extend built-in or repository Skills with `extends: lf:<name>` or `extends: <name>` instead of forking them.
 
 **3. Organize Tasks into Waves.** A Wave is an area of work with its own goal
 (`GOAL.md`), memory (`MEMORY.md`) and plan, and its own setup for every Task in
@@ -121,7 +121,7 @@ lf resume                                  # return to this checkout's conversat
   steps move to the next agent in your `agents` list, or wait and try again.
 - **Workflows are files in your repository.** Skills are Markdown and Graphs
   are YAML under `.lf/`, reviewed like code. A Graph can loop
-  (`implement → sync → realign`), branch (`xor`), write the docs before the
+  (`sync → implement` inside `concept-review → realign`), branch (`xor`), write the docs before the
   code (`write-docs`), keep QA playbooks (`.lf/qa/`), and stop for you with
   one summary page (`ship-review`).
 - **Your team keeps its tools.** Teammates review PRs on GitHub and comment in
@@ -139,7 +139,7 @@ lf resume                                  # return to this checkout's conversat
 | Parallel Tasks, steering, stacking PRs, and team sync (Git, Linear, Asana) | [Work](work.md) |
 | Persistent conversations, multi-terminal views, and crash/reboot recovery | [Sessions](sessions.md) |
 | Mixing Claude, Codex, OpenCode, Pi, and Antigravity + automatic usage-limit failover | [Configuration](config.md#keep-going-when-a-provider-runs-out) · [Native authentication](subscriptions.md) |
-| Custom Skills (`extends: builtin`), Graphs, loops, `ship-review`, and `qa` | [Orchestration](orchestration.md) |
+| Custom Skills (`extends:`), Graphs, loops, `ship-review`, and `qa` | [Orchestration](orchestration.md) |
 | Auto-merge, CI repair (`lf land --wait-and-fix`), stacked PRs, and releases | [Ops](ops.md) |
 | Running on SSH machines, pools, or rented Daytona/Modal/RunPod/AWS boxes | [Machines](ops.md#machines) · [Sign in on any Machine](subscriptions.md#sign-in-on-any-machine) |
 | Loopflow Desktop, Rex, cmux, Herdr, tmux, or building a custom UI | [Surfaces](surfaces.md) · [Workspaces](workspaces.md) |
@@ -156,7 +156,7 @@ Each page picks up where the previous one leaves off:
 | Start | [Get started](getting-started.md) | Install, first Skill, first Task, review, and ship |
 | Work | [Work](work.md) | Multiple Tasks, steering, shared plans (Git/Linear/Asana), Waves |
 | Sessions | [Sessions](sessions.md) | Multi-view attach, `lf resume`, update/crash survival, switching agents |
-| Ops | [Ops](ops.md) | PRs, `gate`, CI repair, releases, checkouts/stacking, SSH & rented machines |
+| Ops | [Ops](ops.md) | PRs, CI repair, releases, checkouts/stacking, SSH & rented machines |
 | Surfaces | [Surfaces](surfaces.md) · [Workspaces](workspaces.md) | Desktop, Rex, cmux, Herdr, tmux, `lf open`, `--subscribe --json` |
 | Client server | [Connect clients](server.md) | Local server lifecycle, Desktop reconnect, phone access over Tailscale |
 | Telemetry | [Telemetry](telemetry.md) | Cost, context budgets, transcripts, live runs, `lf doctor` |
@@ -172,6 +172,8 @@ Each page picks up where the previous one leaves off:
   config.local.yaml       # Your private repo/Wave preferences (auto-excluded from Git)
   skills/                 # Repo Skills (extend or replace builtins)
   graphs/                 # Repo Graphs
+  components/             # Custom <lf-component> templates for review pages
+  theme.css               # Optional CSS custom properties for review pages
   qa/                     # Repo QA playbooks, updated by `qa`
   wave/<name>/            # Wave GOAL.md, MEMORY.md, and config.yaml
 scratch/                  # Temporary working notes (added files cleared on submit/land)
@@ -187,9 +189,9 @@ contract), `scratch/`, and `.lf/wave/` automatically. Pull in more context when
 you need it:
 
 ```bash
-lf gate --docs DESIGN.md            # one file
-lf gate --docs 'docs/*.md'          # a glob
-lf gate --diff files                # paths of files changed on the branch
+lf qa --docs DESIGN.md              # one file
+lf qa --docs 'docs/*.md'            # a glob
+lf qa --diff files                  # paths of files changed on the branch
 lf debug -c                         # clipboard contents
 lf --context debug -c               # preview assembled input without launching
 ```

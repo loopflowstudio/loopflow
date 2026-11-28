@@ -22,11 +22,8 @@
       "demo"
     ],
     "position": {
-      "kind": "run",
-      "step": "review-design",
-      "at": "implement",
-      "lf_process_id": "11111111-1111-4111-8111-111111111111",
-      "running": true
+      "kind": "at",
+      "step": "land"
     },
     "steps": [
       {
@@ -44,10 +41,18 @@
       {
         "name": "demo",
         "breakpoint": true
+      },
+      {
+        "name": "land",
+        "breakpoint": false
       }
     ],
-    "current_step": 2,
-    "sentence": "build is running implement. You are next needed at demo."
+    "current_step": 4,
+    "sentence": "Waiting at land: auto is off.",
+    "control": {
+      "action": "wait",
+      "label": "Waiting: land"
+    }
   },
   "graph_processes": [
     {

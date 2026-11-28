@@ -18,12 +18,31 @@ pub struct Entry {
     /// there is no such builtin or the entry is the builtin.
     #[serde(deserialize_with = "Option::deserialize")]
     pub builtin: Option<BuiltinRelation>,
+    /// Parent skill named by `extends:` (`lf:<name>` for a builtin, or `<name>`),
+    /// when the skill extends another.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub extends: Option<String>,
+}
+
+impl Entry {
+    pub fn source_label(&self) -> String {
+        let mut parts = vec![self.source.clone()];
+        if let Some(target) = &self.extends {
+            parts.push(format!("extends {target}"));
+        }
+        match self.builtin {
+            Some(BuiltinRelation::Extends) if self.extends.is_some() => {}
+            Some(relation) => parts.push(relation.describe().to_string()),
+            None => {}
+        }
+        parts.join(", ")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltinRelation {
-    /// `extends: builtin`: the builtin's text with the file's appended.
+    /// Extends the builtin of the same name (`extends: lf:<name>`, `extends: <name>`, or `extends: builtin`).
     Extends,
     /// A whole skill in the builtin's place, drifting as the builtin changes.
     Replaces,
@@ -111,6 +130,7 @@ fn graph_entry(repo: &Path, name: String) -> Result<Entry> {
         kind: kind.as_str().to_string(),
         description,
         builtin: None,
+        extends: None,
     })
 }
 
@@ -130,6 +150,7 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
                     summary
                 },
                 builtin: None,
+                extends: None,
             });
         }
         if !path.is_empty() {
@@ -140,26 +161,28 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
         let catalog = crate::skills::catalog::SkillCatalog::discover(Some(repo))?;
         let prefix = path.get(1).map(|name| format!("{name}/"));
         for source in catalog.entries() {
-            let name = source.name.clone();
+            let name = &source.name;
             if prefix
                 .as_ref()
                 .is_some_and(|prefix| !name.starts_with(prefix))
             {
                 continue;
             }
-            let description = match source.read() {
+            let description = match catalog.read_source(source) {
                 Ok(content) => {
                     loopflow_definitions::text::skill_description(&content).unwrap_or_default()
                 }
                 Err(error) => format!("unavailable: {error}"),
             };
+            let (builtin, extends) = catalog.relations(source);
             entries.push(Entry {
                 name: name.clone(),
                 kind: "skill".into(),
                 source: definition_source(repo, source.path.as_deref()),
                 description,
                 invocation: format!("lf skill -- {name}"),
-                builtin: source.builtin_relation(),
+                builtin,
+                extends,
             });
         }
         if !path.is_empty() {
@@ -179,7 +202,7 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
 
 #[cfg(test)]
 mod tests {
-    use super::Entry;
+    use super::{BuiltinRelation, Entry};
 
     #[test]
     fn entries_match_the_shared_fixture_without_defaults() {
@@ -190,6 +213,37 @@ mod tests {
         let entries: Vec<Entry> = serde_json::from_value(message["result"].clone()).unwrap();
         assert_eq!(serde_json::to_value(&entries).unwrap(), message["result"]);
         assert_eq!(entries[0].invocation, "lf debug [message]");
+        assert_eq!(entries[1].source_label(), ".lf/skills/qa.md, extends lf:qa");
+        assert_eq!(
+            entries[2].source_label(),
+            ".lf/skills/card-implement.md, extends implement"
+        );
         assert!(serde_json::from_str::<Entry>(r#"{"name":"debug","kind":"skill"}"#).is_err());
+    }
+
+    #[test]
+    fn source_label_reports_named_extends_and_builtin_replacement() {
+        let entry = Entry {
+            name: "qa".into(),
+            kind: "skill".into(),
+            source: ".lf/skills/qa.md".into(),
+            description: "Custom QA".into(),
+            invocation: "lf qa".into(),
+            builtin: Some(BuiltinRelation::Replaces),
+            extends: Some("implement".into()),
+        };
+        assert_eq!(
+            entry.source_label(),
+            ".lf/skills/qa.md, extends implement, replaces builtin"
+        );
+        let transitive = Entry {
+            builtin: Some(BuiltinRelation::Extends),
+            extends: Some("base-qa".into()),
+            ..entry
+        };
+        assert_eq!(
+            transitive.source_label(),
+            ".lf/skills/qa.md, extends base-qa"
+        );
     }
 }

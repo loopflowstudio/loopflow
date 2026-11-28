@@ -98,7 +98,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
         let ids = {
-            let mut statement = snapshot.prepare(
+            let mut statement = snapshot.prepare_cached(
                 "SELECT machine_id FROM pool_machines WHERE pool=?1 ORDER BY machine_id",
             )?;
             let rows = statement.query_map([name], |row| row.get::<_, String>(0))?;
@@ -175,7 +175,7 @@ impl SqliteStore {
     /// completed or abandoned.
     pub fn work_finished_at(&self, machine: &MachineId) -> StoreResult<Option<OffsetDateTime>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT DISTINCT t.id,t.planning_completed_at,t.abandoned_at
              FROM task_ownership o JOIN tasks t ON t.id=o.task_id WHERE o.machine_id=?1",
         )?;

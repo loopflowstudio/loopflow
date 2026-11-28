@@ -8,9 +8,14 @@ use std::path::{Path, PathBuf};
 #[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(from = "PlacementInput")]
 pub struct Placement {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tasks: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub capacity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jobs: Option<usize>,
 }
 
 #[derive(schemars::JsonSchema, Debug, Clone, Deserialize)]
@@ -21,6 +26,7 @@ enum PlacementInput {
         tasks: Option<String>,
         session: Option<String>,
         capacity: Option<String>,
+        jobs: Option<usize>,
     },
 }
 impl From<PlacementInput> for Placement {
@@ -30,15 +36,18 @@ impl From<PlacementInput> for Placement {
                 tasks: Some(id.clone()),
                 session: Some(id),
                 capacity: None,
+                jobs: None,
             },
             PlacementInput::Fields {
                 tasks,
                 session,
                 capacity,
+                jobs,
             } => Self {
                 tasks,
                 session,
                 capacity,
+                jobs,
             },
         }
     }

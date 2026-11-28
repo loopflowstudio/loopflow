@@ -191,10 +191,14 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
         .block_on(task.store.active_task_pr(&task.task.id))
         .unwrap()
         .unwrap();
-    let first = task_status(repo.path(), Some("INF-123"))
-        .expect("REST status succeeds despite GraphQL exhaustion")
-        .execution
-        .expect("execution");
+    let first = task_status(
+        repo.path(),
+        Some("INF-123"),
+        loopflow::lf::navigation::command_merges,
+    )
+    .expect("REST status succeeds despite GraphQL exhaustion")
+    .execution
+    .expect("execution");
     assert!(report.errors.is_empty(), "{report:?}");
     assert!(matches!(
         observed.github_observation.as_ref().unwrap().result,
@@ -219,10 +223,14 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
         previous_interrupt,
         "an idle Task records no interrupt"
     );
-    let cached = task_status(repo.path(), Some("INF-123"))
-        .expect("cached status succeeds")
-        .execution
-        .expect("execution");
+    let cached = task_status(
+        repo.path(),
+        Some("INF-123"),
+        loopflow::lf::navigation::command_merges,
+    )
+    .expect("cached status succeeds")
+    .execution
+    .expect("execution");
     assert!(
         cached.work.graph_processes.is_empty(),
         "an interrupt launches nothing"
@@ -266,10 +274,14 @@ fn rest_failure_is_retained_while_local_controls_continue() {
         .block_on(task.store.active_task_pr(&task.task.id))
         .unwrap()
         .unwrap();
-    let first = task_status(repo.path(), Some("INF-123"))
-        .expect("REST failure degrades instead of failing")
-        .execution
-        .expect("execution");
+    let first = task_status(
+        repo.path(),
+        Some("INF-123"),
+        loopflow::lf::navigation::command_merges,
+    )
+    .expect("REST failure degrades instead of failing")
+    .execution
+    .expect("execution");
     assert!(!first.status.is_terminal(), "{first:?}");
     assert!(report
         .errors
@@ -301,10 +313,14 @@ fn rest_failure_is_retained_while_local_controls_continue() {
         previous_interrupt,
         "an idle Task records no interrupt"
     );
-    let cached = task_status(repo.path(), Some("INF-123"))
-        .expect("cached degraded status succeeds")
-        .execution
-        .expect("execution");
+    let cached = task_status(
+        repo.path(),
+        Some("INF-123"),
+        loopflow::lf::navigation::command_merges,
+    )
+    .expect("cached degraded status succeeds")
+    .execution
+    .expect("execution");
     assert!(matches!(cached.observation, Observation::NotRequired));
     assert_eq!(
         runtime

@@ -12,7 +12,7 @@ impl SqliteStore {
     /// its claims carried.
     pub fn task_owner_emails(&self, repo: &str) -> StoreResult<Vec<(String, Option<String>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT o.person_key,o.person FROM task_ownership o
              JOIN tasks t ON t.id=o.task_id
              JOIN repository_plans w ON w.id=t.repository_id

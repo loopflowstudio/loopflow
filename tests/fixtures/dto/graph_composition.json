@@ -221,6 +221,10 @@
       }
     ],
     "breakpoints": [],
-    "sentence": "Runs on its own."
+    "sentence": "Runs on its own.",
+    "start": {
+      "action": "run",
+      "label": "Run: review"
+    }
   }
 }

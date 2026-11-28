@@ -3054,3 +3054,112 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
     assert_eq!(retained.wave_id.as_ref().unwrap().as_str(), wave_id);
     assert_eq!(retained.worktree.as_deref(), Some(checkout));
 }
+
+fn clone_origin(origin: &TestRepo, dir: &Path) -> std::path::PathBuf {
+    let output = Command::new("git")
+        .args([
+            "clone",
+            "-q",
+            origin.bare_path().to_str().unwrap(),
+            dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git clone: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(Command::new("git")
+        .current_dir(dir)
+        .args(["config", "user.email", "fixture@example.test"])
+        .status()
+        .unwrap()
+        .success());
+    dir.canonicalize().unwrap()
+}
+
+#[test]
+fn fresh_clone_reads_remote_plan_after_task_create_and_on_first_wave_show() {
+    let origin = TestRepo::new();
+    let home_a = tempfile::tempdir().unwrap();
+    let home_b = tempfile::tempdir().unwrap();
+    let home_c = tempfile::tempdir().unwrap();
+    let clones = tempfile::tempdir().unwrap();
+
+    // Home A creates a Wave and a Task, pushing them to the bare origin.
+    lf(
+        origin.path(),
+        home_a.path(),
+        &[
+            "task", "create", "--wave", "alpha", "--title", "A", "--json",
+        ],
+    );
+
+    // Home B clones, saves locally first (`lf task create`), then runs `lf task list`:
+    // it must still fetch A's plan on that first list.
+    let clone_b = clone_origin(&origin, &clones.path().join("b"));
+    lf(
+        &clone_b,
+        home_b.path(),
+        &["task", "create", "--title", "B", "--json"],
+    );
+    let listed = lf(&clone_b, home_b.path(), &["task", "list", "--json"]);
+    let mut titles: Vec<&str> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["task"]["name"].as_str().unwrap())
+        .collect();
+    titles.sort_unstable();
+    assert_eq!(titles, ["A", "B"]);
+
+    // Home C is a brand-new Machine with no store yet. `lf wave show` is its
+    // very first command and skips process admission: it must still fetch the
+    // remote plan and show Wave `alpha` with A's and B's Tasks.
+    let clone_c = clone_origin(&origin, &clones.path().join("c"));
+    let shown = lf(&clone_c, home_c.path(), &["wave", "show", "--json"]);
+    let names: Vec<&str> = shown["waves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["wave"]["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"alpha"), "expected wave alpha in {shown}");
+    let mut titles: Vec<&str> = shown["tasks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["task"]["name"].as_str().unwrap())
+        .collect();
+    titles.sort_unstable();
+    assert_eq!(titles, ["A", "B"]);
+}
+
+#[test]
+fn fresh_clone_task_detail_and_show_find_remote_task() {
+    let origin = TestRepo::new();
+    let home_a = tempfile::tempdir().unwrap();
+    let home_b = tempfile::tempdir().unwrap();
+    let clones = tempfile::tempdir().unwrap();
+
+    let created = lf(
+        origin.path(),
+        home_a.path(),
+        &["task", "create", "--title", "From A", "--json"],
+    )["task"]
+        .clone();
+    let id = created["id"].as_str().unwrap();
+
+    let clone_b = clone_origin(&origin, &clones.path().join("b"));
+
+    let detail = lf(&clone_b, home_b.path(), &["task", "detail", id, "--json"]);
+    assert_eq!(detail["task"]["id"], id);
+    assert_eq!(detail["task"]["name"], "From A");
+
+    // `lf task show` on another fresh home finds it the same way.
+    let home_c = tempfile::tempdir().unwrap();
+    let pane = lf(&clone_b, home_c.path(), &["task", "show", id, "--json"]);
+    assert_eq!(pane["task"]["id"], id);
+    assert_eq!(pane["task"]["title"], "From A");
+}

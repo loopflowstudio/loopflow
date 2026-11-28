@@ -180,52 +180,21 @@ fn _list_agents(value: &mut Value) {
     }
 }
 
-pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
-    if value.is_null() {
-        // YAML deserializes null into an empty mapping too. Use JSON's strict
-        // null here so only a nullable field can retain the declaration.
-        let mut check = Value::Mapping(Default::default());
-        insert(&mut check, path, Value::Null);
-        return serde_json::from_value::<Config>(
-            serde_json::to_value(check).expect("string keys and null"),
-        )
-        .map(|_| ())
-        .map_err(|error| invalid(format!("{}: {error}", path.join("."))));
-    }
-    if ["agent", "default_agent"].contains(&path[0]) {
-        let agent = value
-            .as_str()
-            .filter(|s| !s.trim().is_empty())
-            .ok_or_else(|| invalid("agent needs harness[:model]"))?;
-        // The retired `default_agent: claude,codex` spelling still reads
-        // until LOO-875 removes it.
-        if path[0] == "default_agent" {
-            for entry in super::agent_list(agent) {
-                validate_agent_policy(entry)?;
-            }
-        } else {
-            validate_agent_policy(agent)?;
-        }
-    }
-    let mut normalized = value.clone();
-    if path[0] == "agents" {
-        _list_agents(&mut normalized);
-        let entries = normalized
-            .as_sequence()
-            .ok_or_else(|| invalid("agents needs a list, such as claude,codex"))?;
-        for entry in entries {
-            validate_agent_policy(
-                entry
-                    .as_str()
-                    .filter(|s| !s.trim().is_empty())
-                    .ok_or_else(|| invalid("agents entries need harness[:model]"))?,
-            )?;
-        }
-    }
-    let mut check = super::catalog::defaults();
-    insert(&mut check, path, normalized);
-    let parsed = serde_yaml_ng::from_value::<Config>(check)
-        .map_err(|error| invalid(format!("{}: {error}", path.join("."))))?;
+#[cfg(test)]
+static CONFIG_DESERIALIZATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn deserialize_config_for_validation(value: Value, context: &str) -> Result<Config, LoadError> {
+    #[cfg(test)]
+    CONFIG_DESERIALIZATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    serde_yaml_ng::from_value::<Config>(value)
+        .map_err(|error| invalid(format!("{context}: {error}")))
+}
+
+fn validate_parsed_config(
+    parsed: &Config,
+    check_context: bool,
+    check_graph: Option<&str>,
+) -> Result<(), LoadError> {
     if let Some(model) = &parsed.claude.model {
         if model.trim().is_empty() {
             return Err(invalid(
@@ -242,6 +211,9 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
         return Err(invalid(
             "choose machine.tasks or machine.capacity in one declaration",
         ));
+    }
+    if parsed.machine.jobs == Some(0) {
+        return Err(invalid("machine.jobs must be a positive integer"));
     }
     for (provider, approver) in &parsed.approvers {
         provider
@@ -270,15 +242,111 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             .offer(&template.hardware)
             .map_err(invalid)?;
     }
-    if path[0] == "context" {
-        crate::prompt::context_budget::ContextBudgets::resolve(&parsed)
+    if check_context {
+        crate::prompt::context_budget::ContextBudgets::resolve(parsed)
             .map_err(|error| invalid(error.to_string()))?;
     }
-    if path[0] == "graph" {
-        crate::task_graph::validate_graph_name(value.as_str().expect("validated graph string"))
+    if let Some(graph) = check_graph {
+        crate::task_graph::validate_graph_name(graph)
             .map_err(|error| invalid(error.to_string()))?;
     }
     Ok(())
+}
+
+fn validate_agent_entry(key: &str, value: &Value) -> Result<(), LoadError> {
+    if ["agent", "default_agent"].contains(&key) {
+        let agent = value
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .ok_or_else(|| invalid("agent needs harness[:model]"))?;
+        // The retired `default_agent: claude,codex` spelling still reads
+        // until LOO-875 removes it.
+        if key == "default_agent" {
+            for entry in super::agent_list(agent) {
+                validate_agent_policy(entry)?;
+            }
+        } else {
+            validate_agent_policy(agent)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_agents_list(normalized: &mut Value) -> Result<(), LoadError> {
+    _list_agents(normalized);
+    let entries = normalized
+        .as_sequence()
+        .ok_or_else(|| invalid("agents needs a list, such as claude,codex"))?;
+    for entry in entries {
+        validate_agent_policy(
+            entry
+                .as_str()
+                .filter(|s| !s.trim().is_empty())
+                .ok_or_else(|| invalid("agents entries need harness[:model]"))?,
+        )?;
+    }
+    Ok(())
+}
+
+/// Overlay every non-selector setting in `map` onto `catalog::defaults()` once,
+/// deserialize `Config` once, and check all post-parse invariants.
+fn validate_mapping_once(map: &serde_yaml_ng::Mapping) -> Result<(), LoadError> {
+    let mut check: Option<Value> = None;
+    let mut has_context = false;
+    let mut graph_value: Option<String> = None;
+    for (key, value) in map {
+        let Some(key) = key.as_str() else {
+            return Err(invalid("setting names must be strings"));
+        };
+        if matches!(key, "skills" | "graphs") || value.is_null() {
+            continue;
+        }
+        validate_agent_entry(key, value)?;
+        let mut normalized = value.clone();
+        if key == "agents" {
+            validate_agents_list(&mut normalized)?;
+        }
+        if key == "context" {
+            has_context = true;
+        }
+        if key == "graph" {
+            let graph = normalized
+                .as_str()
+                .ok_or_else(|| invalid("graph: expected a string"))?;
+            graph_value = Some(graph.to_owned());
+        }
+        let target = check.get_or_insert_with(super::catalog::defaults);
+        insert(target, &[key], normalized);
+    }
+    let Some(check) = check else {
+        return Ok(());
+    };
+    let parsed = deserialize_config_for_validation(check, "settings")?;
+    validate_parsed_config(&parsed, has_context, graph_value.as_deref())
+}
+
+pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
+    if value.is_null() {
+        // YAML deserializes null into an empty mapping too. Use JSON's strict
+        // null here so only a nullable field can retain the declaration.
+        let mut check = Value::Mapping(Default::default());
+        insert(&mut check, path, Value::Null);
+        return serde_json::from_value::<Config>(
+            serde_json::to_value(check).expect("string keys and null"),
+        )
+        .map(|_| ())
+        .map_err(|error| invalid(format!("{}: {error}", path.join("."))));
+    }
+    validate_agent_entry(path[0], value)?;
+    let mut normalized = value.clone();
+    if path[0] == "agents" {
+        validate_agents_list(&mut normalized)?;
+    }
+    let mut check = super::catalog::defaults();
+    insert(&mut check, path, normalized);
+    let parsed = deserialize_config_for_validation(check, &path.join("."))?;
+    let graph = (path[0] == "graph").then(|| value.as_str().expect("validated graph string"));
+    validate_parsed_config(&parsed, path[0] == "context", graph)
 }
 
 fn validate_agent_policy(agent: &str) -> Result<(), LoadError> {
@@ -354,6 +422,7 @@ pub(crate) fn validate_preferences(
         }
         return Err(invalid("settings must be a mapping"));
     };
+    let mut to_validate = serde_yaml_ng::Mapping::new();
     for (key, value) in map {
         let key = key
             .as_str()
@@ -394,13 +463,22 @@ pub(crate) fn validate_preferences(
             !targeted || definition.applicability == super::catalog::Applicability::Launch
         }) {
             if !value.is_null() {
-                validate_value(&[key], value)?;
+                to_validate.insert(Value::String(key.to_owned()), value.clone());
             }
         } else if strict || targeted {
             return Err(invalid(format!("unknown or ineligible setting {key}")));
         } else {
             tracing::warn!(key, "unknown LF configuration key");
         }
+    }
+    if let Err(err) = validate_mapping_once(&to_validate) {
+        // Fall back to per-key validation so error messages name the failing key.
+        for (key, value) in &to_validate {
+            if let Some(key) = key.as_str() {
+                validate_value(&[key], value)?;
+            }
+        }
+        return Err(err);
     }
     Ok(())
 }
@@ -473,14 +551,61 @@ pub(super) fn filter_file_preferences(
         *value = Value::Mapping(Default::default());
     }
     super::normalize_preferences(value);
-    _filter_file_settings(value, &mut Vec::new(), file, source, scope);
+    _filter_file_structure(value, &mut Vec::new(), file, source, scope);
+    let Some(root) = value.as_mapping_mut() else {
+        return;
+    };
+    _validate_or_filter_block(root, Vec::new(), file);
+    if let Some(skills) = root.get_mut("skills").and_then(Value::as_mapping_mut) {
+        for (skill_key, target) in skills.iter_mut() {
+            if let (Some(skill_name), Some(skill_map)) =
+                (skill_key.as_str(), target.as_mapping_mut())
+            {
+                _validate_or_filter_block(
+                    skill_map,
+                    vec!["skills".to_owned(), skill_name.to_owned()],
+                    file,
+                );
+            }
+        }
+    }
+    if let Some(graphs) = root.get_mut("graphs").and_then(Value::as_mapping_mut) {
+        for (graph_key, graph_value) in graphs.iter_mut() {
+            let Some(graph_name) = graph_key.as_str() else {
+                continue;
+            };
+            let Some(steps) = graph_value
+                .as_mapping_mut()
+                .and_then(|g| g.get_mut("steps"))
+                .and_then(Value::as_mapping_mut)
+            else {
+                continue;
+            };
+            for (step_key, step_value) in steps.iter_mut() {
+                if let (Some(step_name), Some(step_map)) =
+                    (step_key.as_str(), step_value.as_mapping_mut())
+                {
+                    _validate_or_filter_block(
+                        step_map,
+                        vec![
+                            "graphs".to_owned(),
+                            graph_name.to_owned(),
+                            "steps".to_owned(),
+                            step_name.to_owned(),
+                        ],
+                        file,
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Account routing preferences the released lf still reads from personal
 /// files. This lf ignores them without a warning; LOO-919 deletes this list.
 const RETIRED_SETTINGS: &[&[&str]] = &[&["account"], &["accounts"]];
 
-fn _filter_file_settings(
+fn _filter_file_structure(
     value: &mut Value,
     path: &mut Vec<String>,
     file: &std::path::Path,
@@ -529,7 +654,7 @@ fn _filter_file_settings(
         }
         let mut reason = (!known).then_some("unknown setting");
         if known {
-            _filter_file_settings(value, path, file, source, scope);
+            _filter_file_structure(value, path, file, source, scope);
             if selector {
                 if !value.is_mapping() {
                     reason = Some("settings must be a mapping");
@@ -538,12 +663,10 @@ fn _filter_file_settings(
                 }
             } else {
                 let preference: Vec<_> = preference.iter().map(String::as_str).collect();
-                if definition.is_some_and(|definition| definition.key == preference.join(".")) {
-                    if validate_scope(&path.join("."), source, scope).is_err() {
-                        reason = Some("setting does not apply here");
-                    } else if validate_value(&preference, value).is_err() {
-                        reason = Some("invalid value");
-                    }
+                if definition.is_some_and(|definition| definition.key == preference.join("."))
+                    && validate_scope(&path.join("."), source, scope).is_err()
+                {
+                    reason = Some("setting does not apply here");
                 }
             }
         }
@@ -552,6 +675,55 @@ fn _filter_file_settings(
         }
         path.pop();
         reason.is_none()
+    });
+}
+
+/// Validate a block in one deserialization, falling back to per-leaf filtering
+/// only on error to pinpoint and drop offending keys while keeping neighbours.
+fn _validate_or_filter_block(
+    map: &mut serde_yaml_ng::Mapping,
+    mut prefix: Vec<String>,
+    file: &std::path::Path,
+) {
+    if validate_mapping_once(map).is_err() {
+        _filter_invalid_leaves(map, &mut prefix, &mut Vec::new(), file);
+    }
+}
+
+fn _filter_invalid_leaves(
+    map: &mut serde_yaml_ng::Mapping,
+    full_path: &mut Vec<String>,
+    preference: &mut Vec<String>,
+    file: &std::path::Path,
+) {
+    map.retain(|key, value| {
+        let Some(key) = key.as_str() else {
+            return false;
+        };
+        if preference.is_empty() && matches!(key, "skills" | "graphs") {
+            return true;
+        }
+        full_path.push(key.to_owned());
+        preference.push(key.to_owned());
+        if let Some(child) = value.as_mapping_mut() {
+            _filter_invalid_leaves(child, full_path, preference, file);
+        }
+        let key_path = preference.join(".");
+        let definition = super::catalog::definition(&key_path);
+        let keep = if definition.is_some_and(|definition| definition.key == key_path) {
+            let parts: Vec<_> = preference.iter().map(String::as_str).collect();
+            if validate_value(&parts, value).is_err() {
+                super::reader::warn_setting(file, full_path, "invalid value");
+                false
+            } else {
+                true
+            }
+        } else {
+            true
+        };
+        preference.pop();
+        full_path.pop();
+        keep
     });
 }
 
@@ -695,10 +867,11 @@ pub(crate) fn resolve_with(
     ];
     for layer in layers.iter().chain(&invocation) {
         let mut layer = layer.clone();
-        if matches!(
+        let file_filtered = matches!(
             layer.source,
             ConfigSource::Personal | ConfigSource::Repository
-        ) {
+        );
+        if file_filtered {
             filter_file_preferences(&mut layer.value, &layer.path, layer.source, layer.scope);
         } else {
             super::normalize_preferences(&mut layer.value);
@@ -706,13 +879,16 @@ pub(crate) fn resolve_with(
         if layer.value.is_null() {
             continue;
         }
-        validate_preferences(&layer.value, false, true)
-            .map_err(|error| invalid(format!("{}: {error}", layer.path.display())))?;
-        if let Some(values) = layer.value.as_mapping() {
-            for key in values.keys().filter_map(Value::as_str) {
-                if !["skills", "graphs"].contains(&key) && preference_path(key).is_ok() {
-                    validate_scope(key, layer.source, layer.scope)
-                        .map_err(|error| invalid(format!("{}: {error}", layer.path.display())))?;
+        if !file_filtered {
+            validate_preferences(&layer.value, false, true)
+                .map_err(|error| invalid(format!("{}: {error}", layer.path.display())))?;
+            if let Some(values) = layer.value.as_mapping() {
+                for key in values.keys().filter_map(Value::as_str) {
+                    if !["skills", "graphs"].contains(&key) && preference_path(key).is_ok() {
+                        validate_scope(key, layer.source, layer.scope).map_err(|error| {
+                            invalid(format!("{}: {error}", layer.path.display()))
+                        })?;
+                    }
                 }
             }
         }
@@ -1990,5 +2166,70 @@ mod tests {
                 ConfigSource::Repository
             );
         }
+    }
+
+    #[test]
+    fn valid_file_validates_with_one_config_deserialization() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let mut value: Value = serde_yaml_ng::from_str(
+            "agent: claude\n\
+             yolo: false\n\
+             chrome: true\n\
+             stream: dev\n\
+             merge_method: squash\n\
+             branch_names: {schema: '{name}'}\n",
+        )
+        .unwrap();
+        let before = super::CONFIG_DESERIALIZATIONS.load(std::sync::atomic::Ordering::Relaxed);
+        super::filter_file_preferences(
+            &mut value,
+            std::path::Path::new("config.yaml"),
+            ConfigSource::Personal,
+            SettingScope::Global,
+        );
+        let after = super::CONFIG_DESERIALIZATIONS.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            after - before,
+            1,
+            "a valid file with 6 keys must deserialize Config exactly once"
+        );
+        assert_eq!(value["agent"], Value::from("claude"));
+        assert_eq!(value["stream"], Value::from("dev"));
+    }
+
+    #[test]
+    fn invalid_stream_or_agent_is_dropped_while_keeping_valid_neighbours() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let mut value: Value = serde_yaml_ng::from_str(
+            "agent: claude\n\
+             stream: bogus\n\
+             unknown_key: 123\n\
+             yolo: false\n",
+        )
+        .unwrap();
+        super::filter_file_preferences(
+            &mut value,
+            std::path::Path::new("config.yaml"),
+            ConfigSource::Personal,
+            SettingScope::Global,
+        );
+        assert_eq!(value["agent"], Value::from("claude"));
+        assert_eq!(value["yolo"], Value::from(false));
+        assert!(value.get("stream").is_none());
+        assert!(value.get("unknown_key").is_none());
+
+        let mut bad_agent: Value = serde_yaml_ng::from_str(
+            "agent: nonexistent_harness\n\
+             yolo: false\n",
+        )
+        .unwrap();
+        super::filter_file_preferences(
+            &mut bad_agent,
+            std::path::Path::new("config.yaml"),
+            ConfigSource::Personal,
+            SettingScope::Global,
+        );
+        assert!(bad_agent.get("agent").is_none());
+        assert_eq!(bad_agent["yolo"], Value::from(false));
     }
 }

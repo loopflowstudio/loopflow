@@ -96,6 +96,18 @@ struct ServerProtocolTests {
         #expect(status.clients.first?.requests == 12)
     }
 
+    @Test func serverDiagnosticsSharesTheRustContract() throws {
+        #expect(try encoded(.request(id: "diagnostics-1", operation: .serverDiagnostics, select: nil, requestID: nil)) == value("server_diagnostics"))
+        guard case .response("diagnostics-1", _, let result, nil) = try message("server_diagnostics_answer") else {
+            Issue.record("Missing diagnostics response"); return
+        }
+        let diagnostics = try result.decode(ServerDiagnostics.self)
+        #expect(diagnostics.threads == 16)
+        #expect(diagnostics.storeOpens == 4)
+        #expect(diagnostics.spawns == 2)
+        #expect(diagnostics.heldFacts == 11)
+    }
+
     @Test func errorsBranchOnTheirCode() {
         let unknown = ServerError(code: "outcome_unknown", message: "launch ended without a result", data: .null)
         #expect(unknown.code == .outcomeUnknown)
@@ -267,6 +279,8 @@ struct ServerProtocolTests {
             ("task_auto_off", "auto-1", .taskAutoOff(directory: "/repo", issue: "LOO-1")),
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
             ("task_report", "report-1", .taskReport(directory: "/repo", issue: "LOO-1", message: "Demo recorded")),
+            ("task_pause", "pause-1", .taskPause(directory: "/repo", issue: "LOO-1")),
+            ("task_unpause", "unpause-1", .taskUnpause(directory: "/repo", issue: "LOO-1", run: true)),
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
             ("session_steer", "steer-2", .sessionSteer(directory: "/repo", session: nil, wave: "product",
                                                        message: "Ship the smallest slice first")),
@@ -376,13 +390,18 @@ struct ServerProtocolTests {
         guard case .response(_, _, .array(let entries)) = try answer("skill_entries") else {
             Issue.record("Missing skill.list result"); return
         }
-        #expect(entries.count == 3)
-        // A repository skill that extends its builtin says so; the others carry no mark.
+        #expect(entries.count == 4)
+        // Repository skills report their builtin relation and any `extends:` target.
         let marks = entries.map { entry -> JSONValue? in
             if case .object(let fields) = entry { return fields["builtin"] }
             return nil
         }
-        #expect(marks == [.null, .string("extends"), .null])
+        #expect(marks == [.null, .string("extends"), .null, .null])
+        let parents = entries.map { entry -> JSONValue? in
+            if case .object(let fields) = entry { return fields["extends"] }
+            return nil
+        }
+        #expect(parents == [.null, .string("lf:qa"), .string("implement"), .null])
 
     }
 

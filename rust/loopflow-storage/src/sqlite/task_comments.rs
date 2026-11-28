@@ -164,7 +164,7 @@ impl SqliteStore {
     /// a breakpoint reply reaches the next step as its handoff.
     pub fn task_undirected_comments(&self, task: &TaskId) -> StoreResult<Vec<TaskComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT id,body,author,created_at FROM task_comments c
              WHERE task_id=?1
                AND NOT EXISTS(SELECT 1 FROM steers s WHERE s.source='comment:'||c.id)
@@ -196,7 +196,7 @@ impl SqliteStore {
             refresh_error: None,
         };
         {
-            let mut query = tx.prepare(
+            let mut query = tx.prepare_cached(
                 "SELECT c.id,c.body,c.author,c.created_at,
                     EXISTS(SELECT 1 FROM tracker_actions e WHERE e.task_id=c.task_id AND e.kind='comment'
                         AND e.subject=c.id AND e.phase IN ('queued','sent')),
@@ -282,7 +282,7 @@ impl SqliteStore {
 
     pub fn pending_task_comments(&self, task: &TaskId) -> StoreResult<Vec<TaskComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT c.id,c.body,c.author,c.created_at FROM task_comments c
              WHERE c.task_id=?1 AND EXISTS(SELECT 1 FROM tracker_actions e WHERE e.task_id=c.task_id
                  AND e.kind='comment' AND e.subject=c.id AND e.phase IN ('queued','sent'))

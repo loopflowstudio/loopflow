@@ -11,7 +11,7 @@ A crash, a reboot or a closed terminal loses less than it looks like.
 |---|---|---|
 | Conversations (interactive & headless) | `~/.lf/loopflow.db`, `~/.lf/history.db`, and native provider transcripts | `lf resume --task <ID>` or `lf resume <SESSION>` |
 | Task worktree, branch, PR, and thread | Beside your repo and on GitHub/tracker | `lf task run <ID>` |
-| Task work sessions and runs | Auto-restarted by the server unless you quit or interrupted them | `lf task status <ID>` |
+| Task work sessions and runs | The server restarts conversations after crashes. Interrupted or paused runs stay stopped. | `lf task status <ID>` |
 | Stopped Graph runs | Recorded as history with per-step exit codes | `lf task runs <ID>` · `lf graph show <RUN_ID>` |
 | Uncommitted files | In the worktree (`lf wt prune` saves unpushed work to `refs/lf/pruned/…` first) | `lf wt list` |
 
@@ -19,6 +19,7 @@ A crash, a reboot or a closed terminal loses less than it looks like.
 
 ```bash
 lf doctor                                    # installation, store, lock contention, PTYs, stray processes
+lf server diagnostics --json                 # server threads, SQLite opens, spawns, and held facts
 lf task status <ID>                          # Graph step, conversation state, and reason
 lf graph show <RUN_ID>                       # per-step status and exit codes
 lf session history show <SESSION_ID> --final # agent's final output
@@ -33,6 +34,7 @@ lf graph list --runs --state current         # live Graph runs
 | Task is waiting for your input | `lf resume --task <ID>` |
 | Run is heading the wrong way | `lf steer <ID> "address the latest feedback"` |
 | Need to stop it right now | `lf task interrupt <ID>` |
+| Need to hold the Graph and keep talking to the Task | `lf task pause <ID>` (`lf task unpause <ID> --run` to resume) |
 | Stopped at a failed step, ready to retry | `lf task run <ID>` |
 | Need to redo an earlier step | `lf task run <ID> --from <step>` |
 
@@ -51,16 +53,21 @@ Dirty files under a live Graph are ongoing progress. An idle Task Graph does not
 prove helper Sessions are idle, and a finished launcher does not prove its
 interactive Session closed: check Sessions separately.
 
-`lf task interrupt <ID>` stops a running Graph: an agent step ends at once, an
-operation finishes and nothing follows, and the run exits 130. With nothing
-live it records nothing and says so.
+`lf task interrupt <ID>` stops a running Graph. An agent step and jobs in its
+worker’s OS session exit. A command already in progress finishes, then the run
+exits 130. If nothing is running, interrupt reports that.
+
+`lf task pause <ID>` holds off new Graph runs and worker recovery until you
+unpause. The conversation stays available. If status still reads `Pausing`
+after an interrupted cleanup, repeat the pause command. See
+[Pause a Task](work.md#pause-a-task).
 
 If the Task's worktree never finished being created, status keeps the Task and
 names the exact path and branch to restore before launching.
 
 ## The Task is idle, but waiting on something
 
-Task state says what the Task is doing (`idle`, `active`, `moving`,
+Task state says what the Task is doing (`idle`, `active`, `moving`, `paused`,
 …); whether anyone owns it is separate (`lf task claim`, `lf task unassign`). What it is waiting on (a child Task, review, CI, merge) is its
 `reason`; Desktop's condition, with the evidence behind it, is in `lf task show`:
 
@@ -136,7 +143,7 @@ through your `agents` list; once exhausted, Graph steps wait 5, 15, 30, then
 
 ```bash
 lf set --global agents claude,codex
-lf config settings --skill gate --explain
+lf config settings --skill qa --explain
 ```
 
 Sign in again natively on the execution Machine if credentials expired, then
@@ -233,17 +240,26 @@ and saves unpushed commits under `refs/lf/pruned/<branch>/<commit>` first.
 `scripts/disk-cleanup.sh` also reclaims idle build caches (`target`,
 `node_modules`, `.venv`, `DerivedData`) not held by any running process.
 
+The server's hourly maintenance rotates `~/.lf/logs/lf.log` at 32 MB (keeping 4
+files) and removes finished `terminal-*.log` and `graph-*.log` files untouched
+for 30 days, completed `context-deliveries/*.json` files after 7 days, old
+`loopflow.db.backup-*` snapshots once the next schema has been in use for 7
+days, and lock files whose owners have ended.
+
 ## Processes (`lf holder run`, strays, and `ps`)
 
 ```bash
 ps -axo pid,etime,command | grep -E '[ /]lf( |$)'
 lf machine doctor --json                     # lists stray agent processes by PID
+lf server diagnostics --json                 # server threads, SQLite opens, spawns, and held facts
 ```
 
-Expect one `lf server run`, one `lf holder run` per build with open work
-sessions (each exits a minute after its last conversation ends), and one `lf`
-per active Graph or headless run. Stop leftovers individually by PID, never
-`pkill lf`, which kills live work in other checkouts.
+Expect one `lf server run` for `~/.lf`, one `lf holder run` per build with open
+work sessions (each exits a minute after its last conversation ends), and one
+`lf` per active Graph or headless run. Servers started for a custom `LF_HOME`
+exit after 10 minutes idle or when that directory is removed, taking their
+holders with them. Stop leftovers individually by PID, never `pkill lf`, which
+kills live work in other checkouts.
 
 ## A Wave isn't moving
 

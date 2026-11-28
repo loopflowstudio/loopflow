@@ -353,6 +353,58 @@ definitions! {
     logs: LogConfig = "{linear_requests: false}", Personal, Merge, HostLocal, NextRead, Loopflow, "Local diagnostic logging";
 }
 
+pub static MACHINE_DEFINITIONS: &[Definition] = &[
+    Definition {
+        key: "machine.tasks",
+        schema: || schemars::schema_for!(Option<String>),
+        default: "null",
+        category: Category::Machines,
+        applicability: Applicability::PersonalScoped,
+        combination: Combination::Replace,
+        portability: Portability::Portable,
+        lifecycle: Lifecycle::NextLaunch,
+        description: "Preferred durable Machine ID for new Tasks",
+        unset: None,
+    },
+    Definition {
+        key: "machine.session",
+        schema: || schemars::schema_for!(Option<String>),
+        default: "null",
+        category: Category::Machines,
+        applicability: Applicability::PersonalScoped,
+        combination: Combination::Replace,
+        portability: Portability::Portable,
+        lifecycle: Lifecycle::NextLaunch,
+        description: "Preferred durable Machine ID for new Sessions",
+        unset: None,
+    },
+    Definition {
+        key: "machine.capacity",
+        schema: || schemars::schema_for!(Option<String>),
+        default: "null",
+        category: Category::Machines,
+        applicability: Applicability::PersonalScoped,
+        combination: Combination::Replace,
+        portability: Portability::Portable,
+        lifecycle: Lifecycle::NextLaunch,
+        description: "Preferred local pool or on-demand capacity name for new Tasks",
+        unset: None,
+    },
+    Definition {
+        key: "machine.jobs",
+        schema: || schemars::schema_for!(Option<usize>),
+        default: "null",
+        category: Category::Machines,
+        applicability: Applicability::Personal,
+        combination: Combination::Replace,
+        portability: Portability::HostLocal,
+        lifecycle: Lifecycle::NextLaunch,
+        description:
+            "Build job cap per Graph step on this Machine; unset divides cores across running steps",
+        unset: Some("Automatic"),
+    },
+];
+
 fn all_definitions() -> impl Iterator<Item = &'static Definition> {
     DEFINITIONS
         .iter()
@@ -360,6 +412,7 @@ fn all_definitions() -> impl Iterator<Item = &'static Definition> {
         .chain(FORWARD_DEFINITIONS)
         .chain(CODEX_DEFINITIONS)
         .chain(CLAUDE_DEFINITIONS)
+        .chain(MACHINE_DEFINITIONS)
 }
 
 pub(super) fn has_child_settings(key: &str) -> bool {

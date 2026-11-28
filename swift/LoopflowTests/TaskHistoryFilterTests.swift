@@ -268,7 +268,7 @@ struct TaskHistoryFilterTests {
         for id in ["LOO-318", "recent", "LOO-309"] {
             let task = try #require(model.task(id: id)?.task)
             let bar = TaskWorkflowBar(model: model, task: task, work: .available(unstarted))
-            let start = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button()
+            let start = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").button()
             #expect(start.isDisabled() == (id != "LOO-309"))
         }
     }

@@ -47,6 +47,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case taskChanges(issue: String, base: String, head: String?)
     case taskDiff(issue: String, path: String?, base: String, head: String?, draft: String?)
     case taskFile(issue: String, path: String, at: String?)
+    case taskFilesSymbols(issue: String, name: String, path: String?)
+    case taskFilesGrep(issue: String, query: String, wholeWord: Bool)
+    case taskFilesFind(issue: String, query: String?, limit: UInt?)
     case taskFiles(issue: String, path: String, cursor: String?, showIgnored: Bool)
     case waveList
     case machineSelf
@@ -123,6 +126,13 @@ public enum ServedRead: Equatable, Sendable, Encodable {
                 + (head.map { ["--head", $0] } ?? []) + (draft == nil ? [] : ["--draft"])
         case .taskFile(let issue, let path, let at):
             return ["task", "file", issue, path, "--json"] + argument("--at", at)
+        case .taskFilesSymbols(let issue, let name, let path):
+            return ["task", "symbols", issue, "--json"] + argument("--path", path) + ["--", name]
+        case .taskFilesGrep(let issue, let query, let wholeWord):
+            return ["task", "grep", issue, "--json"] + (wholeWord ? ["--whole-word"] : []) + ["--", query]
+        case .taskFilesFind(let issue, let query, let limit):
+            return ["task", "find", issue, "--json"] + argument("--limit", limit.map(String.init))
+                + (query.map { ["--", $0] } ?? [])
         case .taskFiles(let issue, let path, let cursor, let showIgnored):
             return ["task", "files", issue, path, "--json"] + argument("--cursor", cursor)
                 + (showIgnored ? ["--show-ignored"] : [])
@@ -231,6 +241,12 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("task.diff", ["issue": issue, "path": path, "base": base, "head": head, "draft": draft])
         case .taskFile(let issue, let path, let at):
             TaggedFields("task.file", ["issue": issue, "path": path, "at": at])
+        case .taskFilesSymbols(let issue, let name, let path):
+            TaggedFields("task.files.symbols", ["issue": issue, "name": name, "path": path])
+        case .taskFilesGrep(let issue, let query, let wholeWord):
+            TaggedFields("task.files.grep", ["issue": issue, "query": query, "whole_word": wholeWord])
+        case .taskFilesFind(let issue, let query, let limit):
+            TaggedFields("task.files.find", ["issue": issue, "query": query, "limit": limit])
         case .taskFiles(let issue, let path, let cursor, let showIgnored):
             TaggedFields("task.files", ["issue": issue, "path": path, "cursor": cursor, "show_ignored": showIgnored])
         case .waveList: TaggedFields("wave.list")
@@ -322,6 +338,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case repoTrackerAnswer(directory: String, action: String, answer: LostAnswer)
     case taskSteer(directory: String, issue: String, message: String)
     case taskReport(directory: String, issue: String, message: String)
+    case taskPause(directory: String, issue: String)
+    case taskUnpause(directory: String, issue: String, run: Bool)
     case taskInterrupt(directory: String, issue: String)
     case taskMove(directory: String, issue: String, wave: String?, machine: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
@@ -426,6 +444,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["repo", "tracker", "answer", action, answer == .keepTheirs ? "--keep-theirs" : "--use-mine", "--json"]
         case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
         case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
+        case .taskPause(_, let issue): return ["task", "pause", issue, "--json"]
+        case .taskUnpause(_, let issue, let run): return ["task", "unpause", issue, "--json"] + Self.flags([("--run", run)])
         case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
         case .taskMove(_, let issue, let wave, let machine):
             if let machine { return ["task", "move", issue, "--machine", machine, "--json"] }
@@ -602,6 +622,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.steer", ["directory": directory, "issue": issue, "message": message])
         case .taskReport(let directory, let issue, let message):
             TaggedFields("task.report", ["directory": directory, "issue": issue, "message": message])
+        case .taskPause(let directory, let issue):
+            TaggedFields("task.pause", ["directory": directory, "issue": issue])
+        case .taskUnpause(let directory, let issue, let run):
+            TaggedFields("task.unpause", ["directory": directory, "issue": issue, "run": run])
         case .taskInterrupt(let directory, let issue):
             TaggedFields("task.interrupt", ["directory": directory, "issue": issue])
         case .taskMove(let directory, let issue, let wave, let machine):
@@ -1128,11 +1152,23 @@ public struct RegistryQuery: Sendable {
         try await serve(.taskDiff(issue: issue, path: path, base: base, head: head, draft: draft)).decode(TaskDiffSnapshot.self)
     }
 
+    public func taskSymbols(issue: String, name: String, path: String? = nil) async throws -> TaskSymbols {
+        try await serve(.taskFilesSymbols(issue: issue, name: name, path: path)).decode(TaskSymbols.self)
+    }
+
+    public func taskGrep(issue: String, query: String, wholeWord: Bool) async throws -> TaskGrepResults {
+        try await serve(.taskFilesGrep(issue: issue, query: query, wholeWord: wholeWord)).decode(TaskGrepResults.self)
+    }
+
+    public func taskFind(issue: String, query: String? = nil, limit: UInt? = nil) async throws -> TaskFileInventory {
+        try await serve(.taskFilesFind(issue: issue, query: query, limit: limit)).decode(TaskFileInventory.self)
+    }
+
     /// One page of a checkout directory's immediate entries, directories first;
     /// `cursor` is the previous page's `nextCursor`. The empty path is the root.
-    public func taskFiles(issue: String, directory: String, cursor: String? = nil) async throws -> TaskDirectory {
+    public func taskFiles(issue: String, directory: String, cursor: String? = nil, showIgnored: Bool = false) async throws -> TaskDirectory {
         try await serve(.taskFiles(issue: issue, path: directory.isEmpty ? "." : directory,
-                                   cursor: cursor, showIgnored: false)).decode(TaskDirectory.self)
+                                   cursor: cursor, showIgnored: showIgnored)).decode(TaskDirectory.self)
     }
 
     /// One file of the Task worktree, or its read-only version at commit `at`

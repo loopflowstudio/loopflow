@@ -345,6 +345,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
         "runs_on": null,
@@ -366,6 +367,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "active",
@@ -394,7 +396,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -439,6 +442,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "runs_on": null,
@@ -460,6 +464,7 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "backlog",
+        "working_group": null,
         "selection_states": [
           "open",
           "unstarted",
@@ -488,7 +493,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -533,6 +539,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Linear Task is canceled"
         },
         "runs_on": null,
@@ -546,6 +553,7 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -572,7 +580,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -617,6 +626,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runs_on": null,
@@ -638,6 +648,7 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -664,7 +675,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       }
     ]
   },
@@ -1016,6 +1028,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
         "runs_on": null,
@@ -1037,6 +1050,7 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "idle",
@@ -1065,7 +1079,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -1129,6 +1144,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
         "runs_on": null,
@@ -1150,6 +1166,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "available",
@@ -1179,7 +1196,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -1224,6 +1242,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Linear Task is canceled"
         },
         "runs_on": null,
@@ -1237,6 +1256,7 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -1263,7 +1283,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -1308,6 +1329,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runs_on": null,
@@ -1329,6 +1351,7 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -1355,7 +1378,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       }
     ]
   },
@@ -1716,6 +1740,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
         "runs_on": null,
@@ -1737,6 +1762,7 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "idle",
@@ -1765,7 +1791,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -1829,6 +1856,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
         "runs_on": null,
@@ -1850,6 +1878,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "busy",
@@ -1879,7 +1908,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -1924,6 +1954,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Linear Task is canceled"
         },
         "runs_on": null,
@@ -1937,6 +1968,7 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -1963,7 +1995,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -2008,6 +2041,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runs_on": null,
@@ -2029,6 +2063,7 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -2055,7 +2090,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       }
     ]
   },
@@ -2416,6 +2452,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
         "runs_on": null,
@@ -2437,6 +2474,7 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "idle",
@@ -2465,7 +2503,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -2529,6 +2568,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
         "runs_on": null,
@@ -2542,6 +2582,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "backlog",
+        "working_group": null,
         "selection_states": [
           "busy",
           "active",
@@ -2570,7 +2611,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -2615,6 +2657,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Linear Task is canceled"
         },
         "runs_on": null,
@@ -2628,6 +2671,7 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -2654,7 +2698,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -2699,6 +2744,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runs_on": null,
@@ -2720,6 +2766,7 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -2746,7 +2793,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       }
     ]
   },
@@ -3118,6 +3166,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
         "runs_on": null,
@@ -3139,6 +3188,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "available",
@@ -3170,7 +3220,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -3223,6 +3274,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
         "runs_on": null,
@@ -3244,6 +3296,7 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "idle",
@@ -3272,7 +3325,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -3317,6 +3371,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Linear Task is canceled"
         },
         "runs_on": null,
@@ -3330,6 +3385,7 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -3356,7 +3412,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       },
       {
         "actions": {
@@ -3401,6 +3458,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runs_on": null,
@@ -3422,6 +3480,7 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -3448,7 +3507,8 @@
             "synced_at": null
           },
           "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
+        },
+        "breakpoint_arrival": null
       }
     ]
   }

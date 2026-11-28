@@ -17,8 +17,9 @@ corrections.
 
 **Build a substantial end-to-end pass.** Carry the change from what a person
 does to what gets stored, then run it. Keep building while the next item is
-the same kind of work. Pause when the next item needs a decision or review,
-or when what you learned could change the plan.
+the same kind of work, and do not start another planned pass when context is
+already heavy; stop cleanly with room to close out. Pause when the next item
+needs a decision or review, or when what you learned could change the plan.
 
 Size the diff so one person can review it in a sitting. Around 2,000 lines
 of non-test change is a soft ceiling. Stop earlier when the work is ready
@@ -28,11 +29,7 @@ for review.
 plan wrong: the join between two parts, the data shape everything depends on,
 the step nobody has tried.
 
-**Let the slice change the plan.** If the pieces don't fit, say so in the plan
-and stop building on the part that broke.
-
-A small plan is one slice. Work can be divided between Tasks either way, by
-layer or end to end; inside a Task, every slice goes end to end.
+A small plan is one slice; inside a Task, every slice goes end to end.
 
 ## Build it well
 
@@ -45,10 +42,9 @@ code is simple and sharing it would tie two areas together for nothing. The
 test: can you say where else this job is done, and why you joined it or
 didn't?
 
-**Reshape what exists.** A new type means a new real-world concept. If the
-codebase uses `@dataclass`, use `@dataclass`. No flags, v2 types, adapters,
-fallbacks, dual writes or setup nothing uses yet, unless the plan calls for
-one and says when it is deleted.
+**Reshape what exists.** Use the constructs the codebase already uses for the
+job. No flags, v2 types, adapters, fallbacks, dual writes or setup nothing
+uses yet, unless the plan calls for one and says when it is deleted.
 
 **Move real consumers end to end,** with any data migration in the same
 slice.
@@ -59,34 +55,30 @@ every query you add or change, bound what a hot path reads, keep writes
 short, and time it at realistic size.
 
 **Write the tests.** New behavior gets a test in the same slice, and so does
-behavior you changed. Assert on the intended behavior and user experience,
-not internal code flow or mechanics.
+behavior you changed.
 
-**Finish the slice by deleting.** Once the new path works, remove what it
-replaced, with its tests and docs. Don't repair or extend code the plan
-deletes; when its test fails, delete the test and cover the behavior on the
-surviving path. A finished slice leaves one way to do its job.
-
-**Stay in scope.** Unifying with code that already does this job is part of
-the slice. New behavior is not: other ideas go in `scratch/questions.md`.
+**Finish the slice by deleting.** Remove what the new path replaced, with its
+tests and docs. Don't repair or extend code the plan deletes; when its test
+fails, delete it and cover the behavior on the surviving path.
 
 **Commit each coherent change** as you finish it, with a message that says
-what changed and why. Committing and pushing are always safe here: history
-keeps everything, and nothing needs the branch to stay clean. Whatever you
-leave is committed for you when the step ends.
+what changed and why. Whatever you leave is committed when the step ends.
 
 ## Check
 
 Test the behavior you changed, with the narrowest test that names it, never a
 whole package. That is your share. The usual mistake is running too many
-tests, not too few. Gate and CI come after you and run the suites, including
+tests, not too few. CI comes after you and runs the suites, including
 the ones named in "Done when", so a full run here only makes everything wait.
 Maximize the throughput of the whole software factory, not the certainty of
 this step.
 
-One build at a time. Skip builds for prose-only edits, and don't rerun a
-passing command without a change. A check that can't run here goes to gate; a
-real failure still gets fixed.
+Many agents share this Machine: run one build at a time, and avoid release
+builds (`--release`, release wheels), workspace-wide compiles or linters, and
+heavyweight E2E or browser suites unless this slice specifically requires
+them — defer full suites to CI. Skip builds for prose-only edits, and don't
+rerun a passing command without a change. A check that can't run here goes to
+CI; a real failure still gets fixed.
 
 Run the slice the way a person would and reread the docs against what you
 built. Where behavior is missing, say so rather than weakening the docs.
@@ -96,15 +88,25 @@ built. Where behavior is missing, say so rather than weakening the docs.
 Unclear: make the simplest reversible choice and record it in
 `scratch/questions.md`. Contradicted, by a counterexample that breaks the
 slice, the data model or the deletion path: stop the work that depends on it
-and revise the plan. Never note a contradiction and keep building on it.
+and note what broke in the plan. Never note a contradiction and build on it.
 
-Mark the plan's remaining work in place: what this slice built, what it
-taught, what is next. If you had to discover an undocumented convention, add
-it to the agent guide so the next run doesn't rediscover it.
+If you had to discover an undocumented convention, add it to the agent guide
+so the next run doesn't rediscover it. When the change is ready for someone to
+read, write its reading order as `lf help tour` describes.
 
-When the change is ready for someone to read, write its reading order as
-`lf help tour` describes.
+## When deciding a loop
 
-This is one step of someone's work. Stay in this checkout and build the Task
-you were given; don't pick up backlog, create a second Task or start a
-competing implementation. Publishing and landing belong to the caller.
+- **With `scratch/plan.md`:** return `iterate` while the plan lists a pass not
+  yet built, naming that pass in the summary; return `advance` once the planned
+  passes are built. Before returning `iterate`, collapse the finished pass in
+  `scratch/plan.md` to one line with its commit and note any finding that
+  changes the next pass, so `scratch/plan.md` stays lean for downstream steps.
+  When a counterexample breaks the plan, note what broke in `scratch/plan.md`
+  and return `advance` so review and realign can replan rather than iterating
+  onto a broken plan.
+- **With no `scratch/plan.md`:** the brief is the plan; don't write one. First
+  judge whether it is one bounded change a reviewer reads in a sitting. If it
+  isn't, or a counterexample contradicts it, return `blocked` before building,
+  saying what it would take, so the Graph stops before shipping. Otherwise
+  build it in one pass and return `advance`, iterating only for a concrete
+  remaining piece within the brief.

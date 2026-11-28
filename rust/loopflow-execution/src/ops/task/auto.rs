@@ -38,7 +38,7 @@ pub fn landing_wait(step: &str, off: &Auto, issue: &str) -> String {
 
 /// Who is asking: the caller's Session, with the person named as in the
 /// Task's repository.
-fn caller(store: &SharedStore, task: &Task) -> OpsResult<Starter> {
+pub(super) fn caller(store: &SharedStore, task: &Task) -> OpsResult<Starter> {
     let repo = super::repository_for_task(store, task)?;
     starter(
         &store.sqlite,

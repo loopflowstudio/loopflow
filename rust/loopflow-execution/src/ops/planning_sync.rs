@@ -24,7 +24,7 @@ fn message(error: impl std::fmt::Display) -> OpsError {
 
 /// Saved Tasks need no network before a read or local save. On a cache miss,
 /// read the hub and the remote once, without allocating execution.
-pub(crate) async fn find_task(
+pub async fn find_task(
     store: &Store,
     repo: &str,
     selector: &str,
@@ -67,18 +67,14 @@ where
     F: FnOnce(crate::store::SharedStore) -> Fut,
     Fut: Future<Output = ()>,
 {
-    let finished = tokio::runtime::Runtime::new()
-        .map_err(message)
-        .and_then(|runtime| {
-            runtime.block_on(async {
-                let store = crate::store::open_existing_store()
-                    .await
-                    .map_err(message)?
-                    .ok_or_else(|| message("no Loopflow store on this Machine"))?;
-                sync(Arc::new(store)).await;
-                Ok(())
-            })
-        });
+    let finished = crate::runtime::block_on(async {
+        let store = crate::store::open_existing_store()
+            .await
+            .map_err(message)?
+            .ok_or_else(|| message("no Loopflow store on this Machine"))?;
+        sync(Arc::new(store)).await;
+        Ok::<_, OpsError>(())
+    });
     if let Err(error) = finished {
         tracing::warn!(%error, "planning synchronization after reply did not start");
     }
@@ -112,47 +108,45 @@ pub(crate) async fn sync_saved(store: &Store, repo: &str, saved: Option<&ActionO
 /// it, then make one exchange attempt for that owner. `id` is the line's
 /// action id or the short prefix `lf repo tracker` prints.
 pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<TrackerActionStatus> {
-    tokio::runtime::Runtime::new()
-        .map_err(message)?
-        .block_on(async {
-            let store = planning_store().await?;
-            let main = crate::git::worktrees::main_repo_root(repo).map_err(message)?;
-            let repo = main.to_string_lossy();
-            if super::tracker::queued_tracker(&main).is_none() {
-                return Err(message(format!("{repo} has no Linear or Asana tracker")));
+    crate::runtime::block_on(async {
+        let store = planning_store().await?;
+        let main = crate::git::worktrees::main_repo_root(repo).map_err(message)?;
+        let repo = main.to_string_lossy();
+        if super::tracker::queued_tracker(&main).is_none() {
+            return Err(message(format!("{repo} has no Linear or Asana tracker")));
+        }
+        let lost: Vec<_> = store
+            .sqlite
+            .repository_tracker_actions(&repo)
+            .map_err(message)?
+            .into_iter()
+            .filter(|line| line.phase == ActionPhase::Conflicted && line.id.starts_with(id))
+            .collect();
+        let line = match lost.as_slice() {
+            [line] => line.clone(),
+            [] => {
+                return Err(message(format!(
+                    "{id} is not a lost line in {repo}; `lf repo tracker` lists them"
+                )))
             }
-            let lost: Vec<_> = store
-                .sqlite
-                .repository_tracker_actions(&repo)
-                .map_err(message)?
-                .into_iter()
-                .filter(|line| line.phase == ActionPhase::Conflicted && line.id.starts_with(id))
-                .collect();
-            let line = match lost.as_slice() {
-                [line] => line.clone(),
-                [] => {
-                    return Err(message(format!(
-                        "{id} is not a lost line in {repo}; `lf repo tracker` lists them"
-                    )))
-                }
-                _ => return Err(message(format!("{id} names more than one lost line"))),
-            };
-            store
-                .sqlite
-                .answer_lost(std::slice::from_ref(&line), answer)
-                .map_err(message)?;
-            let owner = match line.owner_kind {
-                ActionOwnerKind::Task => {
-                    Some(ActionOwner::Task(TaskId::from_raw(line.owner_id.clone())))
-                }
-                ActionOwnerKind::Project => Some(ActionOwner::Project(ProjectId::from_raw(
-                    line.owner_id.clone(),
-                ))),
-                _ => WaveId::parse(&line.owner_id).ok().map(ActionOwner::Wave),
-            };
-            sync_after_save(&store, &repo, owner.as_ref()).await;
-            Ok(line)
-        })
+            _ => return Err(message(format!("{id} names more than one lost line"))),
+        };
+        store
+            .sqlite
+            .answer_lost(std::slice::from_ref(&line), answer)
+            .map_err(message)?;
+        let owner = match line.owner_kind {
+            ActionOwnerKind::Task => {
+                Some(ActionOwner::Task(TaskId::from_raw(line.owner_id.clone())))
+            }
+            ActionOwnerKind::Project => Some(ActionOwner::Project(ProjectId::from_raw(
+                line.owner_id.clone(),
+            ))),
+            _ => WaveId::parse(&line.owner_id).ok().map(ActionOwner::Wave),
+        };
+        sync_after_save(&store, &repo, owner.as_ref()).await;
+        Ok(line)
+    })
 }
 
 /// Provider exit is also a useful boundary for Taskless conversations.
@@ -160,20 +154,17 @@ pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
     let repo = crate::repository::discover(directory)
         .map_err(message)?
         .to_string();
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(async {
-            let store = planning_store().await?;
-            if !super::tracker::connected(&repo) {
-                // Nobody asked for this read, so it fetches nothing.
-                return super::plan_carriers::read(&store, &repo)
-                    .await
-                    .map_err(message);
-            }
-            super::tracker_events::sync_repository(&store, &repo).await;
-            Ok(())
-        })
+    crate::runtime::block_on(async {
+        let store = planning_store().await?;
+        if !super::tracker::connected(&repo) {
+            // Nobody asked for this read, so it fetches nothing.
+            return super::plan_carriers::read(&store, &repo)
+                .await
+                .map_err(message);
+        }
+        super::tracker_events::sync_repository(&store, &repo).await;
+        Ok(())
+    })
 }
 
 /// Exchange the repository delta and queued saves, then read the Wave's

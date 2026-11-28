@@ -70,7 +70,7 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 - break                 # review the plan before implementation starts
 - implement             # commits its work on the branch
 - audit                 # runs on Codex per its frontmatter
-- gate                  # publishes the PR so CI starts, then reviews while CI runs
+- cmd: land --wait-and-fix  # syncs, clears scratch, and merges when CI passes
 ```
 
 ```bash
@@ -80,9 +80,9 @@ lf task run <ID> ship-api       # review the finished plan in the Task conversat
 lf -b task run <ID> ship-api    # carry the proposed plan straight into implementation
 ```
 
-Built-in Graphs (`feature`, `code`, `auto`, `research`, `optimize`) work out of
+Built-in Graphs (`feature`, `code`, `quick`, `research`, `optimize`) work out of
 the box and are templates you can customize (`lf graph customize feature`).
-Extend built-in Skills with `extends: builtin` instead of forking them.
+Extend built-in or repository Skills with `extends: lf:<name>` or `extends: <name>` instead of forking them.
 
 **3. Organize Tasks into Waves.** A Wave is an area of work with its own goal
 (`GOAL.md`), memory (`MEMORY.md`) and plan, and its own setup for every Task in

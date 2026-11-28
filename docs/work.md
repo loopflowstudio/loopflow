@@ -55,7 +55,9 @@ context without changing its Graph position or completion state.
 ```bash
 lf steer LOO-12 "keep the retry budget at 3"   # delivered at the next step or turn
 lf task status LOO-12 --json                   # thread: your steers, teammates' comments, agent reports
-lf task interrupt LOO-12                       # stop its running Graph
+lf task interrupt LOO-12                       # stop its running Graph; stay in Working
+lf task pause LOO-12                           # hold the Graph and keep the conversation open
+lf task unpause LOO-12 --run                   # lift pause and continue from the interrupted step
 lf task unassign LOO-12                        # release ownership; stops CI repair
 ```
 
@@ -82,6 +84,48 @@ itself is in `lf task status LOO-12 --json`.
 `lf task claim LOO-12` takes ownership without starting a run; `lf task run`
 claims and runs. To jump into the conversation directly, run
 `lf resume --task LOO-12` ([Sessions](sessions.md)).
+
+### Pause a Task
+
+Pause an open, started Task to keep its checkout, claim, and Graph step for later.
+
+```text
+$ lf task pause LOO-12
+LOO-12 paused
+
+$ lf task status LOO-12
+LOO-12  paused
+  Graph code: Paused in build at implement. `lf task unpause --run` resumes it.
+```
+
+The worker and any subprocesses in its OS session stop. Other Tasks keep running.
+Codex tool shells can create their own OS sessions, and processes in those
+sessions can survive pause. A Graph command already in progress, such as `lf land`,
+finishes at its current step. The pause receipt names the finishing run.
+If cleanup was interrupted, repeat `lf task pause LOO-12` before unpausing.
+
+The primary conversation stays open. You can talk to it, send steers, or
+attach with `lf resume --task LOO-12`. The Task keeps its branch, dirty files,
+PR, and auto setting. New Graph runs, Auto-Ship, and worker retries wait for
+unpause, including after a Machine restart.
+
+An owned Task stays in **Working**, under **Paused** on Mac and iPhone.
+The Working rows in `lf task list --json` carry `working_group`.
+Find held Tasks with `lf task list --state paused`. Plain `lf task unpause LOO-12`
+lifts the hold. An interrupted step stays idle and ready for Run. If a step
+failed before pause, its failure stays in the execution history and shows
+in the Task’s condition again on unpause.
+Use `lf task unpause LOO-12 --run` to resume interrupted work or start a Graph that has yet to run.
+At a human step, at a landing step with auto off, or at the end, the command lifts
+the hold and leaves the Task there. Unpause on Mac and iPhone follows the same
+rule. Turn on Auto to continue from the landing stop.
+
+Unassign clears the hold once cleanup settles. Complete, abandon, and reopen
+also clear it. A move carries the hold to the destination, including a pause
+issued while the source is pushing the checkout. A pause issued after the
+payload was sent can need a retry when the checkout arrives.
+
+Use `lf task interrupt LOO-12` to stop the current run and allow another to start.
 
 ## See where everything stands
 
@@ -313,11 +357,21 @@ laptop$ lf task create 'plan smoke'
 plan smoke · 3e1c9a
 laptop$ lf repo tracker
 Plan: Git origin.
+
+mini$ lf task create 'from mini'
+from mini · 8b4d2e
+mini$ lf task list
+3e1c9a · — · plan smoke
+8b4d2e · — · from mini
 ```
 
-The Task is on the remote in seconds and `lf task list` on the mini shows it
-within a minute; the
-first `lf task list` in a fresh clone reads the remote before it answers. A
+The Task is on the remote in seconds. In a fresh clone, the first command that
+reads the plan (`lf task list`, `lf wave list`, `lf wave show`, `lf wave status`,
+`lf wave plan`, `lf plan list`, `lf plan board`, or `lf repo tracker`) reads the
+remote before it answers, even if you already ran `lf task create` there first.
+Later reads answer from this Machine's local store without fetching. If that
+first read fails or takes more than five seconds, the command still answers from
+the local store and waits a minute before trying again on a later read. A
 teammate who clones the repository sees the same plan, and their Tasks appear
 in yours: no account and no server, only push access to the repository.
 
@@ -331,7 +385,8 @@ Every command saves on this Machine first, so nothing waits on the network.
 Each Machine pushes its plan to a ref of its own on the remote
 (`refs/loopflow/plan/<machine id>`) as part of the save, for five seconds at
 most. Its server fetches the others’ refs about every 30 seconds while it owns
-open Tasks in the repository and once a minute otherwise. A running Graph step
+open Tasks in the repository, and once a minute while the repository has open
+Tasks or Waves here. A running Graph step
 keeps checking its repository if the server exits. `lf task sync <issue>` does
 both now. The refs stay out of
 `git branch`, `git status` and a plain clone. A repository with no remote reads
@@ -413,7 +468,15 @@ loses nothing; `lf machine list` marks the hub.
 A repository with no remote can still use a hub. With no ref to tell its
 clones they are the same repository, say so once: `lf config repo` prints the
 repository id on the first Machine and `lf config repo --bind <id>` sets it in
-each other clone, the hub's included.
+each other clone, the hub's included. The first plan read after binding pulls
+the plan from the hub before it answers:
+
+```text
+mini$ lf config repo --bind 6f9a2c40-…
+6f9a2c40-…
+mini$ lf task list
+3e1c9a · — · plan smoke
+```
 
 A Machine still running an earlier `lf` keeps reading the old
 `refs/loopflow/planning/*` and sees none of these changes until it updates. A
@@ -540,10 +603,11 @@ crosses storage, auth, or public APIs.
 ```
 
 `MEMORY.md` beside it holds what later Tasks need: decisions, dead ends and facts.
-Agents update it as work ships, and `realign` keeps
-plan, code, and memory in sync. Both files are ordinary Markdown in Git,
-reviewed in PRs. Check each file's context footprint with
-`lf context --wave billing`.
+The Wave's conversation (`wave-session`, opened with `lf resume --wave billing`)
+curates it—promoting lessons from child Waves, replacing stale guidance, and
+retiring the largest stale sections when `lf context --wave billing` exceeds its
+limit. Both `GOAL.md` and `MEMORY.md` are ordinary Markdown in Git, reviewed in
+PRs.
 
 ### Defaults per Wave
 
@@ -579,8 +643,8 @@ lf wave status billing                            # the Wave's Project, Tasks an
 ```
 
 `wave-operate` reviews every started Task you own (leaving running Graphs alone
-and continuing stopped ones), lists unstarted backlog for you to pick, and
-leaves teammates' Tasks untouched. Run it on a schedule with your OS scheduler:
+and continuing stopped ones), skips paused Tasks, lists unstarted backlog for
+you to pick, and leaves teammates' Tasks untouched. Run it on a schedule with your OS scheduler:
 
 ```bash
 # Linux crontab (or a macOS LaunchAgent when Keychain access is needed):
@@ -645,25 +709,6 @@ lf wave remove payments --delete-backlog # delete unstarted Tasks instead; start
 Removal retires the Wave and its children, folds a child's `MEMORY.md` into its
 parent, and keeps completed history readable via `lf wave show payments`.
 You can then connect another Wave to the same Linear Project.
-
-### Talk to it from Discord
-
-Talk to a Wave from a Discord channel:
-
-```yaml
-# .lf/wave/billing/config.yaml
-chat:
-  provider: discord
-  guild_id: "123456789012345678"
-  channel_id: "234567890123456789"
-```
-
-```bash
-doppler run -- lf discord serve billing
-```
-
-Each new message becomes a Wave-attributed conversation and posts its final
-answer back to the channel.
 
 ## Reference
 

@@ -18,6 +18,7 @@ impl SqliteStore {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let task = super::children::task_on(&conn, task_id)?.ok_or(StoreError::NotFound)?;
+        super::task_pause::require_unpaused_in(&conn, task_id)?;
         super::children::require_task_planning(&conn, &task)?;
         let work = WorkRef::Task(task_id.clone());
         require_ready_work(&conn, &work)
@@ -76,8 +77,9 @@ impl SqliteStore {
 
     pub fn saved_machines(&self) -> StoreResult<Vec<SavedMachine>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query =
-            conn.prepare("SELECT id,is_local,created_at,observed_at FROM machines ORDER BY id")?;
+        let mut query = conn.prepare_cached(
+            "SELECT id,is_local,created_at,observed_at FROM machines ORDER BY id",
+        )?;
         let rows = query
             .query_map([], |row| {
                 Ok(SavedMachine {
@@ -232,6 +234,17 @@ impl SqliteStore {
         Ok(id)
     }
 
+    /// Pause stops Graphs. An explicit interrupt also reaches standalone Task turns.
+    pub fn task_graph_stopped_since(&self, task: &TaskId, cursor: i64) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1 AND id>?2
+             AND json_extract(kind_json, '$.kind') IN ('interrupt','paused'))",
+            params![task.as_str(), cursor],
+            |row| row.get(0),
+        )?)
+    }
+
     /// The id of the newest interrupt request on the Task, or 0 when there is
     /// none. A run stamps this at launch and re-reads it; a higher value means a
     /// new interrupt to act on.
@@ -302,6 +315,7 @@ pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
          WHEN {t}.planning_state='completed' THEN 'done' \
+         WHEN EXISTS(SELECT 1 FROM task_pauses p WHERE p.task_id={t}.id) THEN 'paused' \
          WHEN EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id AND tg.run_pid IS NOT NULL) \
              OR EXISTS({open_graphs}) \
          THEN 'moving' \
@@ -334,6 +348,7 @@ pub(super) fn abandon_task_in(
         params![task.as_str(), at, reason],
     )? == 1;
     if abandoned {
+        super::task_pause::clear_in(conn, task)?;
         super::task_state::decide_in(conn, task, "canceled")?;
         super::task_summaries::write_in(conn, task, super::task_summaries::TaskEnd::Abandoned)?;
     }

@@ -57,8 +57,8 @@ managed by the local server vs. bare:
 | Kind | Started by | Terminal & lifetime | Server involvement |
 |---|---|---|---|
 | **Work session** | `lf resume --task`, Wave/repo sessions, Desktop panes | Runs in a **holder** process; outlives windows and `lf install` | Records turns, wakes idle conversations on steers/updates |
-| **Worker** | Headless steps of `lf task run` / `lf task auto on`, Discord Wave replies | Headless; runs in its own process | Records turns; keeps running if server stops |
-| **Chat** | `lf`, `lf <skill>`, `lf -i` | Runs directly in your terminal (`Ctrl+C`/`Ctrl+Z` go straight to the agent); ends with the terminal | None; reads transcript at exit |
+| **Worker** | Headless steps of `lf task run` / `lf task auto on` | Headless; runs in its own process | Records turns; keeps running if server stops |
+| **Chat** | `lf`, `lf <skill>`, `lf -i`, interactive `lf graph` | Runs directly in your terminal (`Ctrl+C`/`Ctrl+Z` go straight to the agent); ends with the terminal | None; reads transcript at exit |
 | **Batch** | `lf -b <skill>` | Headless child of its caller; prints output and exits | None; reads transcript at exit |
 
 A Session can change kind between launches: for example, binding a chat to a
@@ -117,6 +117,9 @@ lf task status LOO-12
   conversation in a held terminal with the finished step's result. Attach
   with `lf resume --task <ID>`. Quitting after the result arrives leaves
   the Task at that breakpoint.
+- **Paused Tasks** (`lf task pause`) keep their primary conversation open.
+  Conversation recovery and steers work as usual. Graph runs and worker
+  retries wait for [`lf task unpause`](work.md#pause-a-task).
 - **Backoff.** After a reboot, the server brings Tasks back one at a time, most
   recently active first. Repeated deaths back off from 1 minute up to 30
   minutes and stop after 5 attempts without a finished turn or step, printing
@@ -220,8 +223,8 @@ lf session steers <session>                          # pending vs. delivered
 - **Chats** are never woken while idle; in a Task checkout they receive updates
   on their next turn.
 - **Stopped interactive Sessions** start in a held terminal when steered by
-  name. A Task steer starts its stopped primary conversation and reaches each
-  running Session on the Task; the next Graph step reads it too. Wave and repository steers wait for the next
+  name. A Task steer starts its stopped primary conversation and
+  reaches each running Session on the Task; the next Graph step reads it too. Wave and repository steers wait for the next
   boundary. Several steers saved while the server is down arrive together
   when it returns. Attach with `lf resume <session>` to see the reply.
 

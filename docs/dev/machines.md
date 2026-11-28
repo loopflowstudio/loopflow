@@ -638,12 +638,6 @@ conversation and AgentProcess record. Revalidate native scope or exclusive proce
 group before signaling. An attached LfProcess may disappear while its AgentProcess survives;
 recorded endpoints alone do not prove liveness.
 
-## Independent bridges
-
-`lf discord serve <wave>` is a foreground bridge from a configured channel to
-bounded conversations. It has no Wave cursor or inbox authority. Cron and Task execution
-do not require a daemon or bridge. See [Discord](../work.md#talk-to-it-from-discord).
-
 ## Move a Wave without changing its identity
 
 Wave identity is a UUID. The readable Wave locator is `(canonical repository, slug)`.
@@ -686,7 +680,11 @@ variable selects either. Every variable
 Loopflow sets or reads is listed in [Environment](environment.md). A private Home
 migrates itself on open, including a branch's unmerged migration; editing that
 migration afterwards needs a fresh `LF_HOME`. Nothing in a private Home is
-promoted to the main Machine.
+promoted to the main Machine. A private Home's server is never registered with
+launchd or systemd: it runs as a detached `lf server run` that exits when the
+directory is removed or after 10 minutes with no clients, held terminals, or
+unfinished Graphs or agents, and its holders close their PTYs and exit when the
+directory is removed.
 
 Loopflow Dev opens the main Machine through the installed server and CLI,
 using the Swift app from the current checkout. See [Loopflow for macOS](../../swift/README.md).

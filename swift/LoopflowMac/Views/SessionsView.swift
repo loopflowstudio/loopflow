@@ -389,6 +389,7 @@ final class SessionsWorkspace {
         let files = TaskFilesStore(issue: issue, cwd: cwd, machine: machine, machineLabel: machineLabel,
                                    localMachineID: localMachineId, query: query)
         files.measurementRepository = measurementRepository
+        files.localRepository = retainedStore?.repoPath ?? measurementRepository
         taskFiles = files
         files.restoreDrafts(unavailableDrafts)
         unavailableDrafts.removeAll()
@@ -1632,9 +1633,7 @@ struct SessionsContentView: View {
                 VStack(spacing: 0) {
                     // The main pane alone: the sidebar stays put when a Task opens.
                     if let task = model.breadcrumb?.task?.task {
-                        TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id],
-                            newConversation: { model.newTaskSession(task.id, open: newTaskSession) },
-                            openSession: openSession)
+                        TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
                     }
                     mainPane
                 }

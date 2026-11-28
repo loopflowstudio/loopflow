@@ -1,7 +1,7 @@
 [
   {
     "name": "feature",
-    "description": "Explore, build, deliver and verify. You choose what to build, try the change and check it on main.",
+    "description": "Explore, build and deliver. You choose what to build and review the change before it merges.",
     "source": null,
     "compiled": {
       "name": "feature",
@@ -209,7 +209,11 @@
       "breakpoints": [
         "demo"
       ],
-      "sentence": "You take part at demo."
+      "sentence": "You take part at demo.",
+      "start": {
+        "action": "run",
+        "label": "Run: design"
+      }
     }
   },
   {

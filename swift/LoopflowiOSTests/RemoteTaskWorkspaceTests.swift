@@ -93,8 +93,10 @@ final class RemoteTaskWorkspaceTests: XCTestCase {
             try await world.closeShell(task.id, startedOn: nil)
 
             // Mini goes away: the open watch and a new read both name it.
-            await world.miniServer.stop()
+            // Keep ssh offline whenever mini's server is stopped so a watch retry
+            // cannot run `lf server connect` into `ensure()` / `launchctl`.
             try world.disconnect(true)
+            await world.miniServer.stop()
             await files.load("")
             guard case .failed(let failure)? = files.listings[""] else { return XCTFail("\(String(describing: files.listings[""]))") }
             XCTAssertTrue(failure.contains("mini"), failure)
@@ -103,9 +105,11 @@ final class RemoteTaskWorkspaceTests: XCTestCase {
             }
 
             // Mini returns: Try again reads the same checkout.
-            try world.disconnect(false)
             try await world.miniServer.start()
-            try await eventually("the watch recovers") { files.unavailable == nil }
+            try world.disconnect(false)
+            try await eventually("the watch recovers", showing: { "\(String(describing: files.unavailable))" }) {
+                files.unavailable == nil
+            }
             await files.load("")
             XCTAssertTrue(files.listing("")?.entries.map(\.path).contains("document.txt") == true)
         }
@@ -287,7 +291,8 @@ private final class TwoMachines {
         let id = try await laptop.json(["task", "create", "--title", title, "--json"], cwd: repo, as: Created.self).task.id
         let row = try JSONSerialization.data(withJSONObject: [
             "work": ["repository": "repo_fixture", "kind": "task", "id": id], "title": title, "states": [],
-            "identifier": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [],
+            "identifier": NSNull(), "working_group": NSNull(), "graph_step": NSNull(),
+            "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [],
             "open_children": 0,
         ] as [String: Any])
         return MobileTask(try JSONDecoder().decode(WorkViewPlan.Content.self, from: row))

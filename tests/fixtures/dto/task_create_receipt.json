@@ -113,6 +113,7 @@
         "workspace": null
       },
       "lifecycle": "idle",
+      "working_group": "active",
       "selection_states": [
         "open",
         "idle",
@@ -170,12 +171,14 @@
         "outlook": null
       },
       "run_control": {
+        "pausing": false,
         "unavailable": null
       },
       "pr": null,
       "section": "working",
       "owned_by_you": true,
-      "runs_on": null
+      "runs_on": null,
+      "breakpoint_arrival": null
     },
     "parent": null
   },
@@ -242,6 +245,7 @@
         "workspace": null
       },
       "lifecycle": "moving",
+      "working_group": "active",
       "selection_states": [
         "open",
         "moving",
@@ -299,12 +303,14 @@
         "outlook": null
       },
       "run_control": {
+        "pausing": false,
         "unavailable": null
       },
       "pr": null,
       "section": "working",
       "owned_by_you": true,
-      "runs_on": null
+      "runs_on": null,
+      "breakpoint_arrival": null
     },
     "parent": null
   }

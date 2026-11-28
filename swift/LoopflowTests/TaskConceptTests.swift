@@ -47,6 +47,95 @@ struct TaskConceptTests {
         return try #require((phases[0]["tasks"] as? [[String: Any]])?.first { $0["lifecycle"] as? String == "active" })
     }
 
+    private func pausedTaskWire() throws -> [String: Any] {
+        var wire = try activeTaskWire()
+        wire["lifecycle"] = "paused"
+        wire["section"] = "working"
+        wire["working_group"] = "paused"
+        wire["selection_states"] = ["open", "paused", "working"]
+        wire["run_control"] = ["pausing": false, "unavailable": "Task is paused"]
+        return wire
+    }
+
+    @Test func sidebarUnpausesBeforeOpeningTheTaskAndShowsThePendingWrite() async throws {
+        let row = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: pausedTaskWire()))
+        let machine = HeldMachine()
+        let changes = PendingChanges { write, id in
+            #expect(write == .taskUnpause(directory: row.task.repo, issue: row.task.identifier, run: true))
+            return try await machine.send(write, id)
+        }
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Task pane is unavailable") }
+        let model = WorkModel(query: query, launchCandidates: [], cache: nil, paneLayouts: nil, pendingChanges: changes)
+        let menu = TaskActionItems(model: model, task: row, wave: nil, work: nil)
+        try menu.inspect().find(button: "Unpause").tap()
+        try #require(changes.changes.first?.command == .unpause(task: row.task.identifier))
+        let preview = try #require(changes.apply(to: [row], readAt: nil).first)
+        #expect(preview.lifecycle == .idle)
+        let bar = try TaskWorkflowBar(model: model, task: preview, work: .loading).inspect()
+        _ = try bar.find(text: "Unpausing…")
+        #expect(try bar.find(viewWithAccessibilityIdentifier: "task-workflow-primary").isDisabled())
+        await machine.fail(ServerError(code: "conflict", message: "land is finishing", data: .null))
+        #expect(changes.apply(to: [row], readAt: nil).first?.lifecycle == .paused)
+    }
+
+    @Test func pausedTaskKeepsItsConversationWarm() throws {
+        let wire = try pausedTaskWire()
+        let row = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: wire))
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: [
+            "generated_at": "2026-11-23", "waves": [], "tasks": ["state": "ok", "truncated": false, "items": [wire]]
+        ]))
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let key = WorkWorkspaceKey(repository: row.task.repositoryId, kind: .task, id: row.id)
+        let member = WorkViewPlan.Content(work: key, title: row.task.name, states: [.open, .paused, .working],
+                                          identifier: row.task.identifier, workingGroup: .paused, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
+        var backlog = member
+        backlog.states = [.backlog, .paused]
+        backlog.workingGroup = nil
+        #expect(backlog.status?.word == "Paused")
+        let plan = fixtureViewPlan(owner: .init(repository: key.repository, kind: .repository, id: key.repository), members: [member])
+        model.applyTaskList(plan, wave: nil, reason: "")
+        #expect(model.sidebarTaskIDs == [row.id])
+        #expect(model.sidebarRows.first?.workingGroup == .paused)
+        let board = BacklogList(tasks: [row], truncated: false, wave: nil, waveNames: [:], state: BacklogState())
+        #expect(board.all.isEmpty)
+        #expect(model.startedTaskCount(.repository) == 1)
+        #expect(row.opensConversationAutomatically)
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        model.bindWorkspaces(registry, repository: key.repository)
+        registry.open(key, title: row.task.name, location: .init(machineId: "local", worktree: "/tmp/task"))
+        #expect(registry.selectedWork == key && registry.warmWork.contains(key))
+        let view = try TaskWorkflowBar(model: model, task: row, work: .available(
+            TaskOverview(sessions: [], graphProcesses: [], graph: nil))).inspect()
+        let menu = try TaskActionItems(model: model, task: row, wave: nil, work: nil).inspect()
+        #expect(try !menu.find(button: "Unpause").isDisabled())
+        let action = try view.find(viewWithAccessibilityIdentifier: "task-workflow-primary").button()
+        _ = try view.find(text: "Paused: start")
+        #expect(!action.isDisabled())
+        try action.tap()
+        #expect(model.pendingChanges.changes.last?.command == .unpause(task: row.task.identifier))
+        #expect(throws: (any Error).self) { try view.find(button: "Start") }
+    }
+
+    @Test func workingGroupsKeepOrderAndKeyboardSlotsWhenSortedByStatus() throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
+        #expect(model.startedTaskCount(.repository) == nil)
+        var plan = fixtureStartedPlan([("P", [.paused, .working]), ("S1", [.working, .busy]), ("A", [.working, .busy]), ("S2", [.working, .available])])
+        for (index, group) in [WorkingGroup.paused, .shipping, .active, .shipping].enumerated() {
+            plan.contents[index].workingGroup = group
+        }
+        model.applyTaskList(plan, wave: nil, reason: "")
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        for title in ["Active", "Shipping", "Paused"] {
+            _ = try navigator.inspect().find(text: title)
+        }
+        #expect(model.sidebarTaskIDs == ["A", "S1", "S2", "P"])
+        model.toggleSidebarSortByStatus()
+        #expect(model.sidebarTaskIDs == ["A", "S2", "S1", "P"])
+        model.selectSidebarTask(slot: 1)
+        #expect(model.selection == .task(id: "S2"))
+    }
+
     @Test func lifecycleAndActionsFollowTheSameRustReading() throws {
         for phase in try phases() {
             let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
@@ -206,7 +295,7 @@ struct TaskConceptTests {
 
     @Test func missingKeysFailAndSavedActivityCannotReturn() throws {
         var row = try activeTaskWire()
-        for key in ["lifecycle", "selection_states"] {
+        for key in ["lifecycle", "selection_states", "working_group"] {
             var missing = row
             missing.removeValue(forKey: key)
             #expect(throws: (any Error).self) {

@@ -26,7 +26,9 @@ use loopflow_execution::engine::{Error, ErrorCode};
 use loopflow_execution::machine::client::{Connection, Response};
 use loopflow_execution::machine::connection::local_machine;
 use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
-use loopflow_execution::ops::task::{task_changes, task_diff, task_file, task_files};
+use loopflow_execution::ops::task::{
+    task_changes, task_diff, task_file, task_files, task_find, task_grep, task_symbols,
+};
 use loopflow_execution::read_stream::{Subscription, Transport};
 use loopflow_execution::session::SessionFilter;
 use loopflow_model::durable::{Machine, RepositoryId};
@@ -172,6 +174,33 @@ pub enum Read {
         issue: String,
         path: String,
         at: Option<String>,
+    },
+    /// Find declarations of a name in the Task checkout.
+    #[serde(rename = "task.files.symbols")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskSymbols>()))]
+    TaskSymbols {
+        issue: String,
+        name: String,
+        #[serde(deserialize_with = "Option::deserialize")]
+        path: Option<String>,
+    },
+    /// Search the Task checkout for literal text.
+    #[serde(rename = "task.files.grep")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskGrepResults>()))]
+    TaskGrep {
+        issue: String,
+        query: String,
+        whole_word: bool,
+    },
+    /// `lf task find <issue> [query]`: matching paths across the Task checkout.
+    #[serde(rename = "task.files.find")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskFileInventory>()))]
+    TaskFind {
+        issue: String,
+        #[serde(deserialize_with = "Option::deserialize")]
+        query: Option<String>,
+        #[serde(deserialize_with = "Option::deserialize")]
+        limit: Option<usize>,
     },
     /// `lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:
     /// one page of a Task checkout directory's immediate entries.
@@ -494,6 +523,38 @@ impl Read {
                 argv.extend(optional("--at", at.as_ref()));
                 argv
             }
+            Self::TaskSymbols { issue, name, path } => {
+                let mut argv = words(&["task", "symbols", issue, "--json"]);
+                argv.extend(optional("--path", path.as_ref()));
+                argv.extend(words(&["--", name]));
+                argv
+            }
+            Self::TaskGrep {
+                issue,
+                query,
+                whole_word,
+            } => {
+                let mut argv = words(&["task", "grep", issue, "--json"]);
+                if *whole_word {
+                    argv.push("--whole-word".into());
+                }
+                argv.extend(["--".into(), query.clone()]);
+                argv
+            }
+            Self::TaskFind {
+                issue,
+                query,
+                limit,
+            } => {
+                let mut argv = words(&["task", "find", issue, "--json"]);
+                if let Some(limit) = limit {
+                    argv.extend(["--limit".into(), limit.to_string()]);
+                }
+                if let Some(query) = query {
+                    argv.extend(["--".into(), query.clone()]);
+                }
+                argv
+            }
             Self::TaskFiles {
                 issue,
                 path,
@@ -712,13 +773,14 @@ impl Read {
     /// What `lf <argv>` prints, as a JSON value, read on the caller's thread.
     /// A Task another Machine runs is read by that Machine's server.
     pub fn read(self) -> anyhow::Result<serde_json::Value> {
-        self.read_with(|machine, sender, read| {
+        self.read_with(&|| false, |machine, sender, read| {
             Connection::open_on(machine, sender, None)?.query(read)
         })
     }
 
     pub(crate) fn read_with(
         mut self,
+        cancelled: &dyn Fn() -> bool,
         query: impl FnOnce(&Machine, Sender, &Read) -> anyhow::Result<Response>,
     ) -> anyhow::Result<serde_json::Value> {
         // A status asks whichever Machine claims the Task and reads here
@@ -732,7 +794,7 @@ impl Read {
             self.localize_peer_reading(&mut result, &machine, &route)?;
             return Ok(result);
         }
-        self.read_here()
+        self.read_here_until(cancelled)
     }
 
     /// What `machine` answered for this read, as this Machine names it: the
@@ -820,6 +882,9 @@ impl Read {
             | Self::TaskFile { issue, .. }
             | Self::TaskFilesWatch { issue }
             | Self::TaskFiles { issue, .. }
+            | Self::TaskFind { issue, .. }
+            | Self::TaskGrep { issue, .. }
+            | Self::TaskSymbols { issue, .. }
             | Self::TaskStatus { issue, .. } => Some(issue),
             _ => None,
         }
@@ -857,7 +922,10 @@ impl Read {
     /// `read` on this Machine, never sent on: what a request another Machine
     /// sent runs. A command that prints bare text (`config repo --path`) is a
     /// string.
-    pub fn read_here(&self) -> anyhow::Result<serde_json::Value> {
+    pub(crate) fn read_here_until(
+        &self,
+        cancelled: &dyn Fn() -> bool,
+    ) -> anyhow::Result<serde_json::Value> {
         match self {
             Self::SessionHistoryGet { id } => value(&super::history::render(
                 id,
@@ -926,6 +994,19 @@ impl Read {
             )?),
             Self::TaskFile { issue, path, at } => {
                 value(&task_file(issue, path, at.as_deref(), false)?)
+            }
+            Self::TaskFind {
+                issue,
+                query,
+                limit,
+            } => value(&task_find(issue, query.as_deref(), *limit)?),
+            Self::TaskGrep {
+                issue,
+                query,
+                whole_word,
+            } => value(&task_grep(issue, query, *whole_word, cancelled)?),
+            Self::TaskSymbols { issue, name, path } => {
+                value(&task_symbols(issue, name, path.as_deref(), cancelled)?)
             }
             Self::TaskFiles {
                 issue,
@@ -1119,9 +1200,11 @@ impl Read {
                 directory,
                 pr.as_deref(),
             )?),
-            Self::TaskWait { issue, until } => {
-                value(&loopflow_execution::engine::task::waited(issue, *until)?)
-            }
+            Self::TaskWait { issue, until } => value(&loopflow_execution::engine::task::waited(
+                issue,
+                *until,
+                crate::lf::navigation::command_merges,
+            )?),
         }
     }
 
@@ -1159,6 +1242,9 @@ impl Read {
             | Self::TaskChanges { .. }
             | Self::TaskDiff { .. }
             | Self::TaskFile { .. }
+            | Self::TaskFind { .. }
+            | Self::TaskGrep { .. }
+            | Self::TaskSymbols { .. }
             | Self::TaskFilesWatch { .. }
             | Self::TaskFiles { .. }
             | Self::WaveList
@@ -1247,9 +1333,12 @@ impl Read {
                 &super::tracker::status_repository(&directory)?,
                 transport,
             ),
-            Self::TaskWait { issue, until } => {
-                loopflow_execution::engine::task::subscribe_wait(issue, until, transport)
-            }
+            Self::TaskWait { issue, until } => loopflow_execution::engine::task::subscribe_wait(
+                issue,
+                until,
+                crate::lf::navigation::command_merges,
+                transport,
+            ),
             other => {
                 return Err(loopflow_execution::engine::Error::new(
                     loopflow_execution::engine::ErrorCode::Invalid,
@@ -1296,7 +1385,7 @@ fn session_flags(headless: bool) -> &'static [&'static str] {
 
 /// `future` run to completion on a runtime of its own, as its command does.
 fn block_on<F: std::future::Future>(future: F) -> anyhow::Result<F::Output> {
-    Ok(tokio::runtime::Runtime::new()?.block_on(future))
+    Ok(loopflow_execution::runtime::block_on(future))
 }
 
 fn invalid(message: &str) -> loopflow_execution::engine::Error {

@@ -244,6 +244,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -276,11 +277,13 @@
     },
     "graph_source": null,
     "lifecycle": "moving",
+    "working_group": "active",
     "selection_states": [
       "open",
       "moving",
       "working"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "done": {
     "task": {
@@ -527,6 +530,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -559,9 +563,11 @@
     },
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "none": {
     "task": {
@@ -808,6 +814,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -840,9 +847,11 @@
     },
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "due": {
     "task": {
@@ -911,15 +920,18 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "unrelated": {
     "task": {
@@ -988,15 +1000,18 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "conversion": {
     "task": {
@@ -1243,6 +1258,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -1275,11 +1291,13 @@
     },
     "graph_source": null,
     "lifecycle": "moving",
+    "working_group": "active",
     "selection_states": [
       "open",
       "moving",
       "working"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "completed_running": {
     "task": {
@@ -1526,6 +1544,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {
@@ -1558,8 +1577,10 @@
     },
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   }
 }

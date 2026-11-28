@@ -21,6 +21,7 @@ mod land_tests;
 mod local_promotion;
 mod machine_commands;
 mod machine_credentials;
+mod page_tests;
 mod performance_tests;
 mod planning_setup_tests;
 mod portfolio_cli_tests;

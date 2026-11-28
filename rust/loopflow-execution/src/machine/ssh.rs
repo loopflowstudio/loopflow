@@ -4,18 +4,24 @@ use std::io::IsTerminal;
 use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
+/// Shell that finds `lf` in standard tool directories before lf can repair its
+/// own `PATH`: non-interactive SSH skips shell profiles.
+pub fn lf_remote_path() -> String {
+    let dirs = crate::os_process::tool_dirs(std::path::Path::new("$HOME"));
+    format!("export PATH=\"$PATH:{}\"", dirs.join(":"))
+}
+
 /// Shell that finds `lf` and npm-installed providers before lf can repair its
 /// own `PATH`: non-interactive SSH skips shell profiles.
 pub fn remote_path() -> String {
-    let dirs = crate::os_process::tool_dirs(std::path::Path::new("$HOME"));
     format!(
-        "export PATH=\"$PATH:{}\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi",
-        dirs.join(":")
+        "{}; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi",
+        lf_remote_path()
     )
 }
 
-pub fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
-    let mut lines = vec![remote_path()];
+fn build_preamble_with(path: String, cmd: &[String], extra_env: &[(&str, &str)]) -> String {
+    let mut lines = vec![path];
     for (name, value) in extra_env {
         lines.push(format!("export {name}={}", sh_quote(value)));
     }
@@ -27,6 +33,14 @@ pub fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
             .join(" ")
     ));
     lines.join("\n") + "\n"
+}
+
+pub fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
+    build_preamble_with(remote_path(), cmd, extra_env)
+}
+
+fn build_lf_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
+    build_preamble_with(lf_remote_path(), cmd, extra_env)
 }
 
 /// POSIX single-quote escaping: wrap in `'…'`, and render any embedded single
@@ -58,7 +72,7 @@ pub async fn request(
     let cmd = std::iter::once("lf".to_string())
         .chain(args.iter().cloned())
         .collect::<Vec<_>>();
-    let preamble = build_preamble(&cmd, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
+    let preamble = build_lf_preamble(&cmd, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
     let mut command = tokio::process::Command::new("ssh");
     command
         .args(crate::machine_route::bounded_ssh_args(
@@ -118,7 +132,7 @@ pub struct Pipe {
 impl Pipe {
     pub fn command(machine: &loopflow_model::durable::Machine) -> anyhow::Result<Command> {
         let args = ["lf", "server", "connect"].map(str::to_owned);
-        let preamble = build_preamble(&args, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
+        let preamble = build_lf_preamble(&args, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
         let mut command = Command::new("ssh");
         command
             .args(crate::machine_route::bounded_ssh_args(
@@ -218,13 +232,8 @@ impl Drop for Pipe {
 pub(crate) fn outdated(machine: &loopflow_model::durable::Machine) -> String {
     let name = machine.label.as_deref().unwrap_or(machine.route.as_str());
     let update = super::connection::update_command(&machine.route);
-    let version = tokio::runtime::Runtime::new()
+    let version = crate::runtime::block_on(super::connection::probe(&machine.route, false))
         .ok()
-        .and_then(|runtime| {
-            runtime
-                .block_on(super::connection::probe(&machine.route, false))
-                .ok()
-        })
         .map(|probe| probe.version);
     match version {
         Some(version) => format!(
@@ -387,6 +396,28 @@ mod tests {
     fn ssh_args_opt_in_agent_forwarding() {
         let args = crate::machine_route::bounded_ssh_args("host", true).unwrap();
         assert_eq!(args.first().unwrap(), "-A");
+    }
+
+    #[test]
+    fn pipe_command_finds_lf_without_invoking_npm() {
+        let now = time::OffsetDateTime::UNIX_EPOCH;
+        let machine = loopflow_model::durable::Machine {
+            id: loopflow_model::durable::MachineId::new(),
+            route: "mini".into(),
+            label: Some("mini".into()),
+            created_at: now,
+            observed_at: now,
+        };
+        let command = super::Pipe::command(&machine).unwrap();
+        let script = command
+            .get_args()
+            .last()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(!script.contains("npm"), "{script}");
+        assert!(script.contains("$HOME/.local/bin"), "{script}");
+        assert!(script.contains("exec 'lf' 'server' 'connect'"), "{script}");
     }
 
     #[test]

@@ -12,12 +12,12 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Fetch canonical migration history
         run: git fetch --no-tags origin main:refs/remotes/origin/main
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Check the architecture map
         run: |
           uv run --managed-python python scripts/check_architecture.py --json \
@@ -25,7 +25,7 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
       - name: Retain the weekly evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: architecture-drift-${{ github.run_id }}
           path: architecture-report.json

@@ -62,8 +62,12 @@ pub fn ended_step_recovery(
 /// Task is owned by this Machine, unfinished, and nothing else still executes for it.
 /// Status promises an automatic restart only when this holds.
 pub(crate) fn restarts_by_itself(store: &SqliteStore, task: &TaskId) -> OpsResult<bool> {
+    use loopflow_storage::execution::TaskState;
     Ok(store.task_claimed_here(task).map_err(task_error)?
-        && !store.task_state(task).map_err(task_error)?.is_terminal()
+        && matches!(
+            store.task_state(task).map_err(task_error)?,
+            TaskState::Idle | TaskState::Active | TaskState::Moving
+        )
         && task_execution_blockers(store, task)?.is_empty())
 }
 

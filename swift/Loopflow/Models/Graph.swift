@@ -166,6 +166,7 @@ public struct GraphStepGroup: Identifiable, Sendable {
 }
 
 public struct TaskRunControl: Codable, Sendable, Hashable {
+    public let pausing: Bool
     public let unavailable: String?
 }
 
@@ -255,6 +256,7 @@ public enum GraphSubject: String, Decodable, Sendable, Hashable {
 
 /// A Graph as the workflow line shows it before any Task stands on it.
 public struct WorkflowOutline: Decodable, Sendable, Hashable {
+    public let start: WorkflowControl
     /// The Graph's top-level steps in order, as `TaskGraph.steps` carries them.
     public let steps: [TaskGraph.Step]
     /// Every breakpoint in order, composed Graphs and XOR paths included.

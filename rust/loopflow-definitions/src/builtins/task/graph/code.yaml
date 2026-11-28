@@ -1,11 +1,8 @@
-description: Build, deliver and verify. You review the change, then check it on main.
+description: Build and deliver. You review the change before it merges.
 steps:
 - graph: plan
 - loop:
-    - loop:
-        - graph: build
-        - step: ship-review
-        - break
-    - graph: deliver
-    - step: verify
+    - graph: build
+    - step: ship-review
     - break
+- graph: deliver

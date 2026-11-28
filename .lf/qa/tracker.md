@@ -46,6 +46,14 @@ case: a home `T` beside a script `t` is the same path. A second clone under
 the *same* `LF_HOME` is a different repository to lf and shows an empty plan;
 its saves go out on the Machine's one ref.
 
+To see which commands touch the remote, put a `git` first on each home's
+`PATH` that appends `$LF_HOME` and its arguments to a log when they contain
+`fetch` or `push`, then `exec /usr/bin/git "$@"`. A clone's first plan read
+(`task list`, `wave list|show|status|plan`, `plan list --json|board`,
+`repo tracker`, `task detail|show <id>`) logs one `fetch` even after a
+`task create`; every later read logs none. The installed build at the
+checkout base is the "before": its create-then-list shows only the new Task.
+
 Every save pushes its own ref at once, CLI or socket (about a second
 against a local bare remote). Another Machine reads it on `lf task sync <id>`,
 or on its server's minute (53 s measured). With a hub, the save is on the hub
@@ -72,8 +80,11 @@ runs its last argument with `bash -c` under the hub home's `HOME` and
 `lf machine add mini` and `lf machine hub mini`. A flag file the stand-in
 checks (exit 255) takes the hub down. For a sleeping mini, have a second
 flag sleep 10 s before exiting 255 (SSH's `ConnectTimeout`); for a hub that
-accepts and never answers, a third flag sleeps 120 s. `pkill -f` the
-stand-in's own path afterwards, never a broader pattern. The hub must have fetched the laptop's
+accepts and never answers, a third flag sleeps 120 s. The hub's commands
+start an `lf server run` for the hub home; stop it by PID afterwards
+(`ps -eo pid,command | grep <hub home>`), never with a pattern. A bound
+no-remote clone's first `lf task list` makes four `ssh` calls and the
+second none: log the stand-in's arguments to count them. The hub must have fetched the laptop's
 ref once before it knows the laptop's repository id.
 
 For the returning-user case, build a home with the installed binary

@@ -164,6 +164,16 @@ def check_release_host() -> None:
     if "Developer ID Application" not in identity.stdout:
         raise RuntimeError("Developer ID Application signing identity is unavailable")
     _run(["gh", "auth", "status"], capture=True)
+    settings = _run(
+        [sys.executable, str(ROOT / "scripts/check_actions_secrets.py")],
+        capture=True,
+        check=False,
+    )
+    if settings.returncode != 0:
+        raise RuntimeError(
+            'GitHub Actions secrets are not main-only (.github/CI.md, "Signing secrets"):\n'
+            + (settings.stdout + settings.stderr).strip()
+        )
     _run(["flyctl", "status", "-a", "loopflow-website"], capture=True)
     _r2_client().head_bucket(Bucket="downloads")
     print("Release host preflight passed", flush=True)

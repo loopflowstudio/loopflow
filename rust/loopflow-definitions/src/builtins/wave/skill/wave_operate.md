@@ -42,6 +42,7 @@ An unreadable owner makes the Task unknown: report it and leave it.
 
 | Disposition | When, and what to do |
 | --- | --- |
+| paused | Report the held step and leave the Task quiet, including while a command finishes. |
 | moving | A live Graph run. Leave it alone. An open conversation is not a Graph run. |
 | acted | This pass continued, repaired or delivered it with an `lf` command, then reread status and saw the change. |
 | available | A review, demo, choice or merge click is ready, with its conversation link or PR. Never complete or approve it for them. |
@@ -52,7 +53,7 @@ An unreadable owner makes the Task unknown: report it and leave it.
 "Ready" and "needs reconciliation" are not dispositions. Take the first row
 that fits:
 
-- **Look for a live Graph first.** In `lf task status <issue> --json`, a
+- **Check for a live Graph on each remaining Task.** In `lf task status <issue> --json`, a
   position with `running` true is a live run, read from its own pid. A live
   run makes the Task moving, whoever launched it.
 - **Repair before reporting a blocker.** Read the failed step's log and what
@@ -65,7 +66,7 @@ that fits:
   a merge they didn't approve.
 - **Finish merged work.** Let a live Graph finish. Otherwise, when the
   outcome holds, run `lf task complete <issue>` and reread status. Retry
-  completion alone, never by rerunning gate or re-arming a merged PR.
+  completion alone, never by re-arming a merged PR.
 
 Tasks progress independently of this pass; their Graphs do the work, so don't
 perform a Graph's steps here. `lf task run <issue-id>` continues a Task you

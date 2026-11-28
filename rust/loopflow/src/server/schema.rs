@@ -75,9 +75,8 @@ fn add_examples(schema: &mut Value) {
 
 /// Recorded requests, embedded so `describe` needs no source tree. Each
 /// names its operation; a test fails when a request fixture is missing here.
-const REQUESTS: &[&str] = &[
+pub(super) const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_write.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/attach.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_start.json"),
@@ -107,6 +106,8 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/machine_request.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_interrupt.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_pause.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_unpause.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on.json"),
@@ -118,6 +119,7 @@ const REQUESTS: &[&str] = &[
     include_str!(
         "../../../loopflow-execution/tests/fixtures/dto/server/mobile_status_request.json"
     ),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/server_diagnostics.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_page.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_continue.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_create.json"),
@@ -278,6 +280,13 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         "mobile_status",
         "mobile.status",
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/mobile_status.json"),
+    ),
+    (
+        "server_diagnostics_answer",
+        "server.diagnostics",
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/server_diagnostics_answer.json"
+        ),
     ),
     (
         "remote",

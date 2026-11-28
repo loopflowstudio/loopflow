@@ -192,7 +192,7 @@ pub struct UnrunGraph {
 
 fn unrun_graphs_in(conn: &Connection, ids: &str) -> StoreResult<HashMap<TaskId, UnrunGraph>> {
     let rows = conn
-        .prepare(
+        .prepare_cached(
             "SELECT t.task_id,json_extract(t.graph,'$.name'),
                 (SELECT e.kind_json FROM task_events e WHERE e.task_id=t.task_id ORDER BY e.id DESC LIMIT 1)
              FROM task_graphs t
@@ -244,7 +244,7 @@ fn limit_recoveries(
 ) -> StoreResult<HashMap<LfProcessId, AgentLimitRecovery>> {
     let ids = super::children::ids_json(steps.iter().map(|id| id.as_str()));
     let rows = conn
-        .prepare(
+        .prepare_cached(
             "SELECT lf_process_id,provider,reason,retry_at,agent FROM agent_limit_recoveries
              WHERE lf_process_id IN (SELECT value FROM json_each(?1))",
         )?
@@ -271,7 +271,7 @@ fn process_inputs(
 ) -> StoreResult<HashMap<LfProcessId, (String, String, i64)>> {
     let ids = super::children::ids_json(processes.iter().map(|id| id.as_str()));
     let rows = conn
-        .prepare(
+        .prepare_cached(
             "SELECT lf_process_id,session_id,receipt_key,MAX(seq) FROM session_events
              WHERE lf_process_id IN (SELECT value FROM json_each(?1)) AND kind='captured'
              GROUP BY lf_process_id",
@@ -367,7 +367,7 @@ impl SqliteStore {
     pub fn tasks_past_a_limit_wait(&self, now: i64) -> StoreResult<HashSet<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let waits = conn
-            .prepare("SELECT lf_process_id FROM agent_limit_recoveries WHERE retry_at<=?1")?
+            .prepare_cached("SELECT lf_process_id FROM agent_limit_recoveries WHERE retry_at<=?1")?
             .query_map([now], |row| row.get(0))?
             .collect::<Result<Vec<LfProcessId>, _>>()?;
         let mut tasks = HashSet::new();
@@ -563,6 +563,15 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Count Graph steps currently running on this Machine (reserved or active, not ended).
+    pub fn running_graph_step_count(&self) -> StoreResult<usize> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query =
+            conn.prepare_cached("SELECT COUNT(*) FROM graph_process_steps WHERE ended_at IS NULL")?;
+        let count: i64 = query.query_row([], |row| row.get(0))?;
+        Ok(usize::try_from(count).unwrap_or(0))
+    }
+
     /// Whether the Graph run `id` has recorded itself.
     pub fn graph_run_recorded(&self, id: &LfProcessId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -730,7 +739,7 @@ impl SqliteStore {
         let unanswered_questions = super::turns::unanswered_questions_in(&conn, &steps)?;
         let limit_recoveries = limit_recoveries(&conn, &steps)?;
         let unrun = unrun_graphs_in(&conn, &ids)?;
-        let mut carriers = conn.prepare(
+        let mut carriers = conn.prepare_cached(
             "SELECT task_id FROM task_graphs WHERE task_id IN (SELECT value FROM json_each(?1))
              AND (run_pid IS NOT NULL OR run_died_at IS NOT NULL)",
         )?;

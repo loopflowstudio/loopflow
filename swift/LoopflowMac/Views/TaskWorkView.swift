@@ -77,86 +77,31 @@ struct TaskWorkflowHeader: View {
     }
 }
 
-/// Auto-Ship at the right of the Workflow bar: an ordinary button. Off, it is
-/// `lf task auto on`, which also runs the Task: its run continues through
-/// breakpoints and lands it. On, it is `lf task auto off`. Rust decides whether
-/// auto can start. Sidebar rows and menus carry no auto control.
-struct TaskAutoControl: View {
-    let model: WorkModel
-    let task: RoadmapTask
-
-    var body: some View {
-        let actions = TaskActions(work: model.taskWork[task.id].value, row: task,
-                                  execution: model.taskExecution[task.id].value)
-        if let auto = actions.auto {
-            let refusal = model.changeRefusal ?? actions.autoRefusal
-            Button(auto.offer) {
-                if auto == .on { model.turnAutoOff(task) } else { model.turnAutoOn(task) }
-            }
-            .buttonStyle(LoopflowButtonStyle())
-            .fixedSize()
-            .disabled(refusal != nil)
-            .help(refusal ?? auto.help(issue: task.task.identifier))
-            .accessibilityIdentifier("task-auto")
-        }
-    }
-}
-
-/// The selected Task's Workflow under the jump bar: the workflow line, the one
-/// step that moves it from here, Auto-Ship, then "…" with every other Task
-/// action. Rust owns the graph, the position, the sentence and whether a run
-/// can start; this only arranges them.
+/// The selected Task's Graph and the controls for its saved position.
 struct TaskWorkflowBar: View {
     let model: WorkModel
     let task: RoadmapTask
     /// The Task part of the workspace stream, as last read.
     let work: Reading<TaskOverview>
-    var newConversation: (() -> Void)?
-    var openSession: ((SessionRecord) -> Void)?
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let actions = TaskActions(work: work.value, row: task, execution: model.taskExecution[task.id].value)
-        HStack(spacing: Spacing.md) {
-            if let workflow = work.value?.graph {
-                // One line in a 34 pt bar: a sentence that does not fit is cut, with the whole of it in the tooltip.
-                let line = WorkflowLine(graph: workflow, auto: actions.auto == .on, setup: task.setupPosition)
-                line.lineLimit(1).truncationMode(.tail).help(line.sentence ?? workflow.sentence)
-            } else if work.value == nil {
-                Text(work.isLoading ? task.setupPosition ?? "Reading workflow…" : "")
-                    .lineLimit(1).truncationMode(.tail)
-                    .foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("task-workflow-bar-live")
-            } else if let name = task.graphName {
-                // Not started: the workflow its first run takes up, as the catalog outlines it.
-                WorkflowLine(name: name, outline: model.workflowOutline(name))
+        let actions = TaskActions(work: work.value, row: task, execution: model.taskExecution[task.id].value,
+                                  outline: model.workflowOutline(task.graphName),
+                                  autoPending: model.pendingChanges.autoRequest(for: task.task.identifier))
+        TaskWorkflowControls(task: task, actions: actions, pending: model.pendingChanges.controlRequest(for: task.task.identifier),
+                             run: { step in
+                                 model.startTaskFromInput(nil, from: step, arrival: step == nil ? actions.breakpointArrival : nil, task: task)
+                             },
+                             pause: { model.setPause($0, task: task) }, interrupt: { model.interruptStep(task) },
+                             toggleAuto: { if actions.auto == .on { model.turnAutoOff(task) } else { model.turnAutoOn(task) } },
+                             complete: { model.beginComplete(task) }) {
+            TaskLifecycleItems(model: model, task: task)
+            if let overview = work.value, overview.graph == nil, !task.isCompleted {
+                TaskStartGraphMenu(model: model, task: task)
             }
-            Spacer(minLength: 0)
-            if let run = actions.run {
-                let refusal = model.changeRefusal ?? actions.runRefusal
-                Button(run.label) { model.startTaskFromInput(nil, arrival: run.arrival, task: task) }
-                    .buttonStyle(LoopflowButtonStyle())
-                    .fixedSize()
-                    .disabled(refusal != nil)
-                    .help(refusal ?? run.help)
-                    .accessibilityIdentifier(work.value?.graph == nil ? "task-workflow-start" : "task-workflow-run")
-            }
-            TaskAutoControl(model: model, task: task)
-            Menu {
-                TaskActionItems(model: model, task: task, wave: model.task(id: task.id)?.wave?.wave,
-                                work: work.value, newConversation: newConversation, openSession: openSession)
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(Typography.text)
-                    .frame(width: HitTarget.control, height: HitTarget.control)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden)
-            .fixedSize()
-            .help("Task actions")
-            .accessibilityLabel("Task actions")
-            .accessibilityIdentifier("task-actions")
         }
+        .disabled(model.changeRefusal != nil)
         .padding(.horizontal, Spacing.md)
         .frame(height: 34)
         .font(Typography.text)
@@ -168,6 +113,19 @@ struct TaskWorkflowBar: View {
         .task(id: work.value != nil && work.value?.graph == nil) {
             if work.value != nil, work.value?.graph == nil { await model.loadGraphCatalog() }
         }
+    }
+}
+
+private struct TaskStartGraphMenu: View {
+    let model: WorkModel
+    let task: RoadmapTask
+
+    var body: some View {
+        Menu("Start with…") {
+            StartFlowItems(model: model, chosen: task.graphName) { model.startTaskFromInput($0, task: task) }
+        }
+        .disabled(model.runRefusal(task) != nil)
+        .accessibilityIdentifier("task-workflow-choose")
     }
 }
 
@@ -210,8 +168,7 @@ struct TaskStartOffer: View {
     }
 }
 
-/// Every Task action: the workflow bar's "…", sidebar context menus,
-/// Dashboard tiles and ⌘/ list the same items.
+/// The complete action list for sidebar rows, Dashboard tiles and ⌘/.
 struct TaskActionItems: View {
     let model: WorkModel
     let task: RoadmapTask
@@ -220,29 +177,53 @@ struct TaskActionItems: View {
     let work: TaskOverview?
     var newConversation: (() -> Void)?
     var openSession: ((SessionRecord) -> Void)?
-    @State private var copied: String?
-
-    private var unavailable: Bool { model.changeRefusal != nil }
-
     var body: some View {
-        if let workflow = work?.graph {
-            // Start the next run at `start` or any top-level runnable work stage.
+        let actions = TaskActions(work: work, row: task, execution: model.taskExecution[task.id].value)
+        if work?.graph != nil {
             Menu("Start from…") {
-                ForEach(workflow.startFromSteps, id: \.self) { step in
+                ForEach(actions.steps, id: \.self) { step in
                     Button(step) { model.startTaskFromInput(nil, from: step, task: task) }
                         .accessibilityIdentifier("task-workflow-move-\(step)")
                 }
             }
-            .disabled(model.runRefusal(task) != nil)
-            .help(model.runRefusal(task) ?? "lf task run \(task.task.identifier) --from <step>")
+            .disabled(model.runRefusal(task) != nil || actions.control?.action == .pause || actions.control?.action == .pausing)
             .accessibilityIdentifier("task-workflow-move")
         } else if work != nil, !task.isCompleted {
-            Menu("Start with…") {
-                StartFlowItems(model: model, chosen: task.graphName) { model.startTaskFromInput($0, task: task) }
-            }
-            .disabled(model.runRefusal(task) != nil)
-            .accessibilityIdentifier("task-workflow-choose")
+            TaskStartGraphMenu(model: model, task: task)
         }
+        if let action = actions.pause {
+            Button(action == .pause ? "Pause" : "Unpause") {
+                model.setPause(action, task: task)
+            }
+            .disabled(model.changeRefusal != nil || model.pendingChanges.controlRequest(for: task.task.identifier) != nil
+                      || task.runControl.pausing || actions.control?.action == .pausing)
+        }
+        TaskLifecycleItems(model: model, task: task)
+        if !task.isCompleted {
+            let hasOpenChildren = model.hasOpenChildren(task)
+            Button(hasOpenChildren ? "Complete Task…" : "Complete Task") {
+                model.beginComplete(task)
+            }
+            .disabled(model.changeRefusal != nil)
+            .help(hasOpenChildren
+                ? "Mark this Task done and choose whether its open children move up or are abandoned"
+                : "Mark this Task done")
+            .accessibilityIdentifier("task-complete")
+        }
+        TaskMetadataItems(model: model, task: task, wave: wave, newConversation: newConversation, openSession: openSession)
+    }
+}
+
+private struct TaskMetadataItems: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    let wave: WaveSnapshot?
+    var newConversation: (() -> Void)?
+    var openSession: ((SessionRecord) -> Void)?
+    @State private var copied: String?
+    private var unavailable: Bool { model.changeRefusal != nil }
+
+    var body: some View {
         Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
         Menu("Move to Wave") {
             Button("No Wave") { model.moveTask(task, toWave: nil) }
@@ -253,27 +234,6 @@ struct TaskActionItems: View {
                 }.disabled(destination.wave.id == task.task.waveId)
             }
         }.disabled(unavailable).accessibilityIdentifier("task-move-wave")
-        if task.isCompleted {
-            Button("Reopen Task") { model.reopenTask(task) }.disabled(unavailable)
-                .accessibilityIdentifier("task-reopen")
-        } else {
-            let hasOpenChildren = model.hasOpenChildren(task)
-            Button(hasOpenChildren ? "Complete Task…" : "Complete Task") {
-                model.beginComplete(task)
-            }
-            .disabled(unavailable)
-            .help(hasOpenChildren
-                ? "Mark this Task done and choose whether its open children move up or are abandoned"
-                : "Mark this Task done")
-            .accessibilityIdentifier("task-complete")
-            Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
-                model.assignTask(task, claimed: task.runtime?.owner == nil)
-            }
-            .disabled(unavailable)
-            .help(task.runtime?.owner == nil ? "lf task claim: you own it on this Machine"
-                : "lf task unassign: nobody owns it, so nothing moves it; its checkout, PR and history stay")
-            .accessibilityIdentifier("task-claim-unassign")
-        }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }
         Divider()
         Button(copied == "id" ? "Copied Task ID" : "Copy Task ID") { copy(task.task.identifier, key: "id") }
@@ -295,12 +255,6 @@ struct TaskActionItems: View {
                 Button("Make \(session.title) primary…") { model.beginSessionBinding(session) }
             }
         }
-        if !task.isCompleted {
-            Divider()
-            Button("Abandon…", role: .destructive) { model.beginAbandon(task) }
-                .disabled(unavailable)
-                .accessibilityIdentifier("task-abandon")
-        }
     }
 
     private func copy(_ value: String, key: String) {
@@ -309,6 +263,30 @@ struct TaskActionItems: View {
     }
 }
 
+private struct TaskLifecycleItems: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    private var unavailable: Bool { model.changeRefusal != nil }
+
+    var body: some View {
+        if task.isCompleted {
+            Button("Reopen Task") { model.reopenTask(task) }.disabled(unavailable)
+                .accessibilityIdentifier("task-reopen")
+        } else {
+            Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
+                model.assignTask(task, claimed: task.runtime?.owner == nil)
+            }
+            .disabled(unavailable)
+            .help(task.runtime?.owner == nil ? "lf task claim: you own it on this Machine"
+                : "lf task unassign: nobody owns it, so nothing moves it; its checkout, PR and history stay")
+            .accessibilityIdentifier("task-claim-unassign")
+            Divider()
+            Button("Abandon…", role: .destructive) { model.beginAbandon(task) }
+                .disabled(unavailable)
+                .accessibilityIdentifier("task-abandon")
+        }
+    }
+}
 
 /// The window's one Abandon… confirmation, whichever menu asked for it.
 struct TaskAbandonConfirmation: ViewModifier {

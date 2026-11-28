@@ -29,8 +29,7 @@ struct ContextReport {
 pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
     let mut repo =
         loopflow_execution::repo::require_repo_root(&std::env::current_dir()?, "lf context")?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let binding = runtime.block_on(async {
+    let binding = loopflow_execution::runtime::block_on(async {
         let Some(store) = loopflow_execution::store::open_existing_store().await? else {
             anyhow::ensure!(task.is_none(), "Task usage unavailable: no local registry");
             return Ok::<_, anyhow::Error>(None);
@@ -113,8 +112,7 @@ pub fn explain_in(
         !((wave.is_some() || task.is_some()) && session.is_some()),
         "select Work or a Session, not both"
     );
-    let runtime = tokio::runtime::Runtime::new()?;
-    Ok(runtime.block_on(async {
+    Ok(loopflow_execution::runtime::block_on(async {
         use loopflow_execution::ops::context::ContextExplanation;
         match read_registry() {
             Ok(store) => {
@@ -138,8 +136,7 @@ pub fn explain_task_run(
     mode: loopflow_execution::ops::task::TaskRunMode,
 ) -> Result<loopflow_execution::ops::task::TaskRunExplanation> {
     let cwd = std::env::current_dir()?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    Ok(runtime.block_on(async {
+    Ok(loopflow_execution::runtime::block_on(async {
         match read_registry() {
             Ok(store) => {
                 loopflow_execution::ops::task::explain_task_run(
@@ -181,8 +178,7 @@ pub fn explain_session_resume(
     prepare_only: bool,
 ) -> Result<SessionResumeExplanation> {
     let cwd = std::env::current_dir()?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    Ok(runtime.block_on(async {
+    Ok(loopflow_execution::runtime::block_on(async {
         match read_registry() {
             Ok(store) => {
                 loopflow_execution::ops::human_session::explain_resume(
@@ -206,8 +202,7 @@ pub fn explain_task_planning(
     request: &loopflow_execution::ops::task::TaskPlanningRequest<'_>,
 ) -> Result<loopflow_execution::ops::task::TaskPlanningExplanation> {
     let cwd = std::env::current_dir()?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    Ok(runtime.block_on(async {
+    Ok(loopflow_execution::runtime::block_on(async {
         match read_registry() {
             Ok(store) => {
                 loopflow_execution::ops::task::explain_task_planning(
@@ -231,8 +226,7 @@ pub fn explain_task_checkout(
     options: &loopflow_execution::ops::task::TaskProcessOptions,
 ) -> Result<loopflow_execution::ops::task::TaskCheckoutExplanation> {
     let cwd = std::env::current_dir()?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    Ok(runtime.block_on(async {
+    Ok(loopflow_execution::runtime::block_on(async {
         match read_registry() {
             Ok(store) => {
                 loopflow_execution::ops::task::explain_task_checkout(

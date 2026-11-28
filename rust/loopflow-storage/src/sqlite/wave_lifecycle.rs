@@ -9,7 +9,7 @@ use crate::StoreResult;
 impl SqliteStore {
     pub fn wave_operations(&self, repo: &str, kind: &str) -> StoreResult<Vec<Operation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT operation_json FROM wave_lifecycle_operations
              WHERE repo=?1 AND kind=?2 ORDER BY rowid DESC",
         )?;

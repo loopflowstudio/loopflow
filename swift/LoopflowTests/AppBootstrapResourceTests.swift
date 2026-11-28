@@ -9,7 +9,7 @@ struct AppBootstrapResourceTests {
     func newTaskGlyphs() throws {
         for (face, text) in [(Typography.serifFace, "What do you want?"),
                              (Typography.sansFace, "implement · ship-review"),
-                             (Typography.sansStrongFace, "verify")] {
+                             (Typography.sansStrongFace, "deliver")] {
             let font = try #require(AppFontRegistration.font(face, size: 18))
             let characters = Array(text.utf16)
             var glyphs = [CGGlyph](repeating: 0, count: characters.count)

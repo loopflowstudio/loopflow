@@ -1,10 +1,10 @@
 import Foundation
 
-/// Revision 10 of the server protocol: one connection per client, a negotiated
+/// Revision 11 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 10
+    public static let revision = 11
     /// Session attach and continue require Task and Machine selectors.
     public static let minRevision = 10
     /// The largest control-connection message; larger ones travel by ticket.
@@ -237,6 +237,8 @@ public enum ServerOperation: Encodable, Sendable {
     /// Desktop never sends it; `lf __context-block` and the OpenCode and Pi plugins do.
     case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?,
                          printed: [String], inbox: JSONValue?)
+    /// Live runtime counters for the serving process: threads, SQLite opens, spawns, and held facts.
+    case serverDiagnostics
 
     private enum Keys: String, CodingKey {
         case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, task, machine, agent, terminalID = "terminal_id"
@@ -319,7 +321,24 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(gap, forKey: .gap)
             try box.encode(printed, forKey: .printed)
             try box.encode(inbox, forKey: .inbox)
+        case .serverDiagnostics:
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("server.diagnostics", forKey: .kind)
         }
+    }
+}
+
+/// Live runtime counters answered by `server.diagnostics`.
+public struct ServerDiagnostics: Decodable, Equatable, Sendable {
+    public let threads: UInt64
+    public let storeOpens: UInt64
+    public let spawns: UInt64
+    public let heldFacts: UInt64
+
+    private enum CodingKeys: String, CodingKey {
+        case threads, spawns
+        case storeOpens = "store_opens"
+        case heldFacts = "held_facts"
     }
 }
 

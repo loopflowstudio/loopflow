@@ -39,6 +39,17 @@ struct NowProjectionTests {
         #expect(nowSections(from: [unstarted, opened, parked], waves: []).flatMap(\.rows).map(\.task) == [parked])
     }
 
+    @Test("Pausing removes a Task from Now while its previous condition is still visible")
+    func pauseClearsNeedBeforeTheNextReading() throws {
+        var task = try #require(loadConditionFixture()["dirty"])
+        #expect(nowSections(from: [task], waves: []).flatMap(\.rows).map(\.id) == [task.id])
+
+        task.lifecycle = .paused
+        #expect(task.condition.localProgress.dirty == true)
+        #expect(nowSections(from: [task], waves: []).isEmpty)
+        #expect(taskConditionAccessibilityLabel(task) == "\(task.task.identifier), \(task.task.name).")
+    }
+
     @Test("NOW flattens across waves and drops empty groups")
     func nowSectionsAreFlatAndGrouped() throws {
         let snapshot = try loadRoadmapFixture()

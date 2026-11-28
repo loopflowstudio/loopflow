@@ -604,7 +604,21 @@ impl Driver {
         // Codex's shell policy need not inherit arbitrary app-server environment.
         // Pass only explicit launch and freshly resolved lf executable/Machine
         // values as configuration.
-        let tool_environment = super::conversation_environment(command.as_std(), launch);
+        let mut tool_environment = super::conversation_environment(command.as_std(), launch);
+        // Carry Graph-step build-job budgets into Codex tool shells even when a
+        // user's shell_environment_policy restricts inherited variables.
+        for key in [
+            "CARGO_BUILD_JOBS",
+            "NEXTEST_TEST_THREADS",
+            "MAKEFLAGS",
+            "LF_JOBS",
+        ] {
+            if !tool_environment.contains_key(key) {
+                if let Ok(value) = std::env::var(key) {
+                    tool_environment.insert(key.into(), value);
+                }
+            }
+        }
         // Caller/capture provenance reaches tools only through that policy.
         crate::agent::remove_caller_session_env(command.as_std_mut());
         let native = self.approval == ApprovalPolicy::NativeClient;
@@ -1134,13 +1148,10 @@ impl super::Launcher for loopflow_harness::Codex {
             let opened = std::thread::scope(|scope| {
                 scope
                     .spawn(|| {
-                        tokio::runtime::Builder::new_current_thread()
-                            .enable_all()
-                            .build()?
-                            .block_on(open_native(&super::Launch {
-                                config: &config,
-                                ..*launch
-                            }))
+                        crate::runtime::block_on(open_native(&super::Launch {
+                            config: &config,
+                            ..*launch
+                        }))
                     })
                     .join()
                     .map_err(|_| anyhow!("Codex startup worker panicked"))?
@@ -1302,21 +1313,20 @@ mod tests {
 
     #[tokio::test]
     async fn native_skill_precedes_request_and_clipboard_without_continuation_replay() {
-        use crate::skills::catalog::{SkillDialect, SkillSource};
+        use crate::skills::catalog::SkillCatalog;
         use crate::skills::invocation::SkillInvocation;
 
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("SKILL.md");
+        let skill_dir = directory.path().join(".codex/skills/probe");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let path = skill_dir.join("SKILL.md");
         let source = "---\nname: probe\ndescription: Inspect the supplied asset\n---\nRead ./asset.txt before answering.\n";
         std::fs::write(&path, source).unwrap();
-        std::fs::write(directory.path().join("asset.txt"), "Native asset.").unwrap();
-        let skill = SkillSource {
-            name: "probe".into(),
-            path: Some(path.clone()),
-            dialect: SkillDialect::Codex,
-        }
-        .load()
-        .unwrap();
+        std::fs::write(skill_dir.join("asset.txt"), "Native asset.").unwrap();
+        let skill = SkillCatalog::load(Some(directory.path()), None, false)
+            .unwrap()
+            .load_skill("probe")
+            .unwrap();
         let request = "Find the bug.\n\n<lf:clipboard>\nPasted evidence.\n</lf:clipboard>";
         let (events, _events) = mpsc::unbounded_channel();
         let mut harness = Driver::new(

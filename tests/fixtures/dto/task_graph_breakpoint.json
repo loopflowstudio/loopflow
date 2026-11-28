@@ -20,5 +20,9 @@
     }
   ],
   "current_step": 1,
-  "sentence": "At breakpoint after-research."
+  "sentence": "At breakpoint after-research.",
+  "control": {
+    "action": "continue",
+    "label": "Continue"
+  }
 }

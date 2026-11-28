@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
-use crate::graph::{compile_graph, load_authored_graph, ConcreteSkill, ConcreteStep};
+use crate::graph::{
+    compile_graph, load_authored_graph, return_target, ConcreteSkill, ConcreteStep,
+};
+use loopflow_storage::sqlite::task_work::PauseStage;
 use loopflow_storage::sqlite::{Auto, AutoState};
 
 pub use loopflow_storage::sqlite::task_work::{END, START};
@@ -18,6 +21,14 @@ pub use loopflow_storage::sqlite::task_work::{END, START};
 pub struct CapturedGraph {
     pub name: String,
     pub steps: Vec<ConcreteStep>,
+}
+
+/// What lifting a pause hold does at the Task's saved position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum UnpauseEffect {
+    Resume,
+    /// Stay parked; settle a dead run cursor to `At { step }` when `Some`.
+    Park(Option<String>),
 }
 
 /// A place in the captured steps: the top level, or inside XOR paths.
@@ -84,7 +95,10 @@ fn names(step: &ConcreteStep) -> Vec<&str> {
 
 /// The name a Task waits at before a step that merges: `lf land` or `lf pr
 /// arm` however the graph spells it, or the `pr-land` skill.
-pub fn landing_name(step: &ConcreteStep, merges: fn(&[String]) -> bool) -> Option<String> {
+pub fn landing_name(
+    step: &ConcreteStep,
+    mut merges: impl FnMut(&[String]) -> bool,
+) -> Option<String> {
     match step {
         ConcreteStep::Command(command) => {
             merges(&command.item.argv()).then(|| command.item.display_name())
@@ -219,6 +233,215 @@ impl CapturedGraph {
         }
     }
 
+    fn has_landing(steps: &[ConcreteStep], merges: &mut dyn FnMut(&[String]) -> bool) -> bool {
+        steps.iter().any(|step| match step {
+            ConcreteStep::Xor(branch) => branch
+                .paths
+                .values()
+                .any(|path| Self::has_landing(&path.steps, merges)),
+            _ => landing_name(step, &mut *merges).is_some(),
+        })
+    }
+
+    /// Could any remaining path need a person before or at its next landing?
+    fn needs_review(
+        &self,
+        place: &Place,
+        stop_at_landing: bool,
+        merges: &mut dyn FnMut(&[String]) -> bool,
+    ) -> bool {
+        fn scan(
+            steps: &[ConcreteStep],
+            after: bool,
+            stop_at_landing: bool,
+            merges: &mut dyn FnMut(&[String]) -> bool,
+        ) -> bool {
+            steps.iter().rev().fold(after, |later, step| match step {
+                ConcreteStep::Breakpoint(_) => true,
+                ConcreteStep::Skill(skill) if skill.interactive_step().is_some() => true,
+                ConcreteStep::Xor(branch) => branch
+                    .paths
+                    .values()
+                    .any(|path| scan(&path.steps, later, stop_at_landing, merges)),
+                _ if landing_name(step, &mut *merges).is_some() => stop_at_landing,
+                _ => later,
+            })
+        }
+        let mut steps = self.steps.as_slice();
+        let mut later = false;
+        for (index, selected) in &place.path {
+            later = scan(&steps[index + 1..], later, stop_at_landing, merges);
+            let ConcreteStep::Xor(branch) = &steps[*index] else {
+                unreachable!("validated XOR path")
+            };
+            steps = &branch.paths[selected].steps;
+        }
+        scan(&steps[place.index..], later, stop_at_landing, merges)
+    }
+
+    /// Whether no review remains before landing from the current cursor or stop.
+    pub fn ships_before_review(
+        &self,
+        step: &str,
+        cursor: Option<&ExecutionCursor>,
+        auto: Option<AutoState>,
+        mut merges: impl FnMut(&[String]) -> bool,
+    ) -> bool {
+        if !Self::has_landing(&self.steps, &mut merges) {
+            return false;
+        }
+        let place = if let Some(cursor) = cursor {
+            if cursor.index == self.steps.len() {
+                return true;
+            }
+            self.place_of(cursor)
+        } else if step == END {
+            return true;
+        } else {
+            self.interactive_step(step).or_else(|| self.find(step))
+        };
+        let stop_at_landing = auto == Some(AutoState::Off);
+        place.is_some_and(|place| !self.needs_review(&place, stop_at_landing, &mut merges))
+    }
+
+    /// What lifting a pause hold does at `(step, cursor)` under `auto`:
+    /// `Resume` restarts the run; `Park(step)` leaves it parked, settling a
+    /// dead run cursor to `At { step }` when `Some`.
+    pub(crate) fn unpause_effect(
+        &self,
+        step: &str,
+        cursor: Option<&ExecutionCursor>,
+        at_breakpoint: bool,
+        auto: Option<AutoState>,
+        merges: impl FnMut(&[String]) -> bool,
+    ) -> UnpauseEffect {
+        match cursor {
+            Some(cursor) => match self.place_of(cursor) {
+                Some(place) => match (auto == Some(AutoState::Off))
+                    .then(|| self.landing_at(&place, merges))
+                    .flatten()
+                {
+                    Some(step) => UnpauseEffect::Park(Some(step)),
+                    None => UnpauseEffect::Resume,
+                },
+                None => UnpauseEffect::Park(None),
+            },
+            None if step == START => UnpauseEffect::Resume,
+            None if step != END
+                && !at_breakpoint
+                && auto != Some(AutoState::Off)
+                && self.interactive_step(step).is_none() =>
+            {
+                UnpauseEffect::Resume
+            }
+            None => UnpauseEffect::Park(None),
+        }
+    }
+
+    /// A run restarts at its saved cursor unless `auto` now parks at that step.
+    /// A Task already waiting for a person stays there.
+    pub(crate) fn resumes_on_unpause(
+        &self,
+        step: &str,
+        cursor: Option<&ExecutionCursor>,
+        at_breakpoint: bool,
+        auto: Option<AutoState>,
+        merges: impl FnMut(&[String]) -> bool,
+    ) -> bool {
+        matches!(
+            self.unpause_effect(step, cursor, at_breakpoint, auto, merges),
+            UnpauseEffect::Resume
+        )
+    }
+
+    /// Whether a run can reach a merging step. With `through`, the run
+    /// follows paths past their breakpoints.
+    pub fn reaches_landing(
+        &self,
+        place: &Place,
+        through: bool,
+        merges: fn(&[String]) -> bool,
+    ) -> bool {
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum Reach {
+            Landing,
+            Stopped,
+            Continue,
+        }
+        fn scan(
+            body: &[ConcreteStep],
+            from: usize,
+            through: bool,
+            merges: fn(&[String]) -> bool,
+        ) -> Reach {
+            for (offset, step) in body[from..].iter().enumerate() {
+                let index = from + offset;
+                match step {
+                    ConcreteStep::Breakpoint(_) => {
+                        if !through {
+                            return Reach::Stopped;
+                        }
+                        if let Some(target) = return_target(body, index) {
+                            if target < from
+                                && scan(&body[..from], target, through, merges) == Reach::Landing
+                            {
+                                return Reach::Landing;
+                            }
+                        }
+                    }
+                    ConcreteStep::Skill(skill) => {
+                        // Matches a released capture: an interactive step stops before landing runs.
+                        if !through && skill.interactive {
+                            return Reach::Stopped;
+                        }
+                        if landing_name(step, merges).is_some() {
+                            return Reach::Landing;
+                        }
+                        if let Some(target) = return_target(body, index) {
+                            if target < from
+                                && scan(&body[..from], target, through, merges) == Reach::Landing
+                            {
+                                return Reach::Landing;
+                            }
+                        }
+                    }
+                    ConcreteStep::Command(_) => {
+                        if landing_name(step, merges).is_some() {
+                            return Reach::Landing;
+                        }
+                    }
+                    ConcreteStep::Xor(branch) => {
+                        let mut all_stopped = !branch.paths.is_empty();
+                        for alternative in branch.paths.values() {
+                            match scan(&alternative.steps, 0, through, merges) {
+                                Reach::Landing => return Reach::Landing,
+                                Reach::Stopped => {}
+                                Reach::Continue => all_stopped = false,
+                            }
+                        }
+                        if all_stopped {
+                            return Reach::Stopped;
+                        }
+                    }
+                }
+            }
+            Reach::Continue
+        }
+        let mut path = place.path.clone();
+        let mut from = place.index;
+        loop {
+            match scan(body(&self.steps, &path), from, through, merges) {
+                Reach::Landing => return true,
+                Reach::Stopped => return false,
+                Reach::Continue => {}
+            }
+            let Some((index, _)) = path.pop() else {
+                return false;
+            };
+            from = index + 1;
+        }
+    }
+
     /// The place `cursor` stands at, if the graph has it.
     pub fn place_of(&self, cursor: &ExecutionCursor) -> Option<Place> {
         let mut path = Vec::new();
@@ -243,6 +466,14 @@ impl CapturedGraph {
             }
         }
         (place.index < body.len()).then_some(place)
+    }
+
+    pub fn landing_at(
+        &self,
+        place: &Place,
+        merges: impl FnMut(&[String]) -> bool,
+    ) -> Option<String> {
+        landing_name(self.step_at(place), merges)
     }
 
     fn step_at(&self, place: &Place) -> &ConcreteStep {
@@ -361,9 +592,62 @@ pub fn step_name(step: &ConcreteStep) -> String {
     }
 }
 
+/// The workflow track's primary action and current-step chip label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowControl {
+    pub action: WorkflowAction,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowAction {
+    Run,
+    Continue,
+    Pause,
+    Pausing,
+    Unpause,
+    Resume,
+    Wait,
+    Done,
+}
+
+fn chip_step(top: Option<&str>, at: &str) -> String {
+    match top {
+        Some(top) if top != at => format!("{top} · {at}"),
+        _ => at.to_owned(),
+    }
+}
+
+impl WorkflowControl {
+    fn run(step: &str) -> Self {
+        Self {
+            action: WorkflowAction::Run,
+            label: format!("Run: {step}"),
+        }
+    }
+
+    fn paused(step: &str, resume: bool, stopping: bool) -> Self {
+        let (action, prefix) = match (stopping, resume) {
+            (true, _) => (WorkflowAction::Pausing, "Pausing"),
+            (false, true) => (WorkflowAction::Resume, "Paused"),
+            (false, false) => (WorkflowAction::Unpause, "Paused"),
+        };
+        Self {
+            action,
+            label: format!("{prefix}: {step}"),
+        }
+    }
+
+    fn start(steps: &[WorkflowStep]) -> Self {
+        Self::run(steps.first().map_or(END, |step| step.name.as_str()))
+    }
+}
+
 /// A Graph as the workflow line shows it before any Task stands on it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOutline {
+    pub start: WorkflowControl,
     /// The Graph's top-level steps in order, as `TaskGraph.steps` carries them.
     pub steps: Vec<WorkflowStep>,
     /// Every breakpoint in order, including composed Graphs and XOR paths.
@@ -380,8 +664,10 @@ impl WorkflowOutline {
             [only] => format!("You take part at {only}."),
             [rest @ .., last] => format!("You take part at {} and {last}.", rest.join(", ")),
         };
+        let steps = workflow(steps).0;
         Self {
-            steps: workflow(steps).0,
+            start: WorkflowControl::start(&steps),
+            steps,
             breakpoints,
             sentence,
         }
@@ -391,6 +677,7 @@ impl WorkflowOutline {
 /// One Task's Graph as `lf task status --json` carries it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskGraph {
+    pub control: WorkflowControl,
     pub name: String,
     /// Every breakpoint in order, including composed Graphs and XOR paths.
     pub breakpoints: Vec<String>,
@@ -465,39 +752,131 @@ impl TaskGraph {
         breakpoint: Option<&crate::store::task_work::BreakpointArrival>,
         run: Option<TaskGraphRun<'_>>,
         auto: Option<AutoState>,
+        pause: Option<PauseStage>,
+        merges: impl FnMut(&[String]) -> bool,
     ) -> Self {
         let (steps, indices) = workflow(&graph.steps);
         let top = |place: &Place| {
             let index = place.path.first().map_or(place.index, |(index, _)| *index);
             indices[index]
         };
-        let (position, current_step, sentence) = match (breakpoint, run) {
+        let top_name = |place: &Place| steps[top(place) as usize].name.as_str();
+        let resumes = pause.is_some()
+            && graph.resumes_on_unpause(&step, run.as_ref().map(|run| run.cursor), breakpoint.is_some(), auto, merges);
+        let pausing = pause == Some(PauseStage::Stopping)
+            || (pause.is_some() && run.as_ref().is_some_and(|run| run.running));
+        let unpause = if resumes {
+            "`lf task unpause --run` resumes it."
+        } else {
+            "`lf task unpause` lifts the hold."
+        };
+        let (position, current_step, sentence, control, chip) = match (breakpoint, run) {
             (Some(stop), None) => {
                 let place = graph.place_of(&stop.cursor);
-                let sentence = breakpoint_sentence(&step, stop);
+                let blocker = stop.blocked_reason();
+                let sentence = match pause {
+                    Some(PauseStage::Stopping) => format!("Pausing at {step}."),
+                    Some(PauseStage::Held) => format!("Paused at {step}. {unpause}"),
+                    None => breakpoint_sentence(&step, stop),
+                };
+                let control = if let Some(reason) = blocker {
+                    WorkflowControl {
+                        action: WorkflowAction::Wait,
+                        label: reason.to_owned(),
+                    }
+                } else {
+                    WorkflowControl {
+                        action: WorkflowAction::Continue,
+                        label: "Continue".into(),
+                    }
+                };
+                let chip = step.clone();
                 (
                     TaskGraphPosition::Breakpoint {
                         step,
                         arrival: stop.id.clone(),
-                        blocked: stop.blocked_reason().is_some(),
+                        blocked: blocker.is_some(),
                     },
                     place.as_ref().map(top),
                     sentence,
+                    control,
+                    chip,
                 )
             }
             (None, None) => {
-                let (place, sentence) = match step.as_str() {
-                    START => (None, "Not started.".to_owned()),
-                    END => (None, "At its end.".to_owned()),
+                let (place, sentence, control, chip) = match step.as_str() {
+                    START => {
+                        let first = steps.first().map_or(END, |step| step.name.as_str());
+                        (
+                            None,
+                            "Not started.".to_owned(),
+                            WorkflowControl::run(first),
+                            first.to_owned(),
+                        )
+                    }
+                    END => (
+                        None,
+                        "At its end.".to_owned(),
+                        WorkflowControl {
+                            action: WorkflowAction::Done,
+                            label: "Done".into(),
+                        },
+                        END.to_owned(),
+                    ),
                     step => match graph.interactive_step(step) {
-                        Some(place) => (Some(place), format!("Waiting for you at {step}.")),
-                        None => (graph.find(step), format!("Waiting at {step}.")),
+                        Some(place) => {
+                            let next = graph.after(&place).map(|next| {
+                                if top(&place) == top(&next) {
+                                    graph.step_name(&next)
+                                } else {
+                                    top_name(&next).to_owned()
+                                }
+                            });
+                            let chip = chip_step(Some(top_name(&place)), step);
+                            (
+                                Some(place),
+                                format!("Waiting for you at {step}."),
+                                WorkflowControl {
+                                    action: WorkflowAction::Run,
+                                    label: format!(
+                                        "{step} · next: {}",
+                                        next.as_deref().unwrap_or(END)
+                                    ),
+                                },
+                                chip,
+                            )
+                        }
+                        None => {
+                            let place = graph.find(step);
+                            let chip = chip_step(place.as_ref().map(top_name), step);
+                            let (sentence, control) = if auto == Some(AutoState::Off) {
+                                (
+                                    format!("Waiting at {step}: auto is off."),
+                                    WorkflowControl {
+                                        action: WorkflowAction::Wait,
+                                        label: format!("Waiting: {chip}"),
+                                    },
+                                )
+                            } else {
+                                (format!("Waiting at {step}."), WorkflowControl::run(&chip))
+                            };
+                            (place, sentence, control, chip)
+                        }
                     },
+                };
+                let sentence = match pause {
+                    Some(PauseStage::Stopping) => format!("Pausing at {step}."),
+                    Some(PauseStage::Held) => {
+                        format!("Paused at {step}. {unpause}")
+                    }
+                    None => sentence,
                 };
                 (
                     TaskGraphPosition::At { step },
                     place.as_ref().map(top),
                     sentence,
+                    control,
+                    chip,
                 )
             }
             (_, Some(run)) => {
@@ -506,9 +885,32 @@ impl TaskGraph {
                     .as_ref()
                     .map_or_else(|| step.clone(), |place| graph.step_name(place));
                 let current = place.as_ref().map(top);
-                let label = current.map_or(at.as_str(), |index| &steps[index as usize].name);
-                let sentence = if !run.running {
-                    format!("Stopped at {label}. `lf task run` starts it again.")
+                let top_name = place.as_ref().map(top_name);
+                let label = top_name.unwrap_or(at.as_str());
+                let chip = chip_step(top_name, &at);
+                let location = || {
+                    if label == at {
+                        format!("at {at}")
+                    } else {
+                        format!("in {label} at {at}")
+                    }
+                };
+                let sentence = if pause.is_some() {
+                    if pausing {
+                        let verb = if run.running
+                            && place.as_ref().is_some_and(|place| {
+                                matches!(graph.step_at(place), ConcreteStep::Command(_))
+                            }) {
+                            "finishing"
+                        } else {
+                            "stopping"
+                        };
+                        format!("Pausing at {label} ({at} is {verb}).")
+                    } else {
+                        format!("Paused {}. {unpause}", location())
+                    }
+                } else if !run.running {
+                    format!("Stopped {}. `lf task run` starts it again.", location())
                 } else {
                     let running = if label == at {
                         format!("{label} is running.")
@@ -527,6 +929,14 @@ impl TaskGraph {
                         (Some(next), _) => format!("{running} You are next needed at {next}."),
                     }
                 };
+                let control = if run.running {
+                    WorkflowControl {
+                        action: WorkflowAction::Pause,
+                        label: chip.clone(),
+                    }
+                } else {
+                    WorkflowControl::run(&chip)
+                };
                 (
                     TaskGraphPosition::Run {
                         step,
@@ -536,10 +946,18 @@ impl TaskGraph {
                     },
                     current,
                     sentence,
+                    control,
+                    chip,
                 )
             }
         };
+        let control = if pause.is_some() {
+            WorkflowControl::paused(&chip, resumes, pausing)
+        } else {
+            control
+        };
         Self {
+            control,
             name: graph.name.clone(),
             breakpoints: breakpoints(&graph.steps),
             position,
@@ -568,17 +986,29 @@ impl TaskGraph {
         }
     }
 
-    /// Why the Task waits here and what lands it, when it stands at a step
-    /// that is neither `start`, `end` nor a breakpoint: it stopped before
-    /// merging, which only an off does.
-    pub fn waiting_to_land(&self, auto: Option<&Auto>, issue: &str) -> Option<String> {
+    /// The merging step the Task waits at and the off that stopped it there,
+    /// when it stands at a step that is neither `start`, `end` nor
+    /// interactive: it stopped before merging, which only an off does.
+    pub fn landing_stop<'a>(&'a self, auto: Option<&'a Auto>) -> Option<(&'a str, &'a Auto)> {
         let off = auto.filter(|mark| mark.state == AutoState::Off)?;
         let TaskGraphPosition::At { step } = &self.position else {
             return None;
         };
         let ends = step == START || step == END;
-        (!ends && self.waiting_step().is_none())
-            .then(|| crate::ops::task::auto::landing_wait(step, off, issue))
+        (!ends && self.waiting_step().is_none()).then_some((step.as_str(), off))
+    }
+}
+
+/// Tasks in a list often share a Graph. Parse each command's argv once per reading.
+pub(crate) fn cached_merges(merges: fn(&[String]) -> bool) -> impl FnMut(&[String]) -> bool {
+    let mut commands = std::collections::HashMap::<Vec<String>, bool>::new();
+    move |argv| {
+        if let Some(&result) = commands.get(argv) {
+            return result;
+        }
+        let result = merges(argv);
+        commands.insert(argv.to_vec(), result);
+        result
     }
 }
 
@@ -598,7 +1028,17 @@ pub(crate) fn validate_graph_name(name: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    pub(crate) fn test_merges(argv: &[String]) -> bool {
+        matches!(
+            argv,
+            [_, cmd, ..] if cmd == "land"
+        ) || matches!(
+            argv,
+            [_, cmd, sub, ..] if cmd == "pr" && matches!(sub.as_str(), "land" | "arm")
+        )
+    }
+
     use super::{CapturedGraph, TaskGraph, TaskGraphRun};
     use loopflow_storage::sqlite::{Auto, AutoState};
 
@@ -616,7 +1056,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             feature.breakpoints(),
-            ["after-explore", "after-ship-review", "after-verify"]
+            ["after-explore", "after-ship-review"]
         );
         let pursue = CapturedGraph::load("pursue", repo.path()).unwrap().unwrap();
         assert!(pursue.breakpoints().is_empty());
@@ -643,14 +1083,13 @@ mod tests {
         );
         assert_eq!(
             graph.find("write-docs").unwrap().cursor().index,
-            next.cursor().index + 2
+            next.cursor().index + 3
         );
         assert_eq!(graph.find("start").unwrap().cursor().index, 0);
         assert!(graph.find("no-such-step").is_none());
-        // After the last breakpoint nothing remains.
-        let verify = graph.find("after-verify").unwrap();
+        let review = graph.find("after-ship-review").unwrap();
         assert!(graph
-            .after(&verify)
+            .after(&review)
             .is_none_or(|place| graph.next_breakpoint(&place).is_none()));
     }
 
@@ -660,7 +1099,7 @@ mod tests {
         write(
             repo.path(),
             ".lf/graphs/conditional.yaml",
-            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- gate\n",
+            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- qa\n",
         );
         let graph = CapturedGraph::load("conditional", repo.path())
             .unwrap()
@@ -679,7 +1118,8 @@ mod tests {
         let graph = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let at = |step: &str| TaskGraph::read(&graph, step.into(), None, None, None);
+        let at =
+            |step: &str| TaskGraph::read(&graph, step.into(), None, None, None, None, test_merges);
         let mark = |state| Auto {
             state,
             at: 0,
@@ -688,17 +1128,9 @@ mod tests {
             },
         };
         let off = mark(AutoState::Off);
-        assert_eq!(
-            at("land").waiting_to_land(Some(&off), "INF-1").as_deref(),
-            Some("Waiting at land: auto is off (Maya). `lf task auto on INF-1` lands it.")
-        );
-        assert_eq!(at("land").waiting_to_land(None, "INF-1"), None);
-        assert_eq!(
-            at("land").waiting_to_land(Some(&mark(AutoState::On)), "INF-1"),
-            None
-        );
-
-        assert_eq!(at("end").waiting_to_land(Some(&off), "INF-1"), None);
+        assert_eq!(at("land").landing_stop(Some(&off)), Some(("land", &off)));
+        assert_eq!(at("land").landing_stop(None), None);
+        assert_eq!(at("end").landing_stop(Some(&off)), None);
     }
 
     #[test]
@@ -720,9 +1152,16 @@ mod tests {
                         running,
                     }),
                 auto,
+                None,
+                test_merges,
             )
         };
         let start = read("start", None, None);
+        assert_eq!(start.control.label, "Run: plan");
+        assert_eq!(
+            read("ship-review", None, None).control.label,
+            "ship-review · next: deliver"
+        );
         let steps: Vec<_> = start
             .steps
             .iter()
@@ -736,11 +1175,9 @@ mod tests {
                 ("ship-review", false),
                 ("after-ship-review", true),
                 ("deliver", false),
-                ("verify", false),
-                ("after-verify", true)
             ]
         );
-        assert_eq!(start.breakpoints, ["after-ship-review", "after-verify"]);
+        assert_eq!(start.breakpoints, ["after-ship-review"]);
         assert_eq!(
             (start.current_step, start.sentence.as_str()),
             (None, "Not started.")
@@ -765,11 +1202,11 @@ mod tests {
         let stopped = read("plan", Some(("implement", false)), None);
         assert_eq!(
             stopped.sentence,
-            "Stopped at build. `lf task run` starts it again."
+            "Stopped in build at implement. `lf task run` starts it again."
         );
-        let merge_wait = read("land", None, None);
+        let merge_wait = read("land --wait-and-fix", None, None);
         assert_eq!(merge_wait.current_step, Some(4));
-        assert_eq!(merge_wait.sentence, "Waiting at land.");
+        assert_eq!(merge_wait.sentence, "Waiting at land --wait-and-fix.");
         assert_eq!(merge_wait.waiting_step(), None);
 
         let arrival = crate::store::task_work::BreakpointArrival {
@@ -782,6 +1219,8 @@ mod tests {
             Some(&arrival),
             None,
             None,
+            None,
+            test_merges,
         );
         assert_eq!(parked.current_step, Some(3));
         assert_eq!(parked.sentence, "At breakpoint after-ship-review.");
@@ -798,10 +1237,172 @@ mod tests {
             Some(&blocked_arrival),
             None,
             None,
+            None,
+            test_merges,
         );
         assert_eq!(
             blocked.sentence,
             "At breakpoint after-ship-review. Blocked: needs a layout decision"
+        );
+    }
+
+    #[test]
+    fn a_paused_workflow_names_the_stopping_step_until_cleanup_finishes() {
+        use super::WorkflowAction::{Pausing, Resume};
+        use loopflow_storage::sqlite::task_work::PauseStage;
+        let repo = tempfile::tempdir().unwrap();
+        let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        for (step, pause, running, sentence, action, label) in [
+            (
+                "implement",
+                PauseStage::Stopping,
+                true,
+                "Pausing at build (implement is stopping).",
+                Pausing,
+                "Pausing: build · implement",
+            ),
+            (
+                "implement",
+                PauseStage::Stopping,
+                false,
+                "Pausing at build (implement is stopping).",
+                Pausing,
+                "Pausing: build · implement",
+            ),
+            (
+                "implement",
+                PauseStage::Held,
+                false,
+                "Paused in build at implement. `lf task unpause --run` resumes it.",
+                Resume,
+                "Paused: build · implement",
+            ),
+            (
+                "land --wait-and-fix",
+                PauseStage::Held,
+                true,
+                "Pausing at deliver (land --wait-and-fix is finishing).",
+                Pausing,
+                "Pausing: deliver · land --wait-and-fix",
+            ),
+        ] {
+            let cursor = graph.find(step).unwrap().cursor();
+
+            let run = TaskGraphRun {
+                cursor: &cursor,
+                lf_process_id: "carrier".into(),
+                running,
+            };
+            let reading = TaskGraph::read(
+                &graph,
+                "start".into(),
+                None,
+                Some(run),
+                None,
+                Some(pause),
+                test_merges,
+            );
+            assert_eq!(reading.sentence, sentence);
+            assert_eq!(
+                (reading.control.action, reading.control.label.as_str()),
+                (action, label)
+            );
+        }
+        assert_eq!(
+            TaskGraph::read(
+                &graph,
+                "after-ship-review".into(),
+                Some(&crate::store::task_work::BreakpointArrival {
+                    id: loopflow_model::id::LfProcessId::new(),
+                    cursor: graph.find("after-ship-review").unwrap().cursor(),
+                }),
+                None,
+                Some(AutoState::On),
+                Some(PauseStage::Held),
+                test_merges,
+            )
+            .sentence,
+            "Paused at after-ship-review. `lf task unpause` lifts the hold."
+        );
+    }
+
+    #[test]
+    fn paused_stop_cursors_honour_auto_and_do_not_promise_resume() {
+        use super::WorkflowAction::{Resume, Unpause};
+        use loopflow_storage::sqlite::task_work::PauseStage;
+
+        let repo = tempfile::tempdir().unwrap();
+        let code = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        let land = code.find("land --wait-and-fix").unwrap().cursor();
+        let implement = code.find("implement").unwrap().cursor();
+        let read = |cursor: &crate::graph::runner::ExecutionCursor, auto| {
+            TaskGraph::read(
+                &code,
+                "start".into(),
+                None,
+                Some(TaskGraphRun {
+                    cursor,
+                    lf_process_id: "carrier".into(),
+                    running: false,
+                }),
+                auto,
+                Some(PauseStage::Held),
+                test_merges,
+            )
+        };
+
+        for (cursor, auto, action, sentence) in [
+            (
+                &land,
+                Some(AutoState::On),
+                Resume,
+                "Paused in deliver at land --wait-and-fix. `lf task unpause --run` resumes it.",
+            ),
+            (
+                &land,
+                None,
+                Resume,
+                "Paused in deliver at land --wait-and-fix. `lf task unpause --run` resumes it.",
+            ),
+            (
+                &land,
+                Some(AutoState::Off),
+                Unpause,
+                "Paused in deliver at land --wait-and-fix. `lf task unpause` lifts the hold.",
+            ),
+            (
+                &implement,
+                Some(AutoState::Off),
+                Resume,
+                "Paused in build at implement. `lf task unpause --run` resumes it.",
+            ),
+        ] {
+            let reading = read(cursor, auto);
+            assert_eq!(reading.control.action, action, "{sentence}");
+            assert_eq!(reading.sentence, sentence);
+        }
+
+        // Arriving at an interactive step under a hold stays At { step } with Unpause wording.
+        write(
+            repo.path(),
+            ".lf/graphs/demo.yaml",
+            "- cmd: help graph\n- interactive: demo\n",
+        );
+        let demo = CapturedGraph::load("demo", repo.path()).unwrap().unwrap();
+        let parked = TaskGraph::read(
+            &demo,
+            "after-demo".into(),
+            None,
+            None,
+            None,
+            Some(PauseStage::Held),
+            test_merges,
+        );
+        assert_eq!(parked.control.action, Unpause);
+        assert_eq!(parked.control.label, "Paused: after-demo");
+        assert_eq!(
+            parked.sentence,
+            "Paused at after-demo. `lf task unpause` lifts the hold."
         );
     }
 
@@ -828,10 +1429,131 @@ mod tests {
                         running: true,
                     }),
                     None,
+                    None,
+                    test_merges,
                 );
                 line.steps[line.current_step.unwrap() as usize].name.clone()
             })
             .collect();
         assert_eq!(labels, ["plan", "build"]);
+    }
+
+    #[test]
+    fn reaches_landing_follows_landing_steps_through_stops_xors_and_loops() {
+        let repo = tempfile::tempdir().unwrap();
+        let load = |name| CapturedGraph::load(name, repo.path()).unwrap().unwrap();
+
+        // Builtin code: stops at ship-review before deliver; reaches land after it or with through.
+        let code = load("code");
+        let start = code.find("start").unwrap();
+        assert!(!code.reaches_landing(&start, false, test_merges));
+        assert!(code.reaches_landing(&start, true, test_merges));
+        let after_review = code
+            .after(&code.find("after-ship-review").unwrap())
+            .unwrap();
+        assert!(code.reaches_landing(&after_review, false, test_merges));
+
+        // Builtin feature: stops at explore, then ship-review, then lands in deliver.
+        let feature = load("feature");
+        let start = feature.find("start").unwrap();
+        assert!(!feature.reaches_landing(&start, false, test_merges));
+        assert!(feature.reaches_landing(&start, true, test_merges));
+        let after_explore = feature
+            .after(&feature.find("after-explore").unwrap())
+            .unwrap();
+        assert!(!feature.reaches_landing(&after_explore, false, test_merges));
+        assert!(feature.reaches_landing(&after_explore, true, test_merges));
+        let after_review = feature
+            .after(&feature.find("after-ship-review").unwrap())
+            .unwrap();
+        assert!(feature.reaches_landing(&after_review, false, test_merges));
+
+        // Builtin quick: no interactive steps, lands immediately.
+        let quick = load("quick");
+        assert!(quick.reaches_landing(&quick.find("start").unwrap(), false, test_merges));
+
+        // Non-merging builtins never report reaching a landing step.
+        for name in ["pursue", "research", "deep-clean", "incident"] {
+            let graph = load(name);
+            let start = graph.find("start").unwrap();
+            assert!(!graph.reaches_landing(&start, false, test_merges), "{name}");
+            assert!(!graph.reaches_landing(&start, true, test_merges), "{name}");
+        }
+
+        // Custom post-merge-stop Graph warns when crossing land, not before review or at post-merge stop.
+        write(
+            repo.path(),
+            ".lf/graphs/post-merge.yaml",
+            "- implement\n- interactive: demo\n- cmd: land\n- interactive: research\n",
+        );
+        let post_merge = load("post-merge");
+        let start = post_merge.find("start").unwrap();
+        assert!(!post_merge.reaches_landing(&start, false, test_merges));
+        assert!(post_merge.reaches_landing(&start, true, test_merges));
+        let after_demo = post_merge
+            .after(&post_merge.find("after-demo").unwrap())
+            .unwrap();
+        assert!(post_merge.reaches_landing(&after_demo, false, test_merges));
+        let post_stop = post_merge.find("after-research").unwrap();
+        assert!(!post_merge.reaches_landing(&post_stop, false, test_merges));
+        assert!(!post_merge.reaches_landing(&post_stop, true, test_merges));
+
+        // Interactive landing skill stops before landing unless running through.
+        write(
+            repo.path(),
+            ".lf/graphs/interactive-land.yaml",
+            "- interactive: pr-land\n",
+        );
+        let interactive_land = load("interactive-land");
+        let start = interactive_land.find("start").unwrap();
+        assert!(!interactive_land.reaches_landing(&start, false, test_merges));
+        assert!(interactive_land.reaches_landing(&start, true, test_merges));
+
+        // XOR: any branch reaching land returns true; a trailing land is only blocked when every branch stops.
+        write(
+            repo.path(),
+            ".lf/graphs/xor-merge.yaml",
+            "- xor:\n    paths:\n      ship:\n        description: Land it\n        steps:\n          - pr-land\n      hold:\n        description: Wait\n        steps:\n          - interactive: demo\n",
+        );
+        let xor_merge = load("xor-merge");
+        assert!(xor_merge.reaches_landing(&xor_merge.find("start").unwrap(), false, test_merges));
+
+        write(
+            repo.path(),
+            ".lf/graphs/xor-gated.yaml",
+            "- xor:\n    paths:\n      one:\n        description: First\n        steps:\n          - interactive: demo\n          - implement\n      two:\n        description: Second\n        steps:\n          - interactive: research\n- cmd: land\n",
+        );
+        let xor_gated = load("xor-gated");
+        let start = xor_gated.find("start").unwrap();
+        assert!(!xor_gated.reaches_landing(&start, false, test_merges));
+        assert!(xor_gated.reaches_landing(&start, true, test_merges));
+        // Resuming inside an XOR branch ascends to the trailing `cmd: land`.
+        let inside_xor = xor_gated
+            .after(&xor_gated.find("after-demo").unwrap())
+            .unwrap();
+        assert!(xor_gated.reaches_landing(&inside_xor, false, test_merges));
+
+        write(
+            repo.path(),
+            ".lf/graphs/xor-partial.yaml",
+            "- xor:\n    paths:\n      review:\n        description: Review\n        steps:\n          - interactive: demo\n      skip:\n        description: Skip\n- cmd: land\n",
+        );
+        let xor_partial = load("xor-partial");
+        assert!(xor_partial.reaches_landing(
+            &xor_partial.find("start").unwrap(),
+            false,
+            test_merges
+        ));
+
+        // Loop back-edge: starting at an interactive step that iterates back to a landing step.
+        write(
+            repo.path(),
+            ".lf/graphs/loop-back.yaml",
+            "- loop:\n    - cmd: land\n    - interactive: demo\n",
+        );
+        let loop_back = load("loop-back");
+        let demo = loop_back.find("after-demo").unwrap();
+        assert!(!loop_back.reaches_landing(&demo, false, test_merges));
+        assert!(loop_back.reaches_landing(&demo, true, test_merges));
     }
 }

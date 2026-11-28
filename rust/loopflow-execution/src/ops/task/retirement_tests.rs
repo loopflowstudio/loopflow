@@ -332,6 +332,7 @@ fn a_closed_tasks_conversations_reopen_in_the_main_checkout() {
             &fixture.store,
             fixture.repo.path(),
             SessionTarget::Task(fixture.task.id.as_str()),
+            true,
         )
         .await
         .unwrap();

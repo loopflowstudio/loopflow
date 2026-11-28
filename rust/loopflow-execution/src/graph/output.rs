@@ -16,7 +16,7 @@ This step also decides a loop. Do the step's work first, then judge from its res
 - iterate when the last pass made progress and you can name a substantial next pass within scope and the result it should produce. Aim to finish within five passes. Continue past five when the work warrants it.
 - blocked when passes shrink into small increments that no longer converge, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. The Graph stops here. Give the reason.
 
-Leave checks that can't run here to gate, CI or review. Report them as deferred. Carry the next action and the paths it needs in the summary.";
+Leave checks that can't run here to CI or review. Report them as deferred. Carry the next action and the paths it needs in the summary.";
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]

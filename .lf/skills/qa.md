@@ -4,12 +4,11 @@ extends: builtin
 ## Desktop
 
 Use the [isolated Dev bundle](../qa/desktop.md#loopflow-dev-on-the-live-machine)
-and disposable Work. Check whether launch can attach to or resize personal
-terminals before opening the live Machine. For visual acceptance, capture the
-changed UI and a real update in the foreground, and click through it watching
-the rest of the window: choosing or hovering an item never moves or resizes
-its neighbors. Report the check as open if
-it cannot run safely.
+and disposable Work. Check launch won't attach to or resize personal terminals
+before opening the live Machine. Capture the changed UI and a real update in the
+foreground in both light and dark themes, clicking through so choosing or
+hovering never moves or resizes neighbors. Report the check as open if it cannot
+run safely.
 
 For Session attachment, join an already-running disposable Session on its
 owning Machine from a second view. Check shared output and input, then close

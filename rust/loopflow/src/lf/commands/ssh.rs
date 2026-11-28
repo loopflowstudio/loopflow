@@ -100,6 +100,9 @@ pub(super) fn run_with_io(
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
                 | crate::lf::TaskCommand::Unassign { .. }
+                | crate::lf::TaskCommand::Find { .. }
+                | crate::lf::TaskCommand::Grep { .. }
+                | crate::lf::TaskCommand::Symbols { .. }
                 | crate::lf::TaskCommand::Files { .. }
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
@@ -123,7 +126,6 @@ pub(super) fn run_with_io(
     let forwarded = (!preview && launching)
         .then(|| loopflow_execution::machine::forward::read(directory))
         .transpose()?;
-    let runtime = tokio::runtime::Runtime::new()?;
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it (or its Task) there first.
         loopflow_execution::ops::session_move::move_session(id, target, super::write::run_task)?;
@@ -131,24 +133,28 @@ pub(super) fn run_with_io(
     let source = if preview || resident_operation {
         None
     } else {
-        runtime.block_on(loopflow_execution::machine::task::resolve_task_source(
-            cli.task.as_deref(),
-            directory,
-        ))?
+        loopflow_execution::runtime::block_on(
+            loopflow_execution::machine::task::resolve_task_source(cli.task.as_deref(), directory),
+        )?
     };
     let target = if preview || resident_operation {
-        runtime
-            .block_on(loopflow_execution::machine::connection::find_registered_machine(target))?
+        loopflow_execution::runtime::block_on(
+            loopflow_execution::machine::connection::find_registered_machine(target),
+        )?
     } else {
-        runtime.block_on(resolve_target(target, forward_agent))?
+        loopflow_execution::runtime::block_on(resolve_target(target, forward_agent))?
     };
     // Automatic routing already chose both Machine and plan. Keep that reading
     // together rather than combining its Machine with a second plan reading.
     let routed = task_route.is_some();
+    let search = match &cli.command {
+        Some(crate::lf::Commands::Task { cmd }) => checkout_search(cmd, task_route.as_ref()),
+        _ => None,
+    };
     let work_route = match task_route {
         Some(route) => Some(route),
         // A path/name addresses the destination's filesystem, not the caller's.
-        None if cli.repo.is_some() => None,
+        None if cli.repo.is_some() || search.is_some() => None,
         None => super::work_route::resolve(cli)?,
     };
     if let Some(route) = work_route
@@ -181,6 +187,22 @@ pub(super) fn run_with_io(
         None if cli.repo.is_some() => None,
         None => loopflow_execution::machine::task::current_repository(directory)?,
     };
+    // The checkout's server shares one inventory across a peer picker's keystrokes.
+    if let (Some((read, true)), Some(repository), false) = (search, &repository, preview) {
+        use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
+        let sender = Sender {
+            repository: repository.clone(),
+            selection: Selection::capture(directory, None)?,
+            secrets: Secrets::default(),
+        };
+        let mut connection =
+            loopflow_execution::machine::client::Connection::open_on(&target, sender, None)?;
+        let answer = connection.request(crate::server::wire::Operation::Read(read))?;
+        return output(
+            &mut io,
+            &format!("{}\n", serde_json::to_string_pretty(&answer.result)?),
+        );
+    }
     // A plain command reads what it runs with from its environment.
     let mut environment =
         loopflow_execution::machine::wire::Selection::capture(directory, source.clone())?
@@ -220,7 +242,7 @@ pub(super) fn run_with_io(
             cmd: crate::lf::TaskCommand::Location { .. }
         })
     ) {
-        let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
+        let bytes = loopflow_execution::runtime::block_on(request(&target, &cmd[1..], None))?;
         output(&mut io, &String::from_utf8(bytes)?)?;
         return Ok(());
     }
@@ -249,7 +271,7 @@ pub(super) fn run_with_io(
         if !connection.json && !cli.json {
             cmd.push("--json".into());
         }
-        let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
+        let bytes = loopflow_execution::runtime::block_on(request(&target, &cmd[1..], None))?;
         let record = serde_json::from_slice(&bytes)?;
         if !connection.prepare {
             let record = viewed_remotely(record, &target, forward_agent)?;
@@ -260,7 +282,7 @@ pub(super) fn run_with_io(
             loopflow_execution::transport::relay_over(&record.open_argv, unfocused)?;
             // Read the returned Session without repeating New/fork or starting
             // another provider. JSON belongs after the terminal has returned.
-            let bytes = runtime.block_on(request(
+            let bytes = loopflow_execution::runtime::block_on(request(
                 &target,
                 &[
                     "session".into(),
@@ -481,6 +503,59 @@ pub(crate) fn localize_remote_sessions(
         }
     }
     Ok(())
+}
+
+fn checkout_search(
+    cmd: &crate::lf::TaskCommand,
+    route: Option<&TaskExecutionRoute>,
+) -> Option<(super::read::Read, bool)> {
+    use super::read::Read;
+    use crate::lf::TaskCommand;
+
+    let owner_issue =
+        |issue: &str| route.map_or_else(|| issue.to_owned(), |route| route.peer_selector.clone());
+    match cmd {
+        TaskCommand::Find {
+            issue,
+            query,
+            limit,
+            json,
+        } => Some((
+            Read::TaskFind {
+                issue: owner_issue(issue),
+                query: query.clone(),
+                limit: *limit,
+            },
+            *json,
+        )),
+        TaskCommand::Symbols {
+            issue,
+            name,
+            path,
+            json,
+        } => Some((
+            Read::TaskSymbols {
+                issue: owner_issue(issue),
+                name: name.clone(),
+                path: path.clone(),
+            },
+            *json,
+        )),
+        TaskCommand::Grep {
+            issue,
+            query,
+            whole_word,
+            json,
+        } => Some((
+            Read::TaskGrep {
+                issue: owner_issue(issue),
+                query: query.clone(),
+                whole_word: *whole_word,
+            },
+            *json,
+        )),
+        _ => None,
+    }
 }
 
 fn output(

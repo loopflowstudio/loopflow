@@ -307,16 +307,19 @@
           "outlook": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "pr": null,
         "graph_source": null,
         "lifecycle": "moving",
+        "working_group": null,
         "selection_states": [
           "moving",
           "backlog",
           "auto"
-        ]
+        ],
+        "breakpoint_arrival": null
       },
       {
         "task": {
@@ -565,6 +568,7 @@
           "outlook": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "pr": {
@@ -597,11 +601,13 @@
         },
         "graph_source": null,
         "lifecycle": "unstarted",
+        "working_group": null,
         "selection_states": [
           "open",
           "unstarted",
           "backlog"
-        ]
+        ],
+        "breakpoint_arrival": null
       },
       {
         "task": {
@@ -670,21 +676,24 @@
           "outlook": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "pr": null,
         "graph_source": null,
         "lifecycle": "unstarted",
+        "working_group": null,
         "selection_states": [
           "unstarted",
           "backlog"
-        ]
+        ],
+        "breakpoint_arrival": null
       },
       {
         "task": {
           "id": "issue-later",
           "identifier": "W2-141",
-          "name": "Now + Available work views \u2014 research",
+          "name": "Now + Available work views — research",
           "description": "Research delivered in merged PR.",
           "rank": 0,
           "assignee": null,
@@ -771,14 +780,17 @@
           "outlook": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "pr": null,
         "graph_source": null,
         "lifecycle": "done",
+        "working_group": null,
         "selection_states": [
           "done"
-        ]
+        ],
+        "breakpoint_arrival": null
       }
     ],
     "truncated": false

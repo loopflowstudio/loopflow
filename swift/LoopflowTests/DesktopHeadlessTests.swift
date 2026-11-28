@@ -263,10 +263,8 @@ struct DesktopHeadlessTests {
         }
         // The Workflow bar reads Rust's sentence, and Auto-Ship reads on.
         let bar = TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
-        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-live").text().string()
-            == shown.graph?.sentence)
-        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-auto").button()
-            .labelView().text().string() == "Stop Auto-Ship")
+        _ = try bar.inspect().find(text: #require(shown.graph?.control.label))
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-auto").toggle().isOn())
         // A stacked Task names its parent by Task beside its PR line.
         let parent = try #require(model.taskExecution[task.id].value?.stackParent)
         let stacked = TaskStackParentLabel(parent: parent)
@@ -412,14 +410,23 @@ struct DesktopHeadlessTests {
             run: { args, _ in
                 if args.prefix(2) == ["plan", "list"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "run"] || args.prefix(2) == ["task", "complete"]
-                    || args.contains("auto") {
+                    || args.prefix(2) == ["task", "reopen"] || args.contains("auto") {
                     await started.add(args)
                 }
                 return "{}"
             }))
         func work(position: [String: Any]? = nil) throws -> TaskOverview {
             var workflow = try #require(wire["graph"] as? [String: Any])
-            if let position { workflow["position"] = position }
+            if let position {
+                workflow["position"] = position
+                if position["kind"] as? String == "run" {
+                    workflow["control"] = ["action": "run", "label": "Run: implement"]
+                } else if position["step"] as? String == "end" {
+                    workflow["control"] = ["action": "done", "label": "Done"]
+                } else {
+                    workflow["control"] = ["action": "run", "label": "Run: end"]
+                }
+            }
             wire["graph"] = workflow
             return try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))
         }
@@ -436,40 +443,43 @@ struct DesktopHeadlessTests {
         let header = TaskWorkflowHeader(model: model, task: task, work: .available(try work()))
         #expect(try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string()
             == "build is running implement. You are next needed at demo.")
-        #expect(throws: (any Error).self) { try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run") }
+        _ = try running.inspect().find(text: "build · implement")
+        _ = try running.inspect().find(button: "Interrupt step")
 
         // Stopped, it holds the Task and is offered again.
         let process = "11111111-1111-4111-8111-111111111111"
         let stopped = try view(position: ["kind": "run", "step": "review-design", "at": "implement", "lf_process_id": process, "running": false])
-        #expect(try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run").button()
-            .labelView().text().string() == "Run")
+        _ = try stopped.inspect().find(text: "Run: implement")
 
         // At `demo` the one action continues after it; going into `end` is auto's too.
         let waiting = try view(position: ["kind": "at", "step": "demo"])
-        let next = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run").button()
-        #expect(try next.labelView().text().string() == "Run")
+        let next = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").button()
+        _ = try waiting.inspect().find(text: "Run: end")
         try next.tap()
         #expect(try await tapped(1) == ["task", "run", task.task.identifier, "--json"])
+        // The chip says the run is starting until the Machine answers.
+        for _ in 0..<200 where model.pendingChanges.controlRequest(for: task.task.identifier) != nil { try await Task.sleep(for: .milliseconds(5)) }
         // Auto-Ship sits in the Workflow bar, not in the detail page's Workflow header.
         #expect(throws: (any Error).self) {
             try header.inspect().find(viewWithAccessibilityIdentifier: "task-auto")
         }
         // Off until someone turns it on with `lf task auto on`.
-        let autoShip = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-auto").button()
-        #expect(try autoShip.labelView().text().string() == "Auto-Ship")
+        let autoShip = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-auto").toggle()
+        #expect(try !autoShip.isOn())
         try autoShip.tap()
         #expect(try await tapped(2) == ["--task", task.task.identifier, "task", "auto", "on", "--json"])
 
         // At its end nothing remains to run.
         let ended = try view(position: ["kind": "at", "step": "end"])
-        #expect(throws: (any Error).self) { try ended.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run") }
+        #expect(try ended.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").isDisabled())
 
         // A Task that has taken up no workflow uses its Wave or repository default.
         wire["graph"] = NSNull()
         let unstarted = TaskWorkflowBar(model: model, task: task, work: .available(
             try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))))
-        try unstarted.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button().tap()
+        try unstarted.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").button().tap()
         #expect(try await tapped(3) == ["task", "run", task.task.identifier, "--json"])
+        for _ in 0..<200 where model.pendingChanges.controlRequest(for: task.task.identifier) != nil { try await Task.sleep(for: .milliseconds(5)) }
 
         // Going back is the same command a person would type; Start from… in "…"
         // lists `start` and each top-level runnable work step, omitting standalone breakpoints.
@@ -485,18 +495,26 @@ struct DesktopHeadlessTests {
         #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "plan", "--json"])
 
         // Completion has its own operation and does not move the Workflow.
+        model.select(.task(id: task.id))
         model.completeTask(task, children: nil)
+        #expect(model.selection != .task(id: task.id))
+        // Completing says so in the click, with Undo, which reopens and reselects the Task.
+        let completed = try #require(model.navigation.notices.current)
+        #expect(completed.text == "\(task.task.identifier) completed")
         for _ in 0..<200 where await started.calls.last?.contains("complete") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
-
-        // Auto-Ship says it was requested, never that it shipped; its Undo is Stop Auto-Ship.
-        model.turnAutoOn(task)
-        let notice = try #require(model.navigation.notices.current)
-        #expect(notice.text == "\(task.task.identifier) Auto-Ship requested")
-        let view = NoticeView(center: model.navigation.notices)
         let sent = await started.calls.count
-        try view.inspect().find(viewWithAccessibilityIdentifier: "notice-action").button().tap()
+        try #require(completed.action).perform()
+        #expect(model.selection == .task(id: task.id))
         for _ in 0..<200 where await started.calls.count == sent { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await started.calls.last == ["task", "reopen", task.task.identifier, "--json"])
+
+        // The switch turns in the click with no Notice; turning it off sends lf task auto off.
+        model.navigation.notices.clear(key: "complete-\(task.task.identifier)")
+        model.turnAutoOff(task)
+        #expect(model.pendingChanges.autoRequest(for: task.task.identifier) == false)
+        #expect(model.navigation.notices.current?.text.contains("requested") != true)
+        for _ in 0..<200 where await started.calls.last?.contains("off") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "auto", "off", task.task.identifier, "--json"])
     }
 
@@ -518,54 +536,42 @@ struct DesktopHeadlessTests {
         let lifecycle = state == "completed" ? "done" : state == "canceled" ? "abandoned" : "unstarted"
         row["lifecycle"] = lifecycle
         let refusal: Any = state == "unstarted" ? NSNull() : "Reopen the Task"
-        row["run_control"] = ["unavailable": refusal]
+        row["run_control"] = ["pausing": false, "unavailable": refusal]
         let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
         #expect(task.id == original.id)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering must not mutate") })
         let view = TaskWorkflowBar(model: model, task: task,
             work: .available(TaskOverview(sessions: [], graphProcesses: [], graph: nil)))
-        let menu = try view.inspect().find(viewWithAccessibilityIdentifier: "task-actions")
+        let menu = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move")
         if state == "unstarted" {
-            _ = try menu.find(button: "Complete Task")
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-complete")
             // The fixture Task has no owner, so the assignment control offers Claim.
             let assignment = try menu.find(viewWithAccessibilityIdentifier: "task-claim-unassign")
             #expect(try assignment.button().labelView().text().string() == "Claim Task")
             _ = try menu.find(button: "Abandon…")
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start")
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary")
         } else {
             _ = try menu.find(button: "Reopen Task")
             #expect(throws: (any Error).self) { try menu.find(button: "Complete Task") }
-            #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").isDisabled())
+            #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").isDisabled())
         }
     }
 
-    @Test("The workflow bar's … lists the sidebar row's Task actions and the bar repeats none of them")
-    func workflowBarMenuIsTheSidebarMenu() throws {
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+    @Test("The chip's menu holds steps and lifecycle actions; metadata stays on right-click")
+    func workflowBarMenus() throws {
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: loadFixtureData("roadmap_snapshot.json"))
         let task = try #require(roadmap.waves.first?.tasks.items.first { !$0.isCompleted })
-        let work = try JSONDecoder().decode(TaskOverview.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("task_work.json")))
-        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering must not mutate") })
-        func labels(_ view: InspectableView<some BaseViewType>) -> [String] {
-            // The "…" menu's own label is an image.
-            view.findAll(ViewType.Button.self).compactMap { try? $0.labelView().text().string() }
-                + view.findAll(ViewType.Menu.self).compactMap { try? $0.labelView().text().string() }
-        }
+        let work = try JSONDecoder().decode(TaskOverview.self, from: loadFixtureData("task_work.json"))
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") })
         let bar = try TaskWorkflowBar(model: model, task: task, work: .available(work)).inspect()
-        let menu = labels(try bar.find(viewWithAccessibilityIdentifier: "task-actions"))
-        // The sidebar row's context menu is the same list over the same reading.
-        let sidebar = labels(try TaskActionItems(model: model, task: task, wave: nil, work: work).inspect())
-        #expect(menu == sidebar)
-        for action in ["Start from…", "start", "Complete Task", "Abandon…", "Copy Task ID", "Move to Wave"] {
-            #expect(menu.contains(action), "missing \(action)")
-        }
-        #expect(menu.contains("Claim Task") || menu.contains("Unassign Task"))
-        // Outside "…" the bar holds only the next step and Auto-Ship.
-        for action in ["Complete Task", "Claim Task", "Unassign Task", "Abandon…", "Start from…"] {
-            #expect(labels(bar).filter { $0 == action }.count <= 1)
-        }
-        #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-overview") }
+        #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-actions") }
+        // The running step is the chip; the others are steps to start from.
+        _ = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-0")
+        #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-2") }
+        let steps = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-move")
+        for action in ["build", "demo", "Interrupt step", "Abandon…"] { _ = try steps.find(button: action) }
+        #expect(throws: (any Error).self) { try steps.find(button: "Copy Task ID") }
+        _ = try bar.find(viewWithAccessibilityIdentifier: "task-complete")
     }
 
     @Test("A Task with auto on reads on and switches off with lf task auto off")
@@ -579,9 +585,9 @@ struct DesktopHeadlessTests {
             return "{}"
         }))
         // Rust's refusal to turn it on again never disables turning it off.
-        let button = try TaskAutoControl(model: model, task: task).inspect()
-            .find(viewWithAccessibilityIdentifier: "task-auto").button()
-        #expect(try button.labelView().text().string() == "Stop Auto-Ship")
+        let button = try TaskWorkflowBar(model: model, task: task, work: .loading).inspect()
+            .find(viewWithAccessibilityIdentifier: "task-auto").toggle()
+        #expect(try button.isOn())
         #expect(!button.isDisabled())
         try button.tap()
         for _ in 0..<200 where await sent.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }

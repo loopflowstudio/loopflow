@@ -28,7 +28,7 @@ use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
 /// anyway: the change signal can miss a checkpoint or a Machine's sleep.
-const UNSIGNALLED: Duration = Duration::from_secs(60);
+pub(super) const UNSIGNALLED: Duration = Duration::from_secs(60);
 const SEND_DEADLINE: Duration = Duration::from_secs(2);
 /// A provider's turn start loads nothing new; it answers once the turn exists.
 const TURN_START_DEADLINE: Duration = Duration::from_secs(15);
@@ -39,55 +39,28 @@ pub(super) fn after_turn(store: &SqliteStore, session: &str) {
     wake_idle(store, Some(session));
 }
 
-/// Start the Machine's one watcher. It runs as long as the server; without
-/// `terminals` it starts no stopped Session.
-pub(super) fn start(terminals: Option<Arc<Registry>>) {
-    let spawned = std::thread::Builder::new()
-        .name("task-update-wake".into())
-        .spawn(|| {
-            loopflow_execution::journal::request::isolate(|| watch(terminals));
-        });
-    if let Err(error) = spawned {
-        tracing::warn!(%error, "Task updates wait for each conversation's next turn");
-    }
-}
-
-fn watch(terminals: Option<Arc<Registry>>) {
-    let path = loopflow_execution::store::default_db_path();
-    let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
-    let mut watcher = Watcher {
-        terminals,
-        ..Watcher::default()
-    };
-    loop {
-        watcher.read(&path);
-        changes.wait(UNSIGNALLED);
-    }
-}
-
-/// The watcher's store, the revisions it last woke conversations for, and
-/// the held terminals it starts stopped Sessions in.
+/// The revisions this watcher last woke conversations for, and the held
+/// terminals it starts stopped Sessions in. Driven by `recovery`'s single
+/// store-watching thread.
 #[derive(Default)]
-struct Watcher {
-    store: Option<SqliteStore>,
+pub(super) struct Watcher {
     seen: Option<(i64, i64)>,
     terminals: Option<Arc<Registry>>,
 }
 
 impl Watcher {
+    pub(super) fn new(terminals: Option<Arc<Registry>>) -> Self {
+        Self {
+            seen: None,
+            terminals,
+        }
+    }
+
     /// Wake idle conversations if the revisions moved since the last reading.
     /// The first reading wakes too: what arrived while no server ran reaches
     /// each idle conversation now. One that already heard it gets nothing;
     /// claimed updates and confirmed steers say so.
-    fn read(&mut self, path: &Path) {
-        if self.store.is_none() && path.exists() {
-            self.store = loopflow_execution::store::open_sqlite(path)
-                .inspect_err(|error| tracing::warn!(%error, "Task update watcher has no store"))
-                .ok();
-        }
-        let Some(store) = &self.store else {
-            return;
-        };
+    pub(super) fn read_with(&mut self, store: &SqliteStore) {
         match store
             .task_update_revision()
             .and_then(|updates| Ok((updates, store.steer_revision()?)))
@@ -113,8 +86,17 @@ impl Watcher {
             Ok(_) => {}
             Err(error) => {
                 tracing::warn!(%error, "steer and Task update revisions unread");
-                self.store = None;
             }
+        }
+    }
+
+    #[cfg(test)]
+    fn read(&mut self, path: &Path) {
+        if !path.exists() {
+            return;
+        }
+        if let Ok(store) = loopflow_execution::store::open_sqlite(path) {
+            self.read_with(&store);
         }
     }
 }
@@ -292,10 +274,7 @@ fn open_inbox(key: &Path, thread: &str) -> Result<Option<(UnixStream, String)>> 
 }
 
 fn start_codex_turn(endpoint: &Path, thread: &str, text: &str) -> Result<()> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         tokio::time::timeout(
             TURN_START_DEADLINE,
             loopflow_execution::harness::codex_connection::deliver_update(endpoint, thread, text),
@@ -798,6 +777,51 @@ mod tests {
             !wire.contains("staging bucket") && !wire.contains("pr/1"),
             "delivered news is not repeated"
         );
+    }
+
+    #[test]
+    fn paused_task_delivers_steers_and_child_updates_to_its_idle_conversation() {
+        let session = "paused-inbox";
+        let fixture = fixture(session);
+        let store = &fixture.store;
+        store.choose_task_primary(&fixture.task, session).unwrap();
+        store
+            .take_up_task_graph(&fixture.task, r#"{"name":"code","steps":[]}"#)
+            .unwrap();
+        let (listener, _) = fixture.idle_claude();
+        listener.set_nonblocking(true).unwrap();
+        store
+            .begin_task_pause(
+                &fixture.task,
+                &loopflow_storage::process::Starter::Person { name: None },
+                vec![],
+            )
+            .unwrap();
+        let child = store
+            .create_task(&loopflow_storage::work::task::NewTask {
+                id: loopflow_model::durable::TaskId::new(),
+                parent_task_id: Some(fixture.task.clone()),
+                repository_id: store.task(&fixture.task).unwrap().unwrap().repository_id,
+                project_id: None,
+                title: "Child".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .abandon(
+                &loopflow_model::durable::WorkRef::Task(child.id),
+                "superseded",
+            )
+            .unwrap();
+        fixture.comment(store, "c-1", "Review the staged changes");
+        loopflow_execution::harness::task_updates::write(store, session).unwrap();
+        after_turn(store, session);
+        let frames = received(&listener);
+        let content = frames[1]["message"]["content"].as_str().unwrap();
+        assert!(content.contains("Review the staged changes"), "{content}");
+        assert!(content.contains("was abandoned"), "{content}");
+        assert_eq!(store.session_steers(session, 0, 8).unwrap().pending, 0);
     }
 
     #[test]

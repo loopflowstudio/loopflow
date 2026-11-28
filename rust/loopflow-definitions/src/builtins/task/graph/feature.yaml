@@ -1,13 +1,10 @@
-description: Explore, build, deliver and verify. You choose what to build, review the change and check it on main.
+description: Explore, build and deliver. You choose what to build and review the change before it merges.
 steps:
 - step: explore
 - break
 - graph: plan
 - loop:
-    - loop:
-        - graph: build
-        - step: ship-review
-        - break
-    - graph: deliver
-    - step: verify
+    - graph: build
+    - step: ship-review
     - break
+- graph: deliver

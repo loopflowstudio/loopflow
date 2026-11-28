@@ -10,34 +10,52 @@ the way you work and share it.
 
 ## Skills
 
-A Skill is one job in Markdown: `design` plans, `implement` builds, `qa`
-verifies, `gate` reviews and publishes. Chain Skills in a Graph rather than
-cramming everything into one prompt; steps pass work through Git commits and
-notes in `scratch/`.
+A Skill is one job in Markdown: `design` plans, `implement` builds, `compress`
+simplifies, `qa` verifies. Chain Skills in a Graph rather than cramming
+everything into one prompt; steps pass work through Git commits and notes in
+`scratch/`.
 
-### Extend or replace a builtin
+### Extend or replace a Skill
 
 ```bash
-lf skill customize pr-message    # creates .lf/skills/pr-message.md extending the builtin
-lf skill customize gate --full   # copies the full builtin text to replace it
-lf list skill                    # shows which Skills extend vs. replace builtins
+lf skill customize pr-message    # creates .lf/skills/pr-message.md extending lf:pr-message
+lf skill customize qa --full     # copies the full builtin text to replace it
+lf list skill                    # shows which Skills extend or replace others
 ```
 
 Extending a builtin lets you add repo-specific instructions while still
 receiving upstream improvements to the builtin:
 
 ```markdown
-<!-- .lf/skills/gate.md -->
+<!-- .lf/skills/qa.md -->
 ---
-extends: builtin
+extends: lf:qa
 ---
 ## In this repository
 
-Run `make e2e` before publishing.
+Run `make e2e` against the local preview server before finishing.
 ```
 
-A Skill without `extends: builtin` replaces the builtin of the same name for
-everyone on your team.
+You can also extend another Skill by name to build specialized variants on top
+of your repository's version (or the builtin when no repository file overrides
+it):
+
+```markdown
+<!-- .lf/skills/card-implement.md -->
+---
+extends: implement
+agent: claude:opus
+---
+## Card rules
+
+Verify every state transition against the spec before committing.
+```
+
+Frontmatter merges parent under child (child keys win), and the child's body
+appends after the parent's. Use `extends: lf:<name>` to inherit Loopflow's raw
+builtin directly and skip any repository overlay; using `extends: <name>` in a
+file of the same name also falls through to the builtin. A Skill without
+`extends:` replaces the builtin of the same name for everyone on your team.
 
 ### Automatic commits per step
 
@@ -86,7 +104,7 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 # .lf/graphs/ship-api.yaml
 - step: {name: implement, agent: claude:opus}
 - audit                         # runs on Codex per its frontmatter
-- gate
+- cmd: land --wait-and-fix
 ```
 
 - `agent:` pins the harness (and model, if named).
@@ -117,8 +135,7 @@ Mix Skills and mechanical `cmd:` steps:
 ```yaml
 # deliver (builtin)
 - reflect                     # folds your feedback from this Task into skill edits
-- gate                        # publishes PR so CI starts, then reviews while CI runs
-- cmd: land --wait-and-fix    # merges when checks pass, repairing CI failures
+- cmd: land --wait-and-fix    # syncs, clears scratch, and merges when CI passes
 ```
 
 ### Loops (`loop:`)
@@ -132,12 +149,12 @@ the whole change.
 # build (builtin)
 - loop:
     - loop:
-        - implement        # build one substantial pass of the plan
         - cmd: sync
-        - realign          # decides: next pass (iterate) or move on (advance)
-    - compress             # simplify what the branch touched
-    - qa                   # exercise the real change end to end
-    - concept-review       # decides: ship whole change or loop back
+        - implement        # decides: another planned pass (iterate) or ready for review (advance)
+    - concept-review       # read-only: writes scratch/concept-review.html
+    - realign              # decides: take review into plan and loop back, or move on
+- compress                 # simplify what the branch touched
+- qa                       # exercise the real change end to end
 - pr-publish
 ```
 
@@ -146,18 +163,25 @@ Any Skill can be the deciding step of a loop: it returns `advance`, `iterate`
 
 During a Graph run, each `iterate` launches the loop’s Skills again in fresh conversations.
 For work that needs several passes, `kickoff` groups it into 2–4 substantial
-end-to-end passes, aiming for no more than 5. After each pass, `realign`
-regroups what remains. Within a pass, `implement` keeps building while the
-next item is the same kind of work. It pauses when the next item needs a
-decision or review, or when what it learned could change the plan.
-Aim for one diff a person can review in a sitting. Around 2,000 lines of
-non-test change is a soft ceiling.
+end-to-end passes, aiming for no more than 5. Within a pass, `implement` keeps
+building while the next item is the same kind of work, and stops cleanly rather
+than starting another pass when context is already heavy. Before iterating, it
+collapses the finished pass in `scratch/plan.md` to one line with its commit and
+names the next pass; if a counterexample breaks the plan, it notes what broke
+and advances so review can replan.
+
+Once planned passes are built, `concept-review` reviews the whole change
+read-only (`scratch/concept-review.html`) and `realign` reconciles those
+findings into `scratch/plan.md`—fixing small mismatches inline, deferring
+separate outcomes under `## Deferred findings`, or regrouping remaining passes
+and iterating back to `sync`. Aim for one diff a person can review in a sitting.
+Around 2,000 lines of non-test change is a soft ceiling.
 
 The deciding step sees which pass it is on and how many steps the loop
 repeats, including the decision itself.
 
 ```text
-Decision pass 3. Iterating repeats 3 steps, back to implement.
+Decision pass 3. Iterating repeats 2 steps, back to sync.
 ```
 
 It keeps iterating past 5 when real work is left, and returns `blocked` when
@@ -225,29 +249,28 @@ compact layout and keep the keyboard shortcuts” and planning starts with
 that choice. To take the recommendation as written, run `lf task run <ID>`.
 
 Put `- break` where you want to review what the preceding step produced.
-The builtin `feature` Graph has three such stops.
+The builtin `feature` Graph has two such stops.
 
 ```yaml
 # feature (builtin)
-- explore
+- step: explore
 - break
 - graph: plan
 - loop:
-    - loop:
-        - graph: build
-        - ship-review
-        - break            # review the PR before delivery
-    - graph: deliver
-    - verify
-    - break                # review the checks on main
+    - graph: build
+    - step: ship-review
+    - break                # review the PR before delivery
+- graph: deliver
 ```
 
 After `ship-review`, the conversation links to `scratch/ship-review.html`
 and explains what ships and what was left out. If the worker recommends
 delivery, you can still reply “Fix keyboard focus first.” The build loop
-runs again with that feedback. After `verify`, review `scratch/verify.md`
-and choose whether to finish or make another pass. If a worker reports
-that it is blocked, the reason stays visible until you resolve it.
+runs again with that feedback. Open the review with
+`lf page open scratch/ship-review.html` or in Desktop Files, then use
+`⌘↩` to send your choices to the Task. If a worker reports that it is
+blocked, the reason stays visible until you resolve it. Delivery merges the
+PR and completes the Task.
 
 The built-in research Graph uses `step: research` to select the Skill with
 the same name as the Graph. It runs once per pass. To repeat the investigation
@@ -274,15 +297,102 @@ Run a Graph directly with `lf graph feature` to review its finished steps
 at that terminal. A direct Graph run in a Task checkout leaves the Task at
 its saved position.
 
+### Build and customize review pages
+
+Review skills (`ship-review`, `explore`, `concept-review`, `qa`, `demo`) write
+body-only HTML fragments under `scratch/<name>.page.html` and compile them into
+self-contained pages with `lf page build`:
+
+```html
+<!-- scratch/ship-review.page.html -->
+<h1>Retry budget per Task</h1>
+
+<h2>How it works</h2>
+<lf-diff path="src/retry.rs" lines="40-68">
+  <lf-note line="52">Counts attempts per Task ID rather than per process.</lf-note>
+</lf-diff>
+
+<h2>Findings</h2>
+<lf-component name="decision" id="f1" title="Cap retry log growth" recommendation="File Task">
+  <p>Long-running Tasks append one row per backoff tick without pruning.</p>
+</lf-component>
+
+<button data-lf='{"kind":"task.create","title":"Prune retry log rows"}'>File Task now</button>
+
+<div data-question="q1" data-label="Rented Machine retry default">
+  <p>1. Keep the 3-attempt default for rented Machines?</p>
+  <textarea></textarea>
+</div>
+```
+
+```bash
+lf page build scratch/ship-review.page.html              # → scratch/ship-review.html
+lf page build scratch/ship-review.page.html --base main  # override diff base
+lf page open scratch/ship-review.html                    # open in browser or Desktop Files
+```
+
+Source files contain body HTML only—no `<html>`, `<head>`, `<style>`, or
+`<script>`. `lf page build` wraps the body with the theme CSS, runtime script,
+and a JSON work stamp (work target, checkout, base/head, build hash), and
+expands:
+
+- `<lf-diff path="…" [lines="40-68"]>`: real hunks from Loopflow's diff engine
+  (including untracked files and renames; omit `lines` for every hunk in the
+  file). Add `<lf-note line="52">` (new line) or `<lf-note old-line="48">`
+  (deleted line) children; readers can toggle line notes off.
+- `<lf-file path="…" [lines="1-40"]>`: numbered lines as they stand on disk,
+  with optional `<lf-note line="…">` children, for unchanged code.
+- `<lf-component name="…">`: expands `.lf/components/<name>/template.html` (and
+  optional `style.css`), overriding builtins. Substitutes HTML-escaped
+  `{{attr}}` attributes and `<slot>` / `<slot name="…">` children. Built-in
+  components are `decision` (`id`, `title`, `recommendation`, body slot) and
+  `before-after` (`before` and `after` slots).
+- `data-choice`, `data-multiselect`, `data-question`: interactive controls
+  included in the `⌘↩` reply.
+- `data-lf='<partial JSON>'`: expands partial JSON into a strict Machine
+  `Operation` using the build checkout (injecting `directory` and per-click
+  `request_id` where needed) and validates it at build time.
+
+`lf page build` fails—naming the element and line—on any missing path in
+`<lf-diff>`, `<lf-file>`, or `[data-path]`, any `<lf-diff>` path or range not
+present in the diff, any unknown 7–40 hex commit SHA inside `<code>` (add
+`data-no-check` to opt out), any invalid `data-lf` operation, or any `<script>`
+or `<style>` tag in the source.
+
+Customize review pages for your repository without forking builtins:
+
+- **Theme:** add `.lf/theme.css` setting CSS custom properties for light and
+  dark modes; `lf page build` uses it in place of the built-in theme.
+- **Components:** add `.lf/components/<name>/template.html` (and optional
+  `style.css`) to define new `<lf-component>` blocks or override `decision` /
+  `before-after`.
+- **Skill rules:** extend a built-in review skill with `extends: lf:ship-review`
+  (or `explore`, `concept-review`, `qa`, `demo`) in `.lf/skills/` to add
+  repository-specific sections or checks while keeping the base skill.
+
+Run `lf help page` for the full authoring contract, and see
+[Review pages](surfaces.md#review-pages) for how pages behave in browsers,
+Desktop, and offline.
+
 ### Built-in Graphs
+
+```bash
+lf task run LOO-13 quick    # builds from the brief, runs qa, and lands when CI passes
+```
 
 | Graph | What it does |
 |---|---|
-| `feature` | Choose a direction after `explore`, review the built change after `ship-review`, then review the checks after `verify` |
+| `feature` | Choose a direction after `explore`, then review the built change after `ship-review` |
 | `code` | Same as `feature`, starting at `plan` (default when no Graph is configured) |
+| `quick` | loop(`sync` → `implement`) → `qa` → `land --wait-and-fix` |
 | `pursue` | `plan` then `build` from request to published PR |
 | `research` | Review the findings after each research pass and decide whether to investigate further |
 | `optimize` | Iterative measure → change → keep/revert loop |
+
+`quick` takes a small, clear change straight from the brief to a merged PR with
+no breakpoint. Desktop's Start menu marks it **merges without asking**, and
+`lf task auto off <ID>` still pauses before `land`. A brief bigger than one
+bounded change stops `quick` at `implement`, blocked, before anything is built.
 
 Copy any builtin to customize it for your team:
 
@@ -306,7 +416,7 @@ steps:
 
 ```console
 $ lf graph list
-code       Build, deliver and verify. You review the change, then check it on main.
+code       Build and deliver. You review the change before it merges.
 my-graph
 ship-api   Build the endpoint, audit it, then deliver.
 ```
@@ -364,6 +474,7 @@ lf task auto off LOO-12             # LOO-12: auto off
 | `idle` | Checked out with no run underway or decision pending |
 | `active` | Needs attention, including a Task at a breakpoint |
 | `moving` | Graph running, whatever the auto setting |
+| `paused` | Started Task held by [`lf task pause`](work.md#pause-a-task): Graph held, conversation available, ownership and worktree kept |
 | `done` / `abandoned` | Completed / dropped |
 
 ## Run Tasks on pools or rented machines

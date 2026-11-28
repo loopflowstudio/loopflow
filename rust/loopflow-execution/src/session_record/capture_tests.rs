@@ -800,7 +800,11 @@ fn history_keeps_only_how_a_turn_ended() {
 
     // Capture prose remains readable, but cannot substitute for native turn output.
     assert_eq!(
-        crate::session_record::final_answer(&capture.artifact_dir()).unwrap(),
+        crate::transcript::answer::input_final_answer(
+            &crate::session_record::row_store(&capture.artifact_dir()).unwrap(),
+            &crate::session_record::input_id_from_dir(&capture.artifact_dir()).unwrap(),
+        )
+        .unwrap(),
         None
     );
     assert!(!capture.artifact_dir().join("events.jsonl").exists());

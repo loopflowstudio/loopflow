@@ -47,7 +47,11 @@
       }
     ],
     "current_step": 2,
-    "sentence": "build is running implement. You are next needed at demo."
+    "sentence": "build is running implement. You are next needed at demo.",
+    "control": {
+      "action": "pause",
+      "label": "build · implement"
+    }
   },
   "graph_processes": [
     {

@@ -537,11 +537,7 @@ fn is_current(directory: &Path, tag: &str, app: Option<&Path>) -> bool {
 
 // Installed binaries can be stale or broken; update detection must not hang.
 fn inspect(program: &Path, args: &[&str]) -> Option<Output> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .ok()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let mut command = Command::new(program);
         super::isolate_candidate_command(&mut command);
         command.args(args);

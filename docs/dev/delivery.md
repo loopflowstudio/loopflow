@@ -122,8 +122,8 @@ still cannot form a PR. Root Tasks save the resolved base; stacked Tasks retain
 their integration fork until explicit sync so squash-parent comparison preserves
 child edits.
 
-`submit`, `arm` and `land` clear added scratch files during preparation,
-merge current main, verify once,
+`submit`, `arm` and `land` merge current main when needed, clear added scratch
+files once on the head they are about to push, verify once,
 and push the exact head. Branch commits and merge resolutions retain their identities.
 GitHub applies the repository’s allowed merge method or merge queue policy. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
@@ -137,7 +137,7 @@ Scratch cleanup selects landing candidates for this repository's
 [hosted CI](../../.github/CI.md); PR readiness alone does not select CI.
 
 Final preparation keeps the existing PR title and body when its published head
-matches the local head. Explicit copy and valid gate output take precedence;
+matches the local head. Explicit copy takes precedence;
 unpublished changes still generate fresh copy. Task merge-disposition text is
 updated after that selection. Preparing an unchanged published PR needs no agent
 just to rewrite its description.
@@ -323,7 +323,7 @@ A PR closed without merging ends its landing unsettled. Merge evidence is
 recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
-`ship` runs gate and `land --wait-and-fix`. Waited landing uses the existing
+Waited landing uses the existing
 observation and CI repair path every 15 seconds until verified merge, closure
 or interruption, releasing its lock between reads. A blocked check or failed
 read is printed once and checked again. Repair
@@ -355,7 +355,7 @@ arrives at end; planning writeback remains retryable.
 After a stopped Graph, inspect associated live work and retry only the unfinished
 operation. A completed Task can receive comments without reopening execution.
 There is no special finishing Graph or new-work exception for completed Tasks.
-Do not replay gate or re-arm a merged PR to finish a comment or completion request.
+Do not re-arm a merged PR to finish a comment or completion request.
 Dated follow-ups return on the owning Wave's next pass, including unstarted ones;
 unattended execution needs a concrete check already authorized in the brief.
 Filing installs no schedule. Without an installed Wave schedule there is no

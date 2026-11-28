@@ -492,8 +492,12 @@ pub struct RoadmapTask {
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub breakpoint_arrival: Option<loopflow_model::id::LfProcessId>,
     pub pr: Option<PrSnapshot>,
     pub section: TaskSection,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub working_group: Option<loopflow_storage::execution::WorkingGroup>,
     /// Whether its owner is you; `false` when nobody owns it.
     pub owned_by_you: bool,
     /// The Machine that runs it when another Machine than this one owns it;
@@ -534,8 +538,10 @@ fn scope_waves_to_repo(waves: Vec<Wave>, directory: &Path, all: bool) -> Result<
 }
 
 pub fn ls(json: bool, all: bool) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
+    loopflow_execution::runtime::block_on(async {
+        if let Ok(directory) = std::env::current_dir() {
+            loopflow_execution::ops::plan_carriers::before_first_read(&directory).await;
+        }
         let Some(snapshots) = list(all).await? else {
             return no_registry(json, "[]");
         };
@@ -579,7 +585,8 @@ pub(crate) async fn wave_snapshots(store: &SharedStore, all: bool) -> Result<Vec
 /// <wave>` reads what the store records and `lf wave sync` exchanges planning.
 pub fn status(wave: Option<&str>, json: bool, observe: bool) -> Result<()> {
     let directory = std::env::current_dir()?;
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(&directory).await;
         let Some(status) = read_status(&directory, wave, observe).await? else {
             return no_registry(json, "null");
         };
@@ -594,14 +601,14 @@ pub fn status(wave: Option<&str>, json: bool, observe: bool) -> Result<()> {
 
 /// What `lf --cwd <directory> wave status [<wave>] --json` prints.
 pub fn status_json(directory: &Path, wave: Option<&str>, observe: bool) -> Result<String> {
-    let status = tokio::runtime::Runtime::new()?.block_on(read_status(directory, wave, observe))?;
+    let status = loopflow_execution::runtime::block_on(read_status(directory, wave, observe))?;
     Ok(serde_json::to_string(&status)?)
 }
 
 /// `lf --cwd <directory> wave plan <wave>`: one Wave's stored plan; None
 /// without a registry.
 pub fn desktop_status(directory: &Path, wave: &str) -> Result<Option<WaveDetailSnapshot>> {
-    tokio::runtime::Runtime::new()?.block_on(read_status(directory, Some(wave), false))
+    loopflow_execution::runtime::block_on(read_status(directory, Some(wave), false))
 }
 
 /// One Wave's status; None without a registry.
@@ -628,7 +635,7 @@ pub fn desktop_closed_tasks(
     after: Option<&str>,
 ) -> Result<ClosedTaskPageSnapshot> {
     let repo = loopflow_execution::repo::working_directory_in(directory)?;
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         closed_task_page(
             store.as_ref(),
@@ -729,7 +736,8 @@ pub(crate) fn show_snapshot(
     all: bool,
     observe: bool,
 ) -> Result<RoadmapSnapshot> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(directory).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         show_roadmap(store.as_ref(), directory, wave, task, all, observe).await
     })
@@ -880,15 +888,15 @@ pub struct TaskListArgs {
     pub wave: Option<String>,
     /// Project ID, provider ID, slug or name.
     pub project: Option<String>,
-    /// An open `TaskState` label: unstarted, idle, active or moving.
+    /// Filter by an open `TaskState`.
     pub state: Option<String>,
 }
 
 /// `lf task list`: the repository's open Tasks matching `query`, as the plan
 /// gives them.
 pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let tasks = match &store {
             Some(store) => open_tasks(store, repo, query).await?,
@@ -910,6 +918,10 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
                     });
                 if let Some(place) = place {
                     owner = format!("{owner} · {place}");
+                }
+                if let Some(group) = task.working_group {
+                    owner.push_str(" · ");
+                    owner.push_str(group.label());
                 }
                 let indent = "  ".repeat(depth);
                 println!(
@@ -1207,9 +1219,13 @@ where
             let reading = reading.clone();
             async move {
                 let store = loopflow_execution::read_stream::require_store(store)?;
-                let status =
-                    loopflow_execution::ops::task::read_task_status(&store, &repo, &args.issue)
-                        .await?;
+                let status = loopflow_execution::ops::task::read_task_status(
+                    &store,
+                    &repo,
+                    &args.issue,
+                    crate::lf::navigation::command_merges,
+                )
+                .await?;
                 Ok(serde_json::to_value(reading(store, status).await?)?)
             }
         },
@@ -1359,7 +1375,7 @@ pub(crate) fn task_completed(
     ids(&completion.children, &mut settled);
     let mut rows = HashMap::new();
     if !settled.is_empty() {
-        tokio::runtime::Runtime::new()?.block_on(async {
+        loopflow_execution::runtime::block_on(async {
             let store = loopflow_execution::store::read_existing_registry()?
                 .map(std::sync::Arc::new)
                 .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
@@ -1382,7 +1398,7 @@ pub(crate) fn task_completed(
 
 /// `lf task status`: the Task it was filed from and one line per child.
 pub fn print_task_family(task: &Task) -> Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
@@ -1420,8 +1436,7 @@ pub fn print_task_detail(
     status: loopflow_execution::ops::task::TaskStatus,
     unanswered: Option<String>,
 ) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
@@ -1448,7 +1463,6 @@ pub(crate) fn read_task_detail(
     let store = loopflow_execution::store::read_existing_registry()?
         .map(Arc::new)
         .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
-    let rt = tokio::runtime::Runtime::new()?;
     let task = loopflow_execution::ops::task::registered_task(&store.sqlite, &repo, issue)?;
     let mut unanswered = None;
     if ask_owner {
@@ -1459,8 +1473,13 @@ pub(crate) fn read_task_detail(
             }
         }
     }
-    rt.block_on(async {
-        let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
+    loopflow_execution::runtime::block_on(async {
+        let status = loopflow_execution::ops::task::registered_task_status(
+            &store,
+            task,
+            crate::lf::navigation::command_merges,
+        )
+        .await?;
         task_detail(&store, status, unanswered).await
     })
 }
@@ -1657,8 +1676,8 @@ pub fn list_closed_tasks(
     limit: usize,
     json: bool,
 ) -> Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let page = closed_task_page(store.as_ref(), repo, wave, since, after, limit).await?;
         if json {
@@ -2158,7 +2177,11 @@ impl<'a> DetailReads<'a> {
         {
             selection_readings.insert(repository.clone(), shared.selections(store, repository)?);
         }
-        let facts = loopflow_execution::store::ownership::task_detail_facts(&store.sqlite, tasks)?;
+        let facts = loopflow_execution::store::ownership::task_detail_facts(
+            &store.sqlite,
+            tasks,
+            crate::lf::navigation::command_merges,
+        )?;
         let mut planning_connections = HashMap::new();
         for open in facts.tracker_actions.values() {
             planning_connections
@@ -2239,18 +2262,18 @@ async fn snapshot_task_detail(
     let pr = facts.active_prs.get(&task.id).cloned();
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
-    let (execution, graph_record) =
-        loopflow_execution::ops::task_execution::execution_of_latest_graph(
-            &store.sqlite,
-            task,
-            reads.graphs.get(&task.id),
-            &reads.execution,
-        )
-        .await?;
     let status = *facts
         .states
         .get(&task.id)
         .ok_or_else(|| anyhow!("Task {} has no state", task.id))?;
+    let graph = reads.graphs.get(&task.id);
+    let execution = loopflow_execution::ops::task_execution::execution_of_latest_graph(
+        &store.sqlite,
+        task,
+        status,
+        graph,
+        &reads.execution,
+    )?;
     let pending = facts
         .completion_pending
         .get(&task.id)
@@ -2344,10 +2367,10 @@ async fn snapshot_task_detail(
                     serde_json::from_str(raw)?;
                 let blocked = arrival.blocked_reason().is_some();
                 let sentence = loopflow_execution::task_graph::breakpoint_sentence(step, &arrival);
-                Ok::<_, serde_json::Error>((blocked, sentence))
+                Ok::<_, serde_json::Error>((arrival.id, blocked, sentence))
             })
             .transpose()?
-            .filter(|(blocked, sentence)| {
+            .filter(|(_, blocked, sentence)| {
                 loopflow_execution::ops::task_actions::BreakpointActionEvidence {
                     blocked: *blocked,
                     sentence,
@@ -2358,29 +2381,60 @@ async fn snapshot_task_detail(
         None
     };
     let finished = loopflow_execution::ops::task_actions::Finished::of(
-        &status.work_status(),
+        status,
         pr.as_ref().map(TaskPr::phase),
         at_end,
         breakpoint.is_some(),
     );
     let conducting = finished
         .filter(|_| {
-            elsewhere.is_none()
+            status != TaskState::Paused
+                && elsewhere.is_none()
                 && open_children > 0
                 && execution.state != TaskExecutionState::Running
         })
         .map(|finished| finished.reason(open_children));
+    let run_control = loopflow_execution::ops::task_run::task_run_control(
+        &loopflow_execution::ops::task_run::TaskRunEvidence {
+            status,
+            issue: &task.identifier,
+            running_step: execution
+                .step
+                .as_deref()
+                .filter(|_| execution.state == TaskExecutionState::Running),
+            pause_cleanup: facts.pause_cleanup.get(&task.id).copied(),
+            resumes_on_unpause: facts.resumes_on_unpause.contains(&task.id),
+            // Shared completion withdraws an unstarted Task, never moves its Graph.
+            plan_terminal_reason: loopflow_execution::linear::terminal_reason(
+                task.state.as_deref(),
+            )
+            .filter(|_| matches!(status, TaskState::Unstarted)),
+            worktree_blocker: worktree_blocker
+                .as_ref()
+                .map(|blocker| blocker.reason.as_str()),
+            launch_refusal: launch_refusal.as_deref(),
+        },
+    );
     let next_move = if let Some(runs_on) = elsewhere {
         NextMove {
             owner: NextMoveOwner::Task,
             reason: loopflow_execution::ops::task_ownership::runs_elsewhere(runs_on),
+        }
+    } else if let Some(reason) = run_control
+        .unavailable
+        .as_ref()
+        .filter(|_| status == TaskState::Paused)
+    {
+        NextMove {
+            owner: NextMoveOwner::User,
+            reason: reason.clone(),
         }
     } else if unassigned(&runtime) {
         NextMove {
             owner: NextMoveOwner::User,
             reason: "Unassigned; nothing moves it until `lf task claim` or `lf task run`".into(),
         }
-    } else if let Some((_, sentence)) = &breakpoint {
+    } else if let Some((_, _, sentence)) = &breakpoint {
         NextMove {
             owner: NextMoveOwner::User,
             reason: sentence.clone(),
@@ -2435,7 +2489,7 @@ async fn snapshot_task_detail(
         .and_then(|parent_id| facts.parent_prs.get(parent_id))
         .map(TaskPr::phase);
     let action_evidence = TaskActionEvidence {
-        status: runtime.status.work_status(),
+        status: runtime.status,
         execution: Some(&execution),
         latest_pr_phase: pr.as_ref().map(TaskPr::phase),
         latest_pr_merge_request: pr.as_ref().and_then(TaskPr::merge_request),
@@ -2444,7 +2498,7 @@ async fn snapshot_task_detail(
             .filter(|pr| pr.phase() == PrPhase::Open)
             .map(|pr| pr.presentation().is_some()),
         at_end,
-        breakpoint: breakpoint.as_ref().map(|(blocked, sentence)| {
+        breakpoint: breakpoint.as_ref().map(|(_, blocked, sentence)| {
             loopflow_execution::ops::task_actions::BreakpointActionEvidence {
                 blocked: *blocked,
                 sentence: sentence.as_str(),
@@ -2473,21 +2527,6 @@ async fn snapshot_task_detail(
     } else {
         derive_task_actions(&action_evidence)
     };
-    let work_status = runtime.status.work_status();
-    let run_control = loopflow_execution::ops::task_run::task_run_control(
-        &loopflow_execution::ops::task_run::TaskRunEvidence {
-            status: Some(&work_status),
-            // Shared completion withdraws an unstarted Task, never moves its Graph.
-            plan_terminal_reason: loopflow_execution::linear::terminal_reason(
-                task.state.as_deref(),
-            )
-            .filter(|_| matches!(runtime.status, TaskState::Unstarted)),
-            worktree_blocker: worktree_blocker
-                .as_ref()
-                .map(|blocker| blocker.reason.as_str()),
-            launch_refusal: launch_refusal.as_deref(),
-        },
-    );
     let (graph_name, graph_source) = reads
         .selections
         .get(&task.id)
@@ -2517,11 +2556,12 @@ async fn snapshot_task_detail(
         ),
         reference,
         lifecycle,
+        working_group: facts.working_groups.get(&task.id).copied(),
         selection_states: task_selection_states(
             observed,
             section,
             runtime.owner.is_some() || pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
-            facts.auto_on.contains(&task.id),
+            facts.auto.get(&task.id).copied(),
             breakpoint.is_some(),
             reads.selection_readings[&task.repository_id]
                 .activity
@@ -2533,9 +2573,15 @@ async fn snapshot_task_detail(
         actions,
         graph_name: Some(graph_name),
         graph_source,
-        latest_graph_process: graph_record,
+        latest_graph_process: graph.map(|graph| {
+            graph.detail(loopflow_storage::sqlite::entry_of(
+                graph,
+                task.wave_id.clone(),
+            ))
+        }),
         execution: Some(execution),
         run_control,
+        breakpoint_arrival: breakpoint.map(|(arrival, _, _)| arrival),
         pr: pr.as_ref().map(|pr| {
             let empty = (probe_pr_empty && pr.is_active())
                 .then(|| task_pr_empty(task, pr))
@@ -2698,7 +2744,9 @@ fn derive_task_condition(
     let settled = runtime
         .map(|runtime| runtime.status)
         .filter(|status| status.is_terminal() && !unresolved_execution);
-    let (state, reason) = if let Some(status) = settled {
+    let (state, reason) = if runtime.is_some_and(|runtime| runtime.status == TaskState::Paused) {
+        (TaskConditionState::Clear, next_move.reason.clone())
+    } else if let Some(status) = settled {
         let reason = match status {
             TaskState::Abandoned => "Task is abandoned",
             _ => "Task is complete",
@@ -3573,7 +3621,12 @@ mod tests {
                 .map(|task| task["task"]["id"].as_str().unwrap())
                 .collect();
             assert_eq!(working, expected, "roadmap {}", frame["name"]);
-            let plans = selections::selection_plans(&store.sqlite, &repo).unwrap();
+            let plans = selections::selection_plans(
+                &store.sqlite,
+                &repo,
+                crate::lf::navigation::command_merges,
+            )
+            .unwrap();
             for id in [
                 "repository-default",
                 "wave-default:11111111-1111-1111-1111-111111111111",
@@ -3585,6 +3638,7 @@ mod tests {
                 &store.sqlite,
                 Some("kind:task state:working"),
                 &["/repo".into()],
+                crate::lf::navigation::command_merges,
             )
             .unwrap();
             assert_eq!(phone.len(), 1);
@@ -3592,7 +3646,13 @@ mod tests {
         };
         let check_filters = |available: &[&str], busy: &[&str]| {
             for (query, expected) in [("state:available", available), ("state:busy", busy)] {
-                let plan = selections::view_plan(&store.sqlite, &repo, Some(query)).unwrap();
+                let plan = selections::view_plan(
+                    &store.sqlite,
+                    &repo,
+                    Some(query),
+                    crate::lf::navigation::command_merges,
+                )
+                .unwrap();
                 assert_eq!(plan.resolution.task_ids(), expected, "{query}");
             }
         };
@@ -3675,12 +3735,52 @@ mod tests {
         check_filters(&[active], &[active]);
         report_states(9, &[State::Working, State::Error]);
         check_filters(&[], &[active]);
-        let errors = selections::view_plan(&store.sqlite, &repo, Some("state:error")).unwrap();
+        let errors = selections::view_plan(
+            &store.sqlite,
+            &repo,
+            Some("state:error"),
+            crate::lf::navigation::command_merges,
+        )
+        .unwrap();
         assert_eq!(errors.resolution.task_ids(), [active]);
         assert!(errors
             .resolution
             .attention
             .contains(&errors.resolution.members[0].work));
+        for id in [active, other] {
+            db.execute(
+                "INSERT INTO task_auto(task_id,state,set_at,set_by) VALUES(?1,'on',1,json_object('kind','person','name','Ada'))",
+                [id],
+            ).unwrap();
+        }
+        db.execute("INSERT INTO task_pauses(task_id,paused_at,paused_by) VALUES(?1,1,json_object('kind','person','name','Ada'))", [other]).unwrap();
+        let grouped = read(&store, "shipping_and_paused").await;
+        check_order(&grouped, [active, other]);
+        let plan = selections::view_plan(
+            &store.sqlite,
+            &repo,
+            Some("kind:task state:working"),
+            crate::lf::navigation::command_merges,
+        )
+        .unwrap();
+        for (id, group) in [(active, "shipping"), (other, "paused")] {
+            let row = grouped["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["task"]["id"] == id)
+                .unwrap();
+            assert_eq!(row["working_group"], group);
+            let tile = plan
+                .contents
+                .iter()
+                .find(|tile| tile.work.id == id)
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(tile.working_group).unwrap(),
+                row["working_group"]
+            );
+        }
         report_states(10, &[State::Blocked, State::Working]);
         let fixture =
             serde_json::json!([initial, owned_available, owned_working, working, available]);
@@ -3711,6 +3811,7 @@ mod tests {
                                 "id": task["task"]["id"],
                                 "lifecycle": task["lifecycle"],
                                 "section": task["section"],
+                                "working_group": task["working_group"],
                                 "states": task["selection_states"],
                                 "runtime": task["runtime"]["status"],
                                 "owner": task["runtime"]["owner"],
@@ -4290,7 +4391,7 @@ mod tests {
         assert_eq!(user_handoff.state, TaskConditionState::Waiting);
 
         let breakpoint_evidence = |blocked, sentence| TaskActionEvidence {
-            status: WorkStatus::Ready,
+            status: TaskState::Active,
             execution: None,
             latest_pr_phase: None,
             latest_pr_merge_request: None,
@@ -4347,6 +4448,98 @@ mod tests {
     }
 
     #[test]
+    fn pause_quiets_the_condition_until_unpause() {
+        let failed = TaskExecutionSnapshot {
+            state: TaskExecutionState::Blocked,
+            reason: "gate failed".into(),
+            step: None,
+            captured: None,
+            died: None,
+            outlook: None,
+        };
+        for (dirty, execution, released_state, released_reason) in [
+            (
+                false,
+                None,
+                TaskConditionState::Waiting,
+                "Waiting for review",
+            ),
+            (
+                true,
+                None,
+                TaskConditionState::Blocked,
+                "Task has uncommitted work",
+            ),
+            (
+                true,
+                Some(&failed),
+                TaskConditionState::Blocked,
+                "gate failed",
+            ),
+        ] {
+            for (status, state, reason) in [
+                (
+                    TaskState::Paused,
+                    TaskConditionState::Clear,
+                    "Task is paused",
+                ),
+                (TaskState::Idle, released_state, released_reason),
+            ] {
+                let runtime = TaskRuntimeSnapshot {
+                    work_id: "task-1".into(),
+                    status,
+                    reason: String::new(),
+                    updated_at: "2026-07-21T00:00:00Z".into(),
+                    provider: None,
+                    owner: Some(owned()),
+                    completion_pending: None,
+                };
+                let next_move = NextMove {
+                    owner: NextMoveOwner::User,
+                    reason: if status == TaskState::Paused {
+                        "Task is paused"
+                    } else {
+                        "Waiting for review"
+                    }
+                    .into(),
+                };
+                let condition = derive_task_condition(
+                    Some(&runtime),
+                    &next_move,
+                    LocalProgressEvidence {
+                        state: LocalProgressEvidenceState::Observed,
+                        unsettled: Some(dirty),
+                        dirty: Some(dirty),
+                        authored_commits: Some(false),
+                        recovery_required: Some(false),
+                        reason: None,
+                    },
+                    Some(&TaskActionEvidence {
+                        status,
+                        execution,
+                        latest_pr_phase: None,
+                        latest_pr_merge_request: None,
+                        latest_pr_presentation_current: None,
+                        at_end: false,
+                        breakpoint: None,
+                        open_children: 0,
+                        completion_refusal: None,
+                        run_refusal: None,
+                        ci: None,
+                        predecessor_phase: None,
+                        launch_refusal: None,
+                    }),
+                    execution,
+                    OffsetDateTime::now_utc(),
+                );
+                assert_eq!(condition.state, state);
+                assert_eq!(condition.reason, reason);
+                assert_eq!(condition.local_progress.dirty, Some(dirty));
+            }
+        }
+    }
+
+    #[test]
     fn task_condition_uses_execution_evidence_before_dirty_work() {
         for (state, expected) in [
             (TaskExecutionState::Starting, TaskConditionState::Clear),
@@ -4363,7 +4556,7 @@ mod tests {
                 outlook: None,
             };
             let actions = TaskActionEvidence {
-                status: WorkStatus::Ready,
+                status: TaskState::Idle,
                 execution: Some(&execution),
                 latest_pr_phase: None,
                 latest_pr_merge_request: None,
@@ -4416,7 +4609,7 @@ mod tests {
                         },
                         condition.local_progress.clone(),
                         Some(&TaskActionEvidence {
-                            status: runtime.status.work_status(),
+                            status: runtime.status,
                             ..actions
                         }),
                         None,
@@ -4436,7 +4629,7 @@ mod tests {
                             ..condition.local_progress.clone()
                         },
                         Some(&TaskActionEvidence {
-                            status: runtime.status.work_status(),
+                            status: runtime.status,
                             execution: None,
                             completion_refusal: Some("Pull request has not merged"),
                             ..actions
@@ -4488,7 +4681,7 @@ mod tests {
                     reason: Some("Task worktree is missing".into()),
                 },
                 Some(&TaskActionEvidence {
-                    status: status.work_status(),
+                    status,
                     execution: Some(&failed),
                     latest_pr_phase: None,
                     latest_pr_merge_request: None,
@@ -4521,7 +4714,7 @@ mod tests {
             reason: None,
         };
         let action_evidence = TaskActionEvidence {
-            status: WorkStatus::Ready,
+            status: TaskState::Idle,
             execution: None,
             latest_pr_phase: Some(PrPhase::Open),
             latest_pr_merge_request: None,
@@ -4686,11 +4879,15 @@ mod tests {
             );
         };
         assert!(reason.contains("no such table: task_events"), "{reason}");
-        let graph = loopflow_execution::store::task_work::task_overview(&store.sqlite, &task)
-            .unwrap()
-            .0
-            .graph
-            .unwrap();
+        let graph = loopflow_execution::store::task_work::task_overview(
+            &store.sqlite,
+            &task,
+            crate::lf::navigation::command_merges,
+        )
+        .unwrap()
+        .0
+        .graph
+        .unwrap();
         assert_eq!(graph.name, "feature");
         assert!(
             matches!(graph.position, loopflow_execution::task_graph::TaskGraphPosition::At { ref step } if step == "end")
@@ -4852,6 +5049,7 @@ mod tests {
             &store.sqlite,
             &repo_id,
             loopflow_execution::store::sqlite::selections::repository_default(),
+            |_| false,
         )
         .unwrap();
         let tile = plan

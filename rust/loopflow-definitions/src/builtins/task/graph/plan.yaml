@@ -1,5 +1,6 @@
 description: Settle what to build before any code.
 steps:
 - kickoff
-- concept-review            # the plan's premise
+- concept-review            # the plan's premise, read-only
+- realign                   # takes the review into the plan
 - write-docs

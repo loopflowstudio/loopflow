@@ -431,7 +431,7 @@ pub(crate) fn unanswered_questions_in(
     steps: &[&LfProcessId],
 ) -> StoreResult<HashMap<LfProcessId, String>> {
     let ids = super::children::ids_json(steps.iter().map(|id| id.as_str()));
-    let mut query = conn.prepare(
+    let mut query = conn.prepare_cached(
         "SELECT step.value, (
              SELECT json_extract(t.error,'$.message') FROM history.turns t
              WHERE t.lf_process_id=step.value AND json_extract(t.error,'$.code')=?2
@@ -484,7 +484,7 @@ pub fn convert_turn_rows(database: &std::path::Path) -> StoreResult<u64> {
     let mut converted = 0;
     loop {
         let threads: Vec<(String, String)> = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT DISTINCT session_id,provider_thread FROM session_events
                  WHERE kind IN ('started','usage','completed') AND provider_thread IS NOT NULL
                  LIMIT ?1",
@@ -518,7 +518,7 @@ fn convert_thread(
     thread: &str,
 ) -> StoreResult<u64> {
     let rows: Vec<LegacyRow> = conn
-        .prepare(
+        .prepare_cached(
             "SELECT COALESCE(provider_turn,''),kind,observed_at,lf_process_id,agent_process_id,
                     task_id,wave_id,captured_event,payload
              FROM session_events WHERE session_id=?1 AND provider_thread=?2

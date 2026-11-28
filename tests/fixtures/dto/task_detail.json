@@ -47,7 +47,7 @@
         "reason": null,
         "command": null
       },
-      "status_line": "died 12:01 (exit 137) \u00b7 starts again 12:02"
+      "status_line": "died 12:01 (exit 137) · starts again 12:02"
     },
     {
       "id": "manual",
@@ -90,14 +90,18 @@
       }
     ],
     "current_step": 2,
-    "sentence": "Waiting for you at demo."
+    "sentence": "Waiting for you at demo.",
+    "control": {
+      "action": "run",
+      "label": "Run: demo"
+    }
   },
   "graph_processes": [
     {
       "id": "00000005-0000-4000-8000-000000000000",
       "name": "feature",
       "state": "current",
-      "step": "implement \u00b7 pass 2",
+      "step": "implement · pass 2",
       "updated_at": "2026-09-23T08:05:00Z"
     }
   ],

@@ -120,8 +120,19 @@ public struct TaskOverview: Codable, Sendable, Equatable {
     }
 }
 
-/// The graph a Task took up and where the Task stands on it. Breakpoints are
-/// where a person takes part in the Task conversation; `start` and `end` are implicit.
+/// The primary workflow button, read with the saved Graph cursor.
+public struct WorkflowControl: Codable, Sendable, Hashable {
+    public enum Action: String, Codable, Sendable {
+        case run, `continue`, pause, pausing, unpause, resume, wait, done
+    }
+
+    public let action: Action
+    public let label: String
+}
+
+/// The graph a Task took up and where the Task stands on it. An interactive
+/// step is where a person takes part in the Task conversation; `start` and
+/// `end` are implicit.
 public struct TaskGraph: Codable, Sendable, Equatable {
     /// `at` waits at `start`, `end`, a landing wait, or a legacy unconverted stop.
     /// `breakpoint` is parked at a Graph breakpoint for a specific arrival.
@@ -197,6 +208,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     public static let end = "end"
 
     public let name: String
+    public let control: WorkflowControl
     /// Every breakpoint in order, including composed Graphs and XOR paths.
     public let breakpoints: [String]
     public let position: Position
@@ -209,7 +221,7 @@ public struct TaskGraph: Codable, Sendable, Equatable {
     public let sentence: String
 
     enum CodingKeys: String, CodingKey {
-        case name, breakpoints, position, steps, sentence
+        case name, control, breakpoints, position, steps, sentence
         case currentStep = "current_step"
     }
 
@@ -243,6 +255,7 @@ extension TaskGraph {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             name: try container.decode(String.self, forKey: .name),
+            control: try container.decode(WorkflowControl.self, forKey: .control),
             breakpoints: try container.decode([String].self, forKey: .breakpoints),
             position: try container.decode(Position.self, forKey: .position),
             steps: try container.decode([Step].self, forKey: .steps),

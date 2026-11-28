@@ -1,12 +1,12 @@
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use super::checkout_file::{open_file, parent_directory};
 use super::{
     file_context, file_snapshot, file_store, git_output, task_error, validate_task_relative_path,
     TaskFileSnapshot, TaskFileState, TaskWorkspace, MAX_FILE_BYTES,
@@ -130,42 +130,6 @@ fn revision_of(file: File) -> OpsResult<String> {
     Ok(hex::encode(Sha256::digest(bytes)))
 }
 
-// Pin each directory before opening the next component. A symlink retarget cannot
-// redirect the save outside this checkout. A concurrently moved directory remains
-// the opened directory; the readback reports the current named path separately.
-fn parent_directory(root: &Path, relative: &str) -> OpsResult<(File, CString)> {
-    let mut directory = File::open(root.canonicalize()?)?;
-    let path = Path::new(relative);
-    for component in path
-        .parent()
-        .expect("relative file has a parent")
-        .components()
-    {
-        let name = CString::new(component.as_os_str().as_encoded_bytes())
-            .map_err(|_| task_error("Invalid file path"))?;
-        // SAFETY: directory and name are live; openat returns a fresh owned descriptor.
-        let fd = unsafe {
-            libc::openat(
-                directory.as_raw_fd(),
-                name.as_ptr(),
-                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            )
-        };
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
-        // SAFETY: successful openat returned a fresh descriptor owned by this File.
-        directory = unsafe { File::from_raw_fd(fd) };
-    }
-    let name = CString::new(
-        path.file_name()
-            .expect("validated file name")
-            .as_encoded_bytes(),
-    )
-    .map_err(|_| task_error("Invalid file path"))?;
-    Ok((directory, name))
-}
-
 enum SavePreparation {
     Ready(SaveTarget),
     Changed(TaskFileSave),
@@ -215,20 +179,8 @@ fn prepare_save(
                 .into(),
         }));
     }
-    let (parent, name) = parent_directory(workspace.worktree, &path)?;
-    // SAFETY: parent and name remain alive and openat creates an owned descriptor.
-    let fd = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
-        )
-    };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-    // SAFETY: fd was returned by successful openat and has no other owner.
-    let original = unsafe { File::from_raw_fd(fd) };
+    let (parent, name) = parent_directory(&File::open(workspace.worktree)?, Path::new(&path))?;
+    let original = open_file(&parent, &name)?;
     let permissions = original.metadata()?.permissions();
     if revision_of(original)? != revision {
         return Ok(SavePreparation::Changed(TaskFileSave {

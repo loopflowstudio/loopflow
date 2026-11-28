@@ -13,7 +13,7 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 15] = [
+const GROWING: [&str; 16] = [
     "agent_sessions",
     "processes",
     "session_activity",
@@ -23,6 +23,7 @@ const GROWING: [&str; 15] = [
     "task_checkouts",
     "task_events",
     "task_moves",
+    "task_pauses",
     "task_ownership",
     "task_primary_sessions",
     "task_retirements",
@@ -587,8 +588,10 @@ mod tests {
             .begin_task_move_prepared(&task, &mini, &facts)
             .unwrap()
             .is_some());
-        store.record_move_sent(&task, "{}").unwrap();
         let traced = statements(&store, || {
+            assert!(store.task_is_leaving(&task).unwrap());
+            store.record_move_sent(&task, "{}").unwrap();
+            assert!(!store.task_is_leaving(&task).unwrap());
             assert!(store.task_move_in_flight(&task).unwrap().is_some());
         });
         let scans = growing_scans(&store, &traced);

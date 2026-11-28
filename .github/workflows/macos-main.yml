@@ -22,10 +22,10 @@ jobs:
       macos-process-test: ${{ steps.select.outputs.macos-process-test }}
       loopflow-ui-test: ${{ steps.select.outputs.loopflow-ui-test }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - name: Select the batch since last-green
         id: select
         env:
@@ -52,7 +52,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Advance last-green, or report the failure
         env:
           RESULT: ${{ needs.macos.result }}

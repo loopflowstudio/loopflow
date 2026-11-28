@@ -1,6 +1,6 @@
 # Loopflow verification commands
 
-Shared by this repository's `implement` and `gate` skills. Every command below
+Shared by this repository's `implement` skill and local verification. Every command below
 runs from the checkout root with inherited `LF_*` unset and `< /dev/null`.
 
 ## Plan first
@@ -32,14 +32,13 @@ the CLI fixture checks that selecting a parent retains checkout bytes and public
 Markdown changes under `docs/`, builtins or skills, and README or AGENTS edits,
 also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;
-include `test(documented_commands::)` in the gate's Rust filter.
+include `test(documented_commands::)` in the Rust filter.
 
-Builtin Graph order or loop changes include `test(graph::)` in the gate's
-Rust filter.
+Builtin Graph order or loop changes include `test(graph::)` in the Rust filter.
 
 Embedded skill Markdown also reaches `binary(golden_prompt)`, even when no Rust
 code changes. Follow the [prompt fixture checks](../rust/loopflow/tests/README.md)
-to regenerate and review snapshots for intended prompt changes before gate.
+to regenerate and review snapshots for intended prompt changes before landing.
 
 After the final sync, publish again when the Rust tree changed, even if Git
 merged cleanly. Main can add callers or fixtures for APIs this branch changes.
@@ -82,7 +81,7 @@ Session completion or attachment changes also run
 Session while retaining the saved provider thread and completes again on exit.
 
 Changes to Task/Graph membership or execution reads also include
-`test(performance_tests::)` in the gate's Rust filter. Its planning and status
+`test(performance_tests::)` in the Rust filter. Its planning and status
 checks catch per-Task and per-Graph SQL growth beyond focused store tests.
 
 Store-wide schema or trigger changes also run
@@ -136,8 +135,8 @@ A provider may exit before its viewer sends readiness; final output and exit
 status must survive that acknowledgement failing.
 
 Changes to `scripts/resource_envelope.py` or its imports also include
-`test(build_cleanup::)` in the gate's Rust filter. That suite invokes Python
-recovery outside pytest's configured import path. Use the gate's prepared CLI
+`test(build_cleanup::)` in the Rust filter. That suite invokes Python
+recovery outside pytest's configured import path. Use the runner's prepared CLI
 so compilation cannot outlast its process-liveness fixtures.
 
 ## Implement: one focused test
@@ -161,12 +160,12 @@ as library rows
 surface's full-Machine tests. The lists are in
 [the Rust tests README](../rust/loopflow/tests/README.md#decision-rows-and-full-machine-tests).
 
-## Gate: a few named tests; CI runs the suites
+## Local runner: a few named tests; CI runs the suites
 
-Gate publishes the candidate first ([CI.md](../.github/CI.md)) and CI's
-partitions run the suites. "Plan first" above is the map for naming the two to
-five tests that matter most. Run them here only for fast feedback on a review
-fix, to reproduce a CI failure, or for a risk no suite covers:
+CI's partitions run the suites ([CI.md](../.github/CI.md)). "Plan first" above is
+the map for naming the two to five tests that matter most. Run them locally only
+for fast feedback on a review fix, to reproduce a CI failure, or for a risk no
+suite covers:
 
 ```bash
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::) | test(prompt::) | binary(golden_prompt)'
@@ -225,11 +224,11 @@ fixtures that need Machines (`RemoteTaskWorkspaceTests`) ask
 `target/debug/lf` it builds first. Whether a
 Session works is checked on a physical phone against a real Machine.
 Website checks generate command reference pages from `LF_BIN` or `lf` on PATH.
-After building the candidate, prepend its directory to `PATH` for the gate or
+After building the candidate, prepend its directory to `PATH` for the runner or
 website command when the installed CLI differs: `PATH="$PWD/target/debug:$PATH"`.
 The network boundary clears inherited `LF_*`, including `LF_BIN`; PATH keeps
 the docs check on the candidate's command tree inside that boundary.
-Before gate, regenerate the portable architecture page after edits to
+Before landing, regenerate the portable architecture page after edits to
 `docs/dev/index.md` or its rendering, following [website/README.md](../website/README.md#testing).
 Include `docs/dev/index.html` in the change; the website suite checks it for drift.
 A filter reaching `ops::linear::` subtracts its long on-demand fixture
@@ -482,5 +481,5 @@ The checks a change must add live with the code they protect:
 | runner, network isolation, resources, installation harness | `scripts/README.md` (this directory) |
 | Swift, Desktop, Xcode | `swift/README.md` (Testing) |
 | website, `docs/` | `website/README.md` (Testing) |
-| CI workflows, caches, Dependabot | `.github/CI.md` |
+| CI workflows, caches, dependency bumps | `.github/CI.md` |
 | `tests/e2e/` | `tests/e2e/README.md` |

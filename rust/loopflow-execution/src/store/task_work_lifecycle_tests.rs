@@ -368,7 +368,7 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
         None,
     );
     store.test_graph("unrelated", "/other", &[("implement", None)], None);
-    let work = crate::store::task_work::task_work(&store, &task).unwrap();
+    let work = crate::store::task_work::task_work(&store, &task, |_| false).unwrap();
     assert_eq!(
         work.sessions
             .iter()
@@ -451,7 +451,7 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
         None,
     );
     let graph_ids = |task: &TaskId| {
-        crate::store::task_work::task_work(&store, task)
+        crate::store::task_work::task_work(&store, task, |_| false)
             .unwrap()
             .graph_processes
             .into_iter()
@@ -461,7 +461,7 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
     let enclosing = graph_ids(&task);
     assert!(!enclosing.contains(&child_graph.to_string()));
     assert_eq!(graph_ids(&child), [child_graph.to_string()]);
-    let work = crate::store::task_work::task_work(&store, &task).unwrap();
+    let work = crate::store::task_work::task_work(&store, &task, |_| false).unwrap();
     assert!(!work
         .sessions
         .iter()
@@ -476,7 +476,7 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
         .unwrap();
     }
     // Without its checkout the Task keeps the Sessions and Graphs started for it.
-    let work = crate::store::task_work::task_work(&store, &task).unwrap();
+    let work = crate::store::task_work::task_work(&store, &task, |_| false).unwrap();
     assert_eq!(
         work.sessions
             .iter()

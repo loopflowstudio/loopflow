@@ -116,6 +116,7 @@ pub enum SelectionState {
     Idle,
     Active,
     Moving,
+    Paused,
     /// Board axis: the Task's `TaskSection`.
     Backlog,
     Working,
@@ -766,6 +767,8 @@ pub struct ViewPlan {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ViewContent {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub working_group: Option<crate::execution::WorkingGroup>,
     pub work: WorkWorkspaceKey,
     pub title: String,
     pub states: BTreeSet<SelectionState>,

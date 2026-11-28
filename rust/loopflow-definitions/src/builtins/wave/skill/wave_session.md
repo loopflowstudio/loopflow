@@ -36,6 +36,14 @@ with what people said about it word for word. Working plans stay in
 `scratch/`. `.lf/wave/` is read-only unless the running Graph maintains it or
 someone asks for the edit here; otherwise put proposed changes in `scratch/`.
 
+When curating `.lf/wave/<wave>/MEMORY.md`, read this Wave's memory and its
+immediate children's. Promote lessons that apply across the parent, write what
+future Wave work should know rather than a pass log, replace stale guidance and
+remove duplication. Curate the selected Wave, not its ancestors. Every Wave run
+pays for `MEMORY.md`: run `lf context`, and when it is over its limit retire
+the largest stale sections until it fits, committing notes before removing
+them. Never raise a limit to hide overflow.
+
 This checkout outlives the conversation, and publishing needs no Task:
 
 ```bash

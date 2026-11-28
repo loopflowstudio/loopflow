@@ -14,7 +14,6 @@ use loopflow_execution::prompt::process::prepare_process_prompt;
 use loopflow_execution::prompt::process::ContextSourceOverrides;
 use loopflow_execution::prompt::process::ProcessPromptInput;
 use loopflow_execution::prompt::PromptComponents;
-use loopflow_execution::prompt::Surface;
 use loopflow_execution::session_record::{
     AgentProcessRequest, SessionCaptureSpec, SubjectAttribution,
 };
@@ -39,7 +38,7 @@ pub fn run(
     cli: &Cli,
 ) -> Result<()> {
     if let Some(binding) = implicit_binding(cli)? {
-        return run_bound_prompt(kind, skill, message, cli, &binding).map(|_| ());
+        return run_bound(kind, skill, message, cli, &binding);
     }
     let mut built = build_prompt(kind.mode(), repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -54,7 +53,7 @@ pub fn run(
     });
 
     print_context_header(&built, cli);
-    run_prompt(built, cli, kind).map(|_| ())
+    run_prompt(built, cli, kind)
 }
 
 pub(crate) fn preview_prompt(
@@ -183,7 +182,7 @@ pub fn resume(
         ..resolved
     };
     print_context_header(&built, &turn);
-    run_prompt(built, &turn, kind).map(|_| ())
+    run_prompt(built, &turn, kind)
 }
 
 #[doc(hidden)]
@@ -194,29 +193,6 @@ pub fn run_bound(
     cli: &Cli,
     binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<()> {
-    run_bound_prompt(kind, skill, message, cli, binding).map(|_| ())
-}
-
-/// Run a channel request through the ordinary attributed launch and settlement
-/// path, and read its answer from the provider's transcript.
-pub(crate) fn answer_bound(
-    message: &str,
-    cli: &Cli,
-    binding: &loopflow_execution::ops::WorkBinding,
-) -> Result<Option<String>> {
-    match run_bound_prompt(LaunchKind::Worker, None, Some(message), cli, binding)? {
-        Some(dir) => loopflow_execution::session_record::final_answer(&dir),
-        None => Ok(None),
-    }
-}
-
-fn run_bound_prompt(
-    kind: LaunchKind,
-    skill: Option<&str>,
-    message: Option<&str>,
-    cli: &Cli,
-    binding: &loopflow_execution::ops::WorkBinding,
-) -> Result<Option<std::path::PathBuf>> {
     let mut scoped;
     let binding = if let Some(scope) = operator_scope(skill, cli, &binding.cwd, Some(binding))? {
         scoped = binding.clone();
@@ -287,8 +263,7 @@ pub fn implicit_binding(cli: &Cli) -> Result<Option<loopflow_execution::ops::Wor
         return Ok(None);
     }
     let repo = std::env::current_dir()?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let Some(store) = loopflow_execution::store::open_existing_store().await? else {
             return Ok(None);
         };
@@ -449,8 +424,7 @@ fn prepare_task_input(
     )>,
 > {
     let Some(id) = &cli.task else { return Ok(None) };
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = std::sync::Arc::new(if cli.context {
             loopflow_execution::store::read_existing_registry()?
                 .ok_or_else(|| anyhow!("Task input unavailable: no local registry"))?
@@ -530,11 +504,6 @@ fn build_prompt_at(
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
-    let surface = if is_interactive {
-        Surface::Cli
-    } else {
-        Surface::Headless
-    };
 
     if let Some(skill) = &discovered_skill {
         match loopflow_definitions::name::portable_name(&skill.name).as_str() {
@@ -570,7 +539,7 @@ fn build_prompt_at(
             repo_root: repo_root.clone(),
             skill: skill.map(|value| value.to_string()),
             resolved_skill: discovered_skill.clone(),
-            surface,
+            mode,
             docs: Vec::new(),
             wave,
             message: message.map(|value| value.to_string()),
@@ -666,12 +635,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-/// Run the prompt; a headless run returns where its input was recorded.
-fn run_prompt(
-    built: PromptBuild,
-    cli: &Cli,
-    kind: LaunchKind,
-) -> Result<Option<std::path::PathBuf>> {
+fn run_prompt(built: PromptBuild, cli: &Cli, kind: LaunchKind) -> Result<()> {
     if kind.mode() == Mode::Interactive {
         info!("launching interactive vendor session");
         let runtime = begin_process_runtime(&built, "tui", None, cli.prepared_capture.as_deref())?;
@@ -696,17 +660,15 @@ fn run_prompt(
                 .as_ref()
                 .map_or("failed", NativeOutcome::capture_outcome),
         )?;
-        return result
-            .and_then(|outcome| {
-                let harness = built.agent_config.agent.harness;
-                let assigned = loopflow_execution::harness::launcher(harness)
-                    .capabilities()
-                    .thread
-                    .for_kind(kind)
-                    == loopflow_execution::harness::ThreadName::Assigned;
-                outcome.result(harness, assigned, kind)
-            })
-            .map(|()| None);
+        return result.and_then(|outcome| {
+            let harness = built.agent_config.agent.harness;
+            let assigned = loopflow_execution::harness::launcher(harness)
+                .capabilities()
+                .thread
+                .for_kind(kind)
+                == loopflow_execution::harness::ThreadName::Assigned;
+            outcome.result(harness, assigned, kind)
+        });
     }
 
     // Native terminals own their turn status. A separate lf record would remain
@@ -742,7 +704,7 @@ fn run_prompt(
         ))),
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!("Session completed but did not settle: {error}")),
-        (Ok(()), Ok(())) => Ok(Some(runtime.artifact_dir())),
+        (Ok(()), Ok(())) => Ok(()),
     }
 }
 
@@ -1522,7 +1484,7 @@ for line in sys.stdin:
         std::fs::create_dir_all(native.parent().unwrap()).unwrap();
         std::fs::write(&native, "Original audit instructions").unwrap();
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
-        let skill = catalog.resolve("audit").unwrap().unwrap().load().unwrap();
+        let skill = catalog.load_skill("audit").unwrap();
         std::fs::remove_file(&native).unwrap();
         let invocation = loopflow_execution::skills::invocation::SkillInvocation {
             skill,

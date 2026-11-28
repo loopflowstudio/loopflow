@@ -25,8 +25,9 @@ Don't stop after one small win, and don't wander into unrelated cleanup.
    speculative flexibility; keep abstractions that help a reader. Clarity beats
    line count.
 
-5. **Check.** Build the changed code and run its focused test when behavior
-   changed. No edits, no rerun. Suites belong to gate and CI.
+5. **Check.** Check only the narrowest changed target or focused test when
+   behavior changed. No edits, no rerun. Skip release builds, workspace-wide
+   linters and full suites — CI runs them.
 
 6. **Rewrite the reading order** when `scratch/tour.yaml` exists, as
    `lf help tour` describes: your cuts moved what a reader should open first.

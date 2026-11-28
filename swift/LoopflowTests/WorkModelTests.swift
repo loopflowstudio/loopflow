@@ -1231,7 +1231,7 @@ struct TaskPlanningReadabilityTests {
 
     private func plan(title: String = "Readable local Task") -> WorkViewPlan {
         let content = WorkViewPlan.Content(work: key, title: title,
-            states: [.working], identifier: "LOO-905", graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
+            states: [.working], identifier: "LOO-905", workingGroup: .active, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
         return fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [content])
     }
 
@@ -1263,7 +1263,7 @@ struct TaskPlanningReadabilityTests {
         let record = try #require(fixture.roadmap.tasks.items.first { $0.id == "issue-now" })
         let work = WorkWorkspaceKey(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id)
         let member = WorkViewPlan.Content(work: work, title: "Fresh list name",
-            states: [.working], identifier: record.task.identifier, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
+            states: [.working], identifier: record.task.identifier, workingGroup: .active, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
         let list = fixtureViewPlan(owner: key, members: [member])
         func planning(_ failed: Bool) {
             model.applyFixture(roadmap: failed ? .unavailable(lastGood: fixture.roadmap, reason: "Planning offline") : .available(fixture.roadmap),
@@ -1388,7 +1388,7 @@ struct TaskPlanningReadabilityTests {
         let member = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
             title: record.task.name, states: [.working], identifier: record.task.identifier,
-            graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
+            workingGroup: .active, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
         model.applyTaskList(fixtureViewPlan(owner: key, members: [member]), wave: nil, reason: "")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(try navigator.inspect().find(text: record.task.name).string() == record.task.name)
@@ -1507,7 +1507,7 @@ struct TaskPlanningReadabilityTests {
         let content = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
             title: "Fresh local name", states: [.working], identifier: record.task.identifier,
-            graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
+            workingGroup: .active, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
         model.applyTaskList(fixtureViewPlan(owner: key, members: [content]), wave: nil, reason: "")
         #expect(model.sidebarTaskIDs == [record.id])
         #expect(model.taskPresentation(id: record.id).title == record.task.name, "current roadmap identity keeps priority")

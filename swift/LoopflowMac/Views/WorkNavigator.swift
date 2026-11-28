@@ -40,8 +40,10 @@ struct WorkNavigator: View {
             return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard."
         case .repository, .wave:
             if model.taskListReading.value == nil { return nil }
-            if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave." }
-            return "No working Tasks in this list."
+            let scope = model.sidebarWave == nil ? "list" : "Wave"
+            let filter = model.navigation.sidebarFilter
+            let name = filter == .working ? "working" : filter.rawValue.lowercased()
+            return "No \(name) Tasks in this \(scope)."
         }
     }
 
@@ -68,7 +70,7 @@ struct WorkNavigator: View {
             }.padding([.horizontal, .top], Spacing.sm)
             WorkTaskList(navigation: model.navigation) {
                 let scope = model.navigation.sidebarScope
-                let dragOrder = model.navigation.canReorderSidebar ? rows.map(\.work.id) : []
+                let dragOrders = model.navigation.canReorderSidebar ? Dictionary(grouping: rows, by: \.workingGroup).mapValues { $0.map(\.work.id) } : [:]
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     HStack {
                         NewTaskRow(model: model)
@@ -85,7 +87,12 @@ struct WorkNavigator: View {
                         }.foregroundStyle(palette.textTertiary).padding(Spacing.sm)
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        taskRow(row, dragOrder: dragOrder, slotHint: index < 9 ? "⌘\(index + 1)" : nil)
+                        if scope.isWorkingList, let group = row.workingGroup,
+                           index == 0 || rows[index - 1].workingGroup != group {
+                            Text(group.title).font(Typography.meta).foregroundStyle(palette.textSecondary)
+                                .padding(.horizontal, Spacing.sm).accessibilityAddTraits(.isHeader)
+                        }
+                        taskRow(row, dragOrder: dragOrders[row.workingGroup] ?? [], slotHint: index < 9 ? "⌘\(index + 1)" : nil)
                     }
                     if rows.isEmpty, let emptyListText {
                         Text(emptyListText)
@@ -181,7 +188,7 @@ struct WorkNavigator: View {
     /// The repository is the default Wave; it lists Working Tasks and can't be edited.
     private var repositoryRow: some View {
         waveRow(scope: .repository, name: model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository",
-                icon: nil, count: model.startedTaskCount(.repository), unavailableReason: nil)
+                icon: nil, count: model.startedTaskCount(.repository), unavailableReason: model.roadmap.value?.tasks.unavailableReason)
     }
 
     private func waveRow(_ wave: WaveRoadmap) -> some View {
@@ -193,7 +200,7 @@ struct WorkNavigator: View {
     }
 
     private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
-                         count: Int, unavailableReason: String?) -> some View {
+                         count: Int?, unavailableReason: String?) -> some View {
         let reference: WorkReference? = if case .wave(let id) = scope { .wave(id: id) } else { nil }
         let state: SidebarSelection = pressedScope == scope || model.navigation.destination == .work(reference) ? .shown
             : model.navigation.sidebarScope == scope ? .containing : .none
@@ -213,7 +220,7 @@ struct WorkNavigator: View {
                 Spacer()
                 if let unavailableReason {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
-                } else {
+                } else if let count {
                     Text("\(count)").font(Typography.meta).monospacedDigit().help("\(count) working Tasks")
                 }
             }.font(Typography.text).padding(Spacing.sm)
@@ -224,7 +231,7 @@ struct WorkNavigator: View {
                 .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }.buttonStyle(.plain)
             .modifier(FocusedWork(focus: $focusedWork, reference: reference))
-            .accessibilityLabel("\(name), \(count) working Tasks")
+            .accessibilityLabel(count.map { "\(name), \($0) working Tasks" } ?? name)
             .accessibilityIdentifier("work-wave-\(reference?.id ?? "repository")")
             .matchedGeometryEffect(id: scope, in: scopeTitle)
     }

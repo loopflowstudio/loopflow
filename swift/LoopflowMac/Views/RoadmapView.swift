@@ -229,7 +229,7 @@ extension WorkModel {
                 NSWorkspace.shared.open(github.url)
             }
         case .run:
-            startTask(nil, task: task)
+            startTask(nil, arrival: task.breakpointArrival, task: task)
         }
     }
 }

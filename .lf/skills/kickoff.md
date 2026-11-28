@@ -14,3 +14,9 @@ and cover it or note why it doesn't apply.
 
 **A replacement keeps what the old code covered.** When swapping an engine,
 list its languages, formats and cases and keep each one.
+
+**Flag security-relevant work up front.** Changes touching credential
+forwarding to Modal or Daytona, telemetry or outbound data, mobile or Tailscale
+server auth, or install and release publishing need a **Security and privacy**
+note in the plan and a call on whether to run `lf security-review` before
+delivery.

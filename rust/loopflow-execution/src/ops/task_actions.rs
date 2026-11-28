@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-use loopflow_model::durable::WorkStatus;
+use loopflow_storage::execution::TaskState;
 use loopflow_storage::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -47,7 +47,7 @@ impl BreakpointActionEvidence<'_> {
 
 #[derive(Debug)]
 pub struct TaskActionEvidence<'a> {
-    pub status: WorkStatus,
+    pub status: TaskState,
     pub execution: Option<&'a TaskExecutionSnapshot>,
     pub latest_pr_phase: Option<PrPhase>,
     pub latest_pr_merge_request: Option<&'a PrMergeRequest>,
@@ -65,7 +65,10 @@ pub struct TaskActionEvidence<'a> {
 }
 
 pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
-    if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
+    if evidence.status == TaskState::Paused {
+        return action(TaskAction::NoAction, "Task is paused");
+    }
+    if evidence.status.is_terminal() {
         return action(TaskAction::NoAction, "Task is terminal");
     }
     if let Some(execution) = evidence
@@ -75,7 +78,7 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
         return action(TaskAction::NoAction, &execution.reason);
     }
     let finished = Finished::of(
-        &evidence.status,
+        evidence.status,
         evidence.latest_pr_phase,
         evidence.at_end,
         evidence.breakpoint.is_some(),
@@ -169,12 +172,12 @@ impl Finished {
     /// `None` while the Task still has work of its own (including a parked
     /// breakpoint), or is closed.
     pub fn of(
-        status: &WorkStatus,
+        status: TaskState,
         pr: Option<PrPhase>,
         at_end: bool,
         at_breakpoint: bool,
     ) -> Option<Self> {
-        if matches!(status, WorkStatus::Done | WorkStatus::Abandoned) || at_breakpoint {
+        if status.is_terminal() || at_breakpoint {
             return None;
         }
         match pr {
@@ -257,14 +260,14 @@ mod tests {
 
     use super::{derive_task_actions, BreakpointActionEvidence, TaskAction, TaskActionEvidence};
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
-    use loopflow_model::durable::WorkStatus;
+    use loopflow_storage::execution::TaskState;
     use loopflow_storage::work::task::{
         CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase,
     };
 
     fn evidence<'a>(phase: PrPhase, ci: Option<&'a CiObservation>) -> TaskActionEvidence<'a> {
         TaskActionEvidence {
-            status: WorkStatus::Ready,
+            status: TaskState::Idle,
             execution: None,
             latest_pr_phase: Some(phase),
             latest_pr_merge_request: None,
@@ -283,8 +286,8 @@ mod tests {
     #[test]
     fn abandoned_parent_never_recommends_resuming_terminal_or_canceling_tasks() {
         for (status, reason) in [
-            (WorkStatus::Done, "Task is terminal"),
-            (WorkStatus::Abandoned, "Task is terminal"),
+            (TaskState::Done, "Task is terminal"),
+            (TaskState::Abandoned, "Task is terminal"),
         ] {
             let mut evidence = evidence(PrPhase::Working, None);
             evidence.status = status;

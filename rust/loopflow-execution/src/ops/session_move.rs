@@ -20,7 +20,7 @@ use loopflow_storage::work::task::Task;
 /// with its Task, as `lf task move` moves it, and is the conversation the Task
 /// carries, its Graph continuing through `run`.
 pub fn move_session(id: &str, target: &str, run: ContinueRun) -> Result<()> {
-    let task = tokio::runtime::Runtime::new()?.block_on(async {
+    let task = crate::runtime::block_on(async {
         let Some(store) = crate::store::open_existing_store().await? else {
             return Ok(None);
         };
@@ -89,7 +89,7 @@ pub fn move_task(
     conversation: Option<&str>,
     run: ContinueRun,
 ) -> Result<TaskOwnership> {
-    let (ownership, stopped) = tokio::runtime::Runtime::new()?.block_on(async {
+    let (ownership, stopped) = crate::runtime::block_on(async {
         let store: SharedStore = std::sync::Arc::new(
             crate::store::open_existing_store()
                 .await?
@@ -292,14 +292,15 @@ async fn relay_task(
         ""
     };
     eprintln!("Arrived on {place}{at}{carried}");
-    let stopped = moved_task.stopped.is_some().then(|| StoppedRun {
-        identifier: name.clone(),
-        from,
-        task: task.id.clone(),
-        place: place.clone(),
-        repository: crate::ops::task::repository_for_task(store, &task)
-            .map_err(|error| error.to_string()),
-    });
+    let stopped =
+        (moved_task.paused.is_none() && moved_task.stopped.is_some()).then(|| StoppedRun {
+            identifier: name.clone(),
+            from,
+            task: task.id.clone(),
+            place: place.clone(),
+            repository: crate::ops::task::repository_for_task(store, &task)
+                .map_err(|error| error.to_string()),
+        });
     Ok((
         crate::store::ownership::task_ownership(&store.sqlite, &task.id)?,
         stopped,
@@ -336,7 +337,7 @@ fn sender(
 /// records the arrival. Best-effort: a Machine out of reach, or one that
 /// cannot tell, answers no.
 pub fn arrived_on(task: &loopflow_model::durable::TaskId, to: &MachineId) -> Result<bool> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    crate::runtime::block_on(async {
         let asked = async {
             let target = crate::machine::connection::find_registered_machine(to.as_str()).await?;
             let args = ["session", "receive", "--arrived", task.as_str()].map(String::from);

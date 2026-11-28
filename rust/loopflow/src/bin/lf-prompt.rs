@@ -2,12 +2,12 @@ use std::error::Error;
 use std::path::PathBuf;
 
 use clap::Parser;
+use loopflow_execution::harness::Mode;
 use loopflow_execution::prompt::drop_duplicate_docs;
 use loopflow_execution::prompt::format_prompt;
 use loopflow_execution::prompt::gather_context;
 use loopflow_execution::prompt::ClipboardContext;
 use loopflow_execution::prompt::GatherContextOpts;
-use loopflow_execution::prompt::Surface;
 
 #[derive(Parser, Debug)]
 #[command(name = "lf-prompt")]
@@ -21,9 +21,9 @@ struct Args {
     #[arg(long)]
     skill: Option<String>,
 
-    /// Prompt surface (headless/cli/mac/iphone)
-    #[arg(long)]
-    surface: Option<Surface>,
+    /// Whether someone is in the conversation the prompt opens
+    #[arg(long, value_enum, default_value = "headless")]
+    mode: Mode,
 
     /// Exclude loopflow operating guidance
     #[arg(long = "no-loopflow")]
@@ -62,7 +62,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         skill: args.skill,
         message: None,
         operate: !args.no_loopflow,
-        surface: args.surface.unwrap_or_default(),
+        mode: args.mode,
         docs: args.docs,
         files: Vec::new(),
         include_diff: args.diff,

@@ -36,6 +36,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `task_linear_ingested_comments`: task_id, comment_id, ingested_at
 - `task_linear_observations`: task_id, last_revision, last_title, last_description, last_success_at, degraded_reason, updated_at
 - `task_moves`: id, task_id, from_machine_id, to_machine_id, state, at, claim_id, stopped, payload
+- `task_pauses`: task_id, paused_at, paused_by, stopping_sessions
 - `task_primary_sessions`: task_id, session_id
 - `task_prs`: id, task_id, sequence, slug, branch, base_commit, publication_requested_at, ~~after_merge~~ (leaving → LOO-996, task_parent), ~~next_slug~~ (leaving → LOO-996, task_parent), github_number, github_url, merge_commit, abandoned_at, created_at, updated_at, github_head_sha, ci_observation, parent_pr_id, github_observation, linear_attachment_id, linear_comment_id, linear_link_error, merge_mode, merge_requested_at, merge_head_sha, merged_at, merge_tracking_complete, ~~repair_tracking_complete~~ (leaving → LOO-954, unused_store_members), pr_title, pr_body, pr_copy_head_sha, historical
 - `task_retirements`: task_id, completion, checkout, branch, due_at, phase, reason, retry_at, failures

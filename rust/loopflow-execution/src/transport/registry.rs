@@ -7,7 +7,7 @@
 //! Every connection to a held terminal, a view's or its own child's, enters
 //! through one socket and names its terminal on the first line.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
@@ -24,6 +24,7 @@ use crate::terminal_holder::wire::{self, Held};
 use crate::terminal_holder::Place;
 use loopflow_model::id::{LfSessionId, TerminalId};
 use loopflow_model::program_status::Records;
+use loopflow_storage::sqlite::ViewerHold;
 
 use super::held::Source;
 use super::hosted::{Hosted, Pass, Watchers};
@@ -247,6 +248,30 @@ enum Nudge {
     Narrowed { since: Instant },
 }
 
+/// SQLite and file settlement work dispatched off the held-terminals relay loop
+/// onto the `held-status` worker thread.
+pub(super) enum StoreWork {
+    ProgramStatus(TerminalId, Records),
+    ConfirmDirectory {
+        terminal: TerminalId,
+        agent_process_id: loopflow_model::id::AgentProcessId,
+        cwd: PathBuf,
+    },
+    EndShellJobs {
+        terminal: TerminalId,
+        pid: u32,
+    },
+    LeaveSnapshot {
+        terminal: TerminalId,
+        bytes: Vec<u8>,
+    },
+    ReleaseViewerHold {
+        terminal: TerminalId,
+        previous: Option<ViewerHold>,
+    },
+    Settle(Unsettled),
+}
+
 enum Command {
     Add(TerminalId, Box<Entry>),
     /// A pending holder answered, or is gone: what it held is hosted or settled.
@@ -254,6 +279,15 @@ enum Command {
         place: Place,
         entries: Vec<(TerminalId, Entry)>,
         unsettled: Vec<Unsettled>,
+    },
+    /// Worker confirmed the exec'd provider is live so its configured directory
+    /// can be reported.
+    DirectoryConfirmed(TerminalId, PathBuf),
+    /// Worker finished a settlement attempt; `retry` is `Some` when SQLite was
+    /// unavailable and the exit must be retried later.
+    Settled {
+        terminal: TerminalId,
+        retry: Option<Unsettled>,
     },
     /// The server is going; its terminals stay with their holders. A real
     /// server's exit is enough; fixtures replace one within a process.
@@ -263,7 +297,7 @@ enum Command {
 
 /// An ended terminal whose exit the store has not recorded yet. Its
 /// directory is the receipt and stays until it has.
-struct Unsettled {
+pub(super) struct Unsettled {
     terminal: TerminalId,
     place: Place,
     code: Option<u8>,
@@ -330,6 +364,8 @@ impl std::fmt::Debug for Command {
         match self {
             Self::Add(terminal, _) => write!(f, "Add({terminal})"),
             Self::Resolved { place, .. } => write!(f, "Resolved({})", place.socket.display()),
+            Self::DirectoryConfirmed(terminal, _) => write!(f, "DirectoryConfirmed({terminal})"),
+            Self::Settled { terminal, .. } => write!(f, "Settled({terminal})"),
             #[cfg(any(test, feature = "test-support"))]
             Self::Stop => f.write_str("Stop"),
         }
@@ -355,6 +391,8 @@ impl Registry {
         wake.set_nonblocking(true)?;
         waker.set_nonblocking(true)?;
         let (commands, received) = mpsc::channel();
+        let worker_commands = commands.clone();
+        let worker_waker = waker.try_clone()?;
         let registry = Arc::new(Self {
             build: build.to_owned(),
             place: Place::of(build)?,
@@ -380,7 +418,17 @@ impl Registry {
         }
         let (pending, live) = (registry.pending.clone(), registry.live.clone());
         let _thread = spawn_with_ledger("held-terminals", move || {
-            run(listener, wake, received, entries, pending, unsettled, live)
+            run(
+                listener,
+                wake,
+                received,
+                worker_commands,
+                worker_waker,
+                entries,
+                pending,
+                unsettled,
+                live,
+            )
         })?;
         #[cfg(any(test, feature = "test-support"))]
         {
@@ -400,10 +448,23 @@ impl Registry {
 
     /// The running terminal started for `session`.
     pub fn session_terminal(&self, session: &LfSessionId) -> Option<TerminalId> {
-        self.live
-            .lock()
-            .expect("registry lock poisoned")
-            .iter()
+        self.session_terminal_for(session, None)
+    }
+
+    /// The running terminal started for `session`: `wanted` when it is still
+    /// running for `session`, else any running terminal for `session`.
+    pub fn session_terminal_for(
+        &self,
+        session: &LfSessionId,
+        wanted: Option<&TerminalId>,
+    ) -> Option<TerminalId> {
+        let live = self.live.lock().expect("registry lock poisoned");
+        if let Some(wanted) = wanted {
+            if live.get(wanted).and_then(Option::as_ref) == Some(session) {
+                return Some(wanted.clone());
+            }
+        }
+        live.iter()
             .find(|(_, held)| held.as_ref() == Some(session))
             .map(|(terminal, _)| terminal.clone())
     }
@@ -455,6 +516,16 @@ impl Registry {
             return Ok(held);
         }
         self.start_locked(start, &mut started)
+    }
+
+    /// Whether any terminal is currently hosted or waiting on a pending holder.
+    pub fn has_active_terminals(&self) -> bool {
+        !self.live.lock().expect("registry lock poisoned").is_empty()
+            || !self
+                .pending
+                .lock()
+                .expect("registry lock poisoned")
+                .is_empty()
     }
 
     /// Start `start`'s command in this build's holder and host it. Repeating a
@@ -790,18 +861,34 @@ fn spawn_with_ledger(
         })
 }
 
-/// Record each held terminal's Program Status as its Session's, off the
-/// terminals' loop: a slow store delays a reading, never a terminal. Only
-/// the newest reading of each terminal is written.
-fn record_statuses(reported: mpsc::Receiver<(TerminalId, Records)>) {
+/// Handle every SQLite and filesystem side effect for held terminals off the
+/// relay loop: a locked store delays status/settlement recording, never
+/// keystrokes or PTY output. Only the newest Program Status per terminal is
+/// written when bursts queue up.
+fn run_store_worker(
+    work: mpsc::Receiver<StoreWork>,
+    commands: mpsc::Sender<Command>,
+    waker: UnixStream,
+) {
     let mut gap = crate::store::RecordingGap::default();
     let mut sequences: HashMap<TerminalId, i64> = HashMap::new();
-    while let Ok(first) = reported.recv() {
-        let mut newest: HashMap<TerminalId, Records> = HashMap::new();
-        for (terminal, records) in std::iter::once(first).chain(reported.try_iter()) {
-            newest.insert(terminal, records);
+    let notify = |cmd: Command| {
+        if commands.send(cmd).is_ok() {
+            let _ = (&waker).write_all(&[1]);
         }
-        for (terminal, records) in newest {
+    };
+    while let Ok(first) = work.recv() {
+        let mut newest_status: HashMap<TerminalId, Records> = HashMap::new();
+        let mut actions: Vec<StoreWork> = Vec::new();
+        for item in std::iter::once(first).chain(work.try_iter()) {
+            match item {
+                StoreWork::ProgramStatus(terminal, records) => {
+                    newest_status.insert(terminal, records);
+                }
+                other => actions.push(other),
+            }
+        }
+        for (terminal, records) in newest_status {
             let sequence = sequences.entry(terminal.clone()).or_default();
             *sequence += 1;
             let recorded = crate::journal::process_ledger()
@@ -809,6 +896,58 @@ fn record_statuses(reported: mpsc::Receiver<(TerminalId, Records)>) {
             match recorded {
                 Ok(_) => gap.recovered(),
                 Err(error) => gap.note("held terminal program status", &format!("{error:#}")),
+            }
+        }
+        for action in actions {
+            match action {
+                StoreWork::ProgramStatus(..) => unreachable!("separated above"),
+                StoreWork::ConfirmDirectory {
+                    terminal,
+                    agent_process_id,
+                    cwd,
+                } => {
+                    let connected = crate::journal::process_ledger()
+                        .and_then(|store| store.agent_state(&agent_process_id))
+                        .ok()
+                        .flatten()
+                        .is_some_and(|agent| agent.pid.is_some() && agent.ended_at.is_none());
+                    if connected {
+                        notify(Command::DirectoryConfirmed(terminal, cwd));
+                    }
+                }
+                StoreWork::EndShellJobs { terminal, pid } => {
+                    let is_shell = crate::journal::process_ledger()
+                        .and_then(|store| store.is_shell_terminal(&terminal))
+                        .unwrap_or(false);
+                    if is_shell {
+                        let _ = spawn_with_ledger("shell-jobs", move || {
+                            let settled = crate::os_process::terminate_shell_jobs(pid)
+                                .map_err(anyhow::Error::from)
+                                .and_then(|()| {
+                                    Ok(crate::journal::process_ledger()?
+                                        .settle_shell_jobs(&terminal)?)
+                                });
+                            if let Err(error) = settled {
+                                tracing::error!(
+                                    %terminal,
+                                    %error,
+                                    "Shell job cleanup remains pending"
+                                );
+                            }
+                        });
+                    }
+                }
+                StoreWork::LeaveSnapshot { terminal, bytes } => {
+                    super::snapshot::write_encoded(&terminal, bytes);
+                }
+                StoreWork::ReleaseViewerHold { terminal, previous } => {
+                    super::release_viewer_hold(&terminal, previous);
+                }
+                StoreWork::Settle(mut exit) => {
+                    let terminal = exit.terminal.clone();
+                    let retry = (!settle(&mut exit)).then_some(exit);
+                    notify(Command::Settled { terminal, retry });
+                }
             }
         }
     }
@@ -842,20 +981,26 @@ impl Arriving {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
     listener: UnixListener,
     wake: UnixStream,
     commands: mpsc::Receiver<Command>,
+    worker_commands: mpsc::Sender<Command>,
+    worker_waker: UnixStream,
     adopted: Vec<(TerminalId, Entry)>,
     pending: PendingHolders,
     mut unsettled: Vec<Unsettled>,
     live: Live,
 ) {
-    let (statuses, reported) = mpsc::channel();
-    if let Err(error) = spawn_with_ledger("held-status", move || record_statuses(reported)) {
-        tracing::warn!(%error, "held terminals' Program Status goes unrecorded");
+    let (worker, work_rx) = mpsc::channel();
+    if let Err(error) = spawn_with_ledger("held-status", move || {
+        run_store_worker(work_rx, worker_commands, worker_waker)
+    }) {
+        tracing::warn!(%error, "held terminals' store worker did not start");
     }
     let mut terminals: HashMap<TerminalId, Entry> = adopted.into_iter().collect();
+    let mut settling: HashSet<TerminalId> = HashSet::new();
     let mut arriving: Vec<Arriving> = Vec::new();
     loop {
         while let Ok((socket, _)) = listener.accept() {
@@ -885,28 +1030,51 @@ fn run(
                     terminals.extend(entries);
                     unsettled.extend(ended);
                 }
+                Command::DirectoryConfirmed(terminal, cwd) => {
+                    if let Some(entry) = terminals.get_mut(&terminal) {
+                        entry.hosted.confirm_directory(&cwd);
+                    }
+                }
+                Command::Settled { terminal, retry } => {
+                    settling.remove(&terminal);
+                    if let Some(exit) = retry {
+                        unsettled.push(exit);
+                    }
+                }
                 #[cfg(any(test, feature = "test-support"))]
                 Command::Stop => return,
             }
         }
-        // Exits are recorded before views are answered, so a view of a
-        // terminal that ended with no server running reads its exit code.
-        unsettled.retain_mut(|exit| exit.retry_at > Instant::now() || !settle(exit));
+        // Dispatch due exit settlements off-loop onto the store worker; keep
+        // each terminal in `settling` so attaching views wait for its exit code.
+        let now = Instant::now();
+        let mut deferred = Vec::new();
+        for exit in unsettled.drain(..) {
+            if exit.retry_at <= now && !settling.contains(&exit.terminal) {
+                settling.insert(exit.terminal.clone());
+                let _ = worker.send(StoreWork::Settle(exit));
+            } else {
+                deferred.push(exit);
+            }
+        }
+        unsettled = deferred;
         let mut waiting = Vec::new();
         for mut connection in arriving.drain(..) {
             match connection.named() {
                 Ok(Some(Named { terminal, revision })) => {
-                    // A terminal neither hosted here nor kept by a pending
-                    // holder has ended or was never started. Attach never creates.
+                    // A terminal neither hosted here, settling its exit, nor
+                    // kept by a pending holder has ended or was never started.
                     let entry = terminals.get_mut(&terminal);
                     let answer = wire::line(&Answer {
                         answer: if entry.is_some() {
                             Answered::Hosted
-                        } else if pending
-                            .lock()
-                            .expect("registry lock poisoned")
-                            .iter()
-                            .any(|holder| holder.terminals.contains(&terminal))
+                        } else if settling.contains(&terminal)
+                            || unsettled.iter().any(|exit| exit.terminal == terminal)
+                            || pending
+                                .lock()
+                                .expect("registry lock poisoned")
+                                .iter()
+                                .any(|holder| holder.terminals.contains(&terminal))
                         {
                             Answered::Waiting
                         } else {
@@ -933,8 +1101,8 @@ fn run(
             // One terminal's failure is never another's.
             let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 entry.nudge();
-                let pass = entry.hosted.pass(&mut entry.child);
-                entry.report(terminal, &statuses);
+                let pass = entry.hosted.pass(&mut entry.child, &worker);
+                entry.report(terminal, &worker);
                 pass
             }));
             match pass {
@@ -1040,7 +1208,7 @@ impl Entry {
     /// Hand the store the terminal's Program Status when it changed: the
     /// server records output and acknowledgements from typing, including
     /// an empty set of records after the last result is dismissed.
-    fn report(&mut self, terminal: &TerminalId, statuses: &mpsc::Sender<(TerminalId, Records)>) {
+    fn report(&mut self, terminal: &TerminalId, worker: &mpsc::Sender<StoreWork>) {
         let Some(records) = self.hosted.program_status() else {
             return;
         };
@@ -1048,7 +1216,7 @@ impl Entry {
             return;
         }
         self.reported = Some(records.clone());
-        let _ = statuses.send((terminal.clone(), records.clone()));
+        let _ = worker.send(StoreWork::ProgramStatus(terminal.clone(), records.clone()));
     }
 
     /// Ask a program whose screen was rebuilt from the ring to repaint: one

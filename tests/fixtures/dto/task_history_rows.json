@@ -59,14 +59,17 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is canceled"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -128,14 +131,17 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is canceled"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -197,14 +203,17 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is canceled"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -266,14 +275,17 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is canceled"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -335,14 +347,17 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is canceled"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -404,14 +419,17 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is canceled"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -473,14 +491,17 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is canceled"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -542,15 +563,18 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -612,15 +636,18 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -682,15 +709,18 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -752,15 +782,18 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -822,14 +855,17 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is complete"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -891,14 +927,17 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is complete"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -960,14 +999,17 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is complete"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -1029,15 +1071,18 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -1099,13 +1144,16 @@
     "latest_graph_process": null,
     "execution": null,
     "run_control": {
+      "pausing": false,
       "unavailable": "Linear Task is canceled"
     },
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   }
 ]

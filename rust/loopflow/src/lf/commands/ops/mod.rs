@@ -494,9 +494,9 @@ pub fn refresh_status(directory: &Path, wave: Option<&str>) -> Result<Option<Str
         WaveResolveError::NoContext => anyhow!("Select a Wave to refresh"),
         error => error.into(),
     })?;
-    tokio::runtime::Runtime::new()?.block_on(
-        loopflow_execution::ops::planning_sync::refresh_wave(&wave, tracker),
-    )?;
+    loopflow_execution::runtime::block_on(loopflow_execution::ops::planning_sync::refresh_wave(
+        &wave, tracker,
+    ))?;
     Ok(Some(wave.slug().to_owned()))
 }
 
@@ -1435,31 +1435,24 @@ fn task_ownership() -> Result<WorktreeOwnership> {
         ..WorktreeOwnership::default()
     };
     let mut named = Vec::new();
-    let runtime = tokio::runtime::Runtime::new()?;
-    match runtime.block_on(loopflow_execution::store::open_existing_store()) {
+    match loopflow_execution::runtime::block_on(loopflow_execution::store::open_existing_store()) {
         Ok(Some(store)) => {
-            let tasks = runtime
-                .block_on(store.list_tasks(None))
+            let tasks = loopflow_execution::runtime::block_on(store.list_tasks(None))
                 .map_err(|error| anyhow!("cannot verify Task ownership before pruning: {error}"))?;
             let local = loopflow_execution::store::machines::local_machine(&store.sqlite)?.id;
             for task in tasks {
-                let work = runtime
-                    .block_on(
-                        store.work_for_child(&loopflow_storage::child::ChildRef::Task(
-                            task.id.clone(),
-                        )),
-                    )
-                    .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
-                let status = runtime
-                    .block_on(store.work_status(&work))
+                let work = loopflow_execution::runtime::block_on(
+                    store.work_for_child(&loopflow_storage::child::ChildRef::Task(task.id.clone())),
+                )
+                .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
+                let status = loopflow_execution::runtime::block_on(store.work_status(&work))
                     .map_err(|error| anyhow!("cannot read Task Work status: {error}"))?;
                 let open = !matches!(
                     status,
                     loopflow_model::durable::WorkStatus::Done
                         | loopflow_model::durable::WorkStatus::Abandoned
                 );
-                let prs = runtime
-                    .block_on(store.task_prs(&task.id))
+                let prs = loopflow_execution::runtime::block_on(store.task_prs(&task.id))
                     .map_err(|error| anyhow!("cannot read Task PRs: {error}"))?;
                 named.push((task.branch, open));
                 named.extend(prs.into_iter().map(|pr| (pr.branch, open)));

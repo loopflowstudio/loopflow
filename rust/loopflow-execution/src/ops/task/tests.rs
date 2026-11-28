@@ -4,6 +4,7 @@ use crate::durable::TaskState;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingIo, LandingObservation};
 use crate::store::{SharedStore, StorageConfig};
+use crate::task_graph::tests::test_merges;
 use crate::test_linear_input::SeedLinear;
 use crate::work::wave::Wave;
 use loopflow_model::durable::{WorkRef, WorkStatus};
@@ -586,14 +587,19 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
             .block_on(super::snapshot::read_task_snapshot(
                 &fixture.store,
                 fixture.task.clone(),
+                |_| false,
             ))
             .unwrap();
         assert_eq!(snapshot.execution.state, state);
         assert_eq!(snapshot.status, TaskState::Moving);
         assert_eq!(
-            crate::store::ownership::task_detail_facts(&fixture.store.sqlite, &[&fixture.task])
-                .unwrap()
-                .states[&fixture.task.id],
+            crate::store::ownership::task_detail_facts(
+                &fixture.store.sqlite,
+                &[&fixture.task],
+                test_merges
+            )
+            .unwrap()
+            .states[&fixture.task.id],
             TaskState::Moving
         );
         assert_eq!(
@@ -635,6 +641,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         .block_on(super::snapshot::read_task_snapshot(
             &fixture.store,
             fixture.task.clone(),
+            |_| false,
         ))
         .unwrap();
     assert_eq!(
@@ -899,7 +906,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
         )
         .unwrap();
     assert_eq!(
-        crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id)
+        crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id, |_| false)
             .unwrap()
             .sessions
             .len(),
@@ -916,7 +923,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
             graphql_url: "http://127.0.0.1:1".into(),
         },
         || {
-            let snapshot = super::task_snapshot(&fixture.task).unwrap();
+            let snapshot = super::task_snapshot(&fixture.task, |_| false).unwrap();
             assert_eq!(snapshot.machine_id, Some(local.clone()));
             assert_eq!(snapshot.task_id, fixture.task.id.as_str());
             assert_eq!(snapshot.pr.as_ref().map(|pr| &pr.id), Some(&pr.id));
@@ -1050,7 +1057,10 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
                 .unwrap_err()
                 .to_string()
                 .contains(expected));
-            let work = crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id)
+            let work =
+                crate::store::task_work::task_work(&fixture.store.sqlite, &fixture.task.id, |_| {
+                    false
+                })
                 .unwrap();
             assert_eq!(
                 work.sessions
@@ -1211,19 +1221,35 @@ fn task_changes_count_each_files_stops_before_any_patch_is_read() {
         .map(|(path, count)| (path.to_string(), *count))
         .collect::<std::collections::BTreeMap<_, _>>();
     assert_eq!(
-        super::snapshot::count_changes(diff.patch.as_bytes()),
+        super::snapshot::count_changes(diff.patch.as_bytes())
+            .into_iter()
+            .map(|(p, c)| (p, c.stops))
+            .collect::<std::collections::BTreeMap<_, _>>(),
         nonzero
     );
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/fixtures/review/change_counts.patch");
     assert_eq!(
-        super::snapshot::count_changes(&std::fs::read(fixture).unwrap()),
+        super::snapshot::count_changes(&std::fs::read(fixture).unwrap())
+            .into_iter()
+            .map(|(p, c)| (p, c.stops))
+            .collect::<std::collections::BTreeMap<_, _>>(),
         nonzero
     );
     let adjacent =
         b"diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n+new\n-old\n+again\n-more\n";
     // A removal right after additions starts a new stop, as the Diff reads it.
-    assert_eq!(super::snapshot::count_changes(adjacent)["x"], 3);
+    let count = super::snapshot::count_changes(adjacent)["x"];
+    let quoted = b"diff --git a/x b/x\n--- \"a/na\\303\\257ve\"\n+++ \"b/na\\303\\257ve\"\n@@ -1 +1 @@\n-old\n+new\n";
+    assert_eq!(super::snapshot::count_changes(quoted)["naïve"].stops, 1);
+    assert_eq!(count.stops, 3);
+    assert_eq!(
+        count.lines,
+        Some(super::ChangedLines {
+            added: 2,
+            removed: 2
+        })
+    );
 }
 
 #[test]
@@ -2027,16 +2053,16 @@ fn deleted_task_status_requires_explicit_history_lookup() {
             },
             || {
                 let repo = std::env::current_dir().unwrap();
-                let error = super::task_status(&repo, None).unwrap_err();
+                let error = super::task_status(&repo, None, |_| false).unwrap_err();
                 assert!(error.to_string().contains("Task was deleted"), "{error}");
-                let status = super::task_status(&repo, Some("HISTORY-1")).unwrap();
+                let status = super::task_status(&repo, Some("HISTORY-1"), |_| false).unwrap();
                 let snapshot = status.execution.as_ref().unwrap();
                 assert_eq!(
-                    super::task_status(&repo, Some(&snapshot.task_id)).unwrap(),
+                    super::task_status(&repo, Some(&snapshot.task_id), |_| false).unwrap(),
                     status
                 );
                 assert_eq!(
-                    super::task_status(&repo, Some(&snapshot.task_id)).unwrap(),
+                    super::task_status(&repo, Some(&snapshot.task_id), |_| false).unwrap(),
                     status
                 );
                 assert_eq!(snapshot.status, TaskState::Done);
@@ -3800,7 +3826,7 @@ async fn task_snapshot_owns_breakpoint_actions_across_pr_phases_and_blocked_auto
     });
     fx.store.update_task_pr(&pr).await.unwrap();
     park("after-ship-review", None, false);
-    let snap = super::snapshot::snapshot_here(&fx.store, fx.task.clone(), local.clone())
+    let snap = super::snapshot::snapshot_here(&fx.store, fx.task.clone(), local.clone(), |_| false)
         .await
         .unwrap();
     assert_eq!(
@@ -3813,18 +3839,18 @@ async fn task_snapshot_owns_breakpoint_actions_across_pr_phases_and_blocked_auto
         crate::task_graph::TaskGraphPosition::Breakpoint { blocked: false, .. }
     ));
 
-    // 2. Merged PR + parked at after-verify recommends Run with breakpoint sentence, NOT `complete the Task`.
+    // Merging a PR while this Graph is parked leaves the review available.
     pr.merge_commit = Some("deadbeef".into());
     fx.store.update_task_pr(&pr).await.unwrap();
-    park("after-verify", None, false);
-    let snap = super::snapshot::snapshot_here(&fx.store, fx.task.clone(), local.clone())
+    park("after-explore", None, false);
+    let snap = super::snapshot::snapshot_here(&fx.store, fx.task.clone(), local.clone(), |_| false)
         .await
         .unwrap();
     assert_eq!(
         snap.actions.recommended,
         Some(crate::ops::task_actions::TaskAction::Run)
     );
-    assert_eq!(snap.actions.reason, "At breakpoint after-verify.");
+    assert_eq!(snap.actions.reason, "At breakpoint after-explore.");
 
     // 3. Blocked worker verdict under auto:on/-b (non-zero GraphHeld::EXIT) -> NoAction with blocked sentence
     //    and `blocked: true` on TaskGraphPosition::Breakpoint.
@@ -3838,7 +3864,7 @@ async fn task_snapshot_owns_breakpoint_actions_across_pr_phases_and_blocked_auto
         }),
         true,
     );
-    let snap = super::snapshot::snapshot_here(&fx.store, fx.task.clone(), local)
+    let snap = super::snapshot::snapshot_here(&fx.store, fx.task.clone(), local, |_| false)
         .await
         .unwrap();
     assert_eq!(

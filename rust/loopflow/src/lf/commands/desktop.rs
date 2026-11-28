@@ -665,12 +665,15 @@ pub(crate) fn read_task_pane(
         &loopflow_execution::repo::working_directory_in(directory)?,
         Some(issue),
     )?;
-    // A read reads what the store records; `wave.sync` exchanges planning.
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let store = loopflow_execution::store::read_existing_registry()?
-            .map(std::sync::Arc::new)
-            .context("no Loopflow store exists on this Machine")?;
-        let status = loopflow_execution::ops::task::read_task_status(&store, &repo, issue).await?;
+    let (store, task) =
+        super::screens::registered_task(&repo, issue, super::screens::TaskScope::Repository)?;
+    loopflow_execution::runtime::block_on(async {
+        let status = loopflow_execution::ops::task::registered_task_status(
+            &store,
+            task,
+            crate::lf::navigation::command_merges,
+        )
+        .await?;
         super::waves::task_pane(&store, status).await
     })
 }
@@ -682,11 +685,17 @@ pub(crate) fn subscribe_task_pane(
     transport: Transport,
 ) -> Result<Option<Subscription>> {
     let repo = loopflow_execution::ops::task::task_repository(directory, Some(issue))?;
-    let task_id = tokio::runtime::Runtime::new()?.block_on(async {
+    let task_id = loopflow_execution::runtime::block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
-        let status = loopflow_execution::ops::task::read_task_status(&store, &repo, issue).await?;
+        let status = loopflow_execution::ops::task::read_task_status(
+            &store,
+            &repo,
+            issue,
+            crate::lf::navigation::command_merges,
+        )
+        .await?;
         anyhow::Ok(
             status
                 .task
@@ -725,7 +734,11 @@ pub(crate) fn read_plans(
 ) -> Result<Vec<loopflow_storage::work::selection::ViewPlan>> {
     let store = work_registry()?;
     let repository = repository_in(selected, directory, &store.sqlite)?;
-    Ok(selections::selection_plans(&store.sqlite, &repository)?)
+    Ok(selections::selection_plans(
+        &store.sqlite,
+        &repository,
+        crate::lf::navigation::command_merges,
+    )?)
 }
 
 /// `lf desktop view list --subscribe` for `--repository`, else the repository
@@ -744,7 +757,11 @@ pub(crate) fn subscribe_plans(
                 .context("Work registry is unavailable")
                 .and_then(|store| {
                     let repository = repository_in(selected.as_ref(), &directory, &store.sqlite)?;
-                    Ok(selections::selection_plans(&store.sqlite, &repository)?)
+                    Ok(selections::selection_plans(
+                        &store.sqlite,
+                        &repository,
+                        crate::lf::navigation::command_merges,
+                    )?)
                 });
             async move { result }
         },
@@ -775,6 +792,7 @@ pub(crate) fn subscribe_view_plan(
                         &store.sqlite,
                         &repository,
                         expression.as_deref(),
+                        crate::lf::navigation::command_merges,
                     )?)
                 });
             async move { result }
@@ -808,6 +826,7 @@ pub(crate) fn read_all_view_plans(
         &store.sqlite,
         expression,
         &portfolio_repos()?,
+        crate::lf::navigation::command_merges,
     )?)
 }
 
@@ -829,6 +848,7 @@ pub(crate) fn subscribe_all_view_plans(
                 &store.sqlite,
                 args.expression.as_deref(),
                 &portfolio_repos()?,
+                crate::lf::navigation::command_merges,
             )?)
         },
         transport,
@@ -851,6 +871,7 @@ pub fn plan_view(
         &store.sqlite,
         &repository,
         expression,
+        crate::lf::navigation::command_merges,
     )?)
 }
 
@@ -901,6 +922,7 @@ fn view_plan(
                 id: SelectionId("work-default".into()),
                 expression,
             },
+            crate::lf::navigation::command_merges,
         )?
     } else {
         plan_view(
@@ -1277,51 +1299,25 @@ pub(super) fn conversation_opening(url: &str) -> Result<Option<DesktopOpening>> 
         .find(|opening| opening.url == url))
 }
 
-/// Reuse the Files surface without launching Desktop or changing conversation ownership.
-pub(super) fn present_files(
-    resolution: &loopflow_execution::ops::context::ContextExplanation,
-    paths: &[&std::path::Path],
-) -> Result<bool> {
-    let mut desktop = match DesktopConnection::open() {
-        Ok(desktop) => desktop,
-        Err(error)
-            if error
-                .downcast_ref::<DesktopError>()
-                .is_some_and(|error| matches!(error, DesktopError::Unreachable(_))) =>
-        {
-            return Ok(false)
-        }
-        Err(error) => return Err(error),
+fn presentation_path(input: &str) -> Result<(&str, Option<&str>)> {
+    let Some((path, lines)) = input.rsplit_once(':') else {
+        return Ok((input, None));
     };
-    let reading: DesktopInspection = desktop.call("inspect", serde_json::json!({}))?;
-    let scope = Scope {
-        inspection: &reading,
-        resolution,
-        explicit_work: true,
-        caller: std::env::var("LF_TERMINAL_ID")
-            .ok()
-            .filter(|id| !id.is_empty()),
-    };
-    let window = scope.window(None).map_err(DesktopError::target)?;
-    let pane = scope
-        .pane(window, None, PaneNeed::for_action("files"))
-        .map_err(DesktopError::target)?;
-    for path in paths {
-        let _: DesktopActionReceipt = desktop.call(
-            "perform",
-            DesktopActionRequest {
-                repository: window.repository.clone(),
-                window: window.window.clone(),
-                pane: Some(pane.target(window)),
-                action: "files".into(),
-                args: std::collections::BTreeMap::from([(
-                    "path".into(),
-                    path.to_string_lossy().into_owned(),
-                )]),
-            },
-        )?;
+    if lines.is_empty() || !lines.bytes().all(|c| c.is_ascii_digit() || c == b'-') {
+        return Ok((input, None));
     }
-    Ok(true)
+    if path.is_empty() {
+        return Err(DesktopError::Argument("Expected a checkout path before :LINE".into()).into());
+    }
+    let (start, end) = lines.split_once('-').unwrap_or((lines, lines));
+    if !matches!((start.parse::<u32>(), end.parse::<u32>()),
+        (Ok(start), Ok(end)) if start > 0 && start <= end)
+    {
+        return Err(
+            DesktopError::Argument("Expected LINE or LINE-END after the path".into()).into(),
+        );
+    }
+    Ok((path, Some(lines)))
 }
 
 /// View, start or close a Task shell through this Machine's server, which
@@ -1811,7 +1807,20 @@ impl Verb {
             DesktopCommand::Show { target } => (action("show", vec![]), target.clone()),
             DesktopCommand::Close { target } => (action("close", vec![]), target.clone()),
             DesktopCommand::Reopen { target } => (action("reopen", vec![]), target.clone()),
-            DesktopCommand::Files { target } => (action("files", vec![]), target.clone()),
+            DesktopCommand::Files { path, mode, target } => {
+                let mut args = Vec::new();
+                if let Some(path) = path {
+                    let (path, lines) = presentation_path(path)?;
+                    args.push(("path", path.to_owned()));
+                    if let Some(lines) = lines {
+                        args.push(("lines", lines.to_owned()));
+                    }
+                }
+                if let Some(mode) = mode {
+                    args.push(("mode", mode.clone()));
+                }
+                (action("files", args), target.clone())
+            }
             DesktopCommand::GraphLog { target } => (action("graph-log", vec![]), target.clone()),
             DesktopCommand::PageBack { target } => (action("page-back", vec![]), target.clone()),
             DesktopCommand::PageForward { target } => {
@@ -3977,6 +3986,19 @@ mod tests {
             caller.window(None).unwrap().window,
             inspection.windows[0].window
         );
+    }
+
+    #[test]
+    fn desktop_files_addresses_lines_without_reinterpreting_other_colons() {
+        assert_eq!(
+            super::presentation_path("notes:a.md:7-12").unwrap(),
+            ("notes:a.md", Some("7-12"))
+        );
+        assert_eq!(
+            super::presentation_path("notes:a.md").unwrap(),
+            ("notes:a.md", None)
+        );
+        assert!(super::presentation_path("a.md:8-2").is_err());
     }
 
     #[test]

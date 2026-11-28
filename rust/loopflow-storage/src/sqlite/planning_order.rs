@@ -34,7 +34,7 @@ pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResu
 /// while no tracker held it. One Task has no order to send.
 pub(super) fn send_local_order_in(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
     let order = conn
-        .prepare(
+        .prepare_cached(
             "SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL
              ORDER BY planning_rank,id",
         )?
@@ -62,7 +62,7 @@ fn enqueue_order(conn: &Connection, project: &ProjectId, order: &[String]) -> St
 
 /// The Tasks `task` is ranked among, in rank order, with id breaking ties.
 fn siblings_in(conn: &Connection, task: &Task) -> StoreResult<Vec<String>> {
-    let mut query = conn.prepare(
+    let mut query = conn.prepare_cached(
         "SELECT id FROM tasks WHERE repository_id=?1 AND project_id IS ?2
          AND planning_deleted_at IS NULL ORDER BY planning_rank,id",
     )?;
@@ -94,7 +94,7 @@ pub(super) fn observed_order(
     let Some((repo, tracker, external)) = bound else {
         return Ok(None);
     };
-    let mut query = conn.prepare(
+    let mut query = conn.prepare_cached(
         "SELECT t.id FROM tracker_items i JOIN tasks t ON t.external_issue_id=i.id
          WHERE i.repo=?1 AND i.tracker=?2 AND i.project_id=?3
          AND t.project_id=?4 AND t.planning_deleted_at IS NULL
@@ -171,8 +171,9 @@ fn current_members(
     project: &ProjectId,
     mut desired: Vec<String>,
 ) -> StoreResult<Vec<String>> {
-    let mut query =
-        conn.prepare("SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL")?;
+    let mut query = conn.prepare_cached(
+        "SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL",
+    )?;
     let members = query
         .query_map([project.as_str()], |row| row.get(0))?
         .collect::<rusqlite::Result<std::collections::HashSet<String>>>()?;

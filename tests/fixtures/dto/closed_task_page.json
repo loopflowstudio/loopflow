@@ -327,6 +327,7 @@
         "outlook": null
       },
       "run_control": {
+        "pausing": false,
         "unavailable": null
       },
       "pr": {
@@ -362,9 +363,11 @@
       "owned_by_you": false,
       "runs_on": null,
       "lifecycle": "done",
+      "working_group": null,
       "selection_states": [
         "done"
-      ]
+      ],
+      "breakpoint_arrival": null
     }
   ],
   "next": "ts_22222222222222222222222222222222"

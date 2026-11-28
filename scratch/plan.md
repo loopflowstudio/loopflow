@@ -37,10 +37,26 @@ carry the rule.
 
 The review at `3180e006f7` confirmed the earlier findings about the small-fix
 iteration rule, the extra shape review, and the agent guide were resolved.
-It found that the shared stop had become a fallback. Pass 2 puts the stop
-before the fallback and tests that placement with the compiled build Graph.
-It also removes the unsupported claim that `ship-review` reconciles an inline
-docs fix with its review row.
+Its finding that the shared stop had become a fallback is fixed by Pass 2.
+
+The review at `7303cbf672` found Pass 2 overcorrected: `output.rs:14` says the
+`blocked` stop "applies to every decider" and lets skills override only
+`advance` and `iterate`, and `docs/orchestration.md:190-195` repeats it. That
+contradicts `optimize-plan.md:20-28`, where a reverted trial makes no progress,
+running out of ideas returns `advance`, and `blocked` is only for a failed
+harness or workload. The appended criteria would stop an optimize run as
+`blocked` instead of reaching `compress` and `measure`.
+
+- Pass 3 (next): keep the shared `blocked` bullet ahead of the defaults, but
+  replace "This applies to every decider." with a qualifier that a skill's own
+  rule for that case wins (review wording: "unless the skill says to handle
+  that case differently"). Update `build_realign_uses_its_own_loop_rule` in
+  `output.rs`, add a compiled-Graph assertion for an `optimize-plan` decider
+  if the existing test helper makes it one line, and match
+  `docs/orchestration.md:190-195`. `realign`, `implement` and `loop-or-next`
+  state no stop rule of their own, so they keep the stop. Re-run
+  `concept-review` on the result. Passed over: deleting the shared stop, which
+  leaves `implement` and custom skills without one.
 
 ## Choice for review
 

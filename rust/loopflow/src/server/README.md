@@ -974,8 +974,9 @@ that lapses for the next boundary:
   keystrokes or open paste, the server injects the trigger prompt via bracketed
   paste (`ESC[200~ … ESC[201~\r`) and marks the conversation woken without
   claiming steers; `PreInvocation` claims and stamps them once `agy` starts the
-  turn. When a draft, menu, or dialog is open, the wake defers and retries
-  until the prompt is empty again.
+  turn. The relay reads waiting viewer input and provider output before
+  checking readiness. A draft, menu, dialog, or holder still being adopted
+  defers the wake for a retry.
 
 A reopened work session takes steers saved while it was closed as a turn
 before anyone types. Without a steer or an opening prompt, it waits for input.
@@ -994,8 +995,8 @@ deliver.
 A server that restarts reads the same conversations again. An unreachable
 Claude inbox, extension socket, or busy held terminal leaves its news
 unclaimed. After a failed send the steers arrive again. One watcher serves
-every Session, with a 60 s fallback for a missed checkpoint or a Machine's
-sleep (and a 2 s retry while a held-terminal wake is deferred).
+every Session, with a 60 s fallback for a missed checkpoint, a Machine's sleep,
+or a steer that arrived during launch. Deferred terminal wakes retry within 2 s.
 
 ### Starting a stopped conversation
 

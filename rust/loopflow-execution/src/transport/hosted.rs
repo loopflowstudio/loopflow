@@ -86,13 +86,12 @@ pub(super) struct Hosted {
     /// from the ring: its queries were answered when it was printed, or
     /// went unanswered while no server ran. Nothing answers them now.
     replayed_through: u64,
-    /// When a viewer last typed a real keystroke (excluding terminal replies,
-    /// focus reports and mouse events).
-    last_user_key: Option<Instant>,
+    /// When a viewer last typed a key or the server queued a wake prompt.
+    last_prompt_input: Option<Instant>,
 }
 
-/// How long after the last user keystroke an idle-terminal wake holds off.
-const USER_KEY_QUIET: Duration = Duration::from_secs(2);
+/// Give the provider time to process a keystroke or a wake before pasting.
+const PROMPT_INPUT_QUIET: Duration = Duration::from_secs(2);
 
 /// The threads the Machine server's held terminals share: viewing records
 /// and Session-name reads.
@@ -160,7 +159,7 @@ impl Hosted {
             title,
             reported_status: None,
             replayed_through: 0,
-            last_user_key: None,
+            last_prompt_input: None,
             id,
         })
     }
@@ -226,8 +225,8 @@ impl Hosted {
             || self.pending_input.in_paste()
             || !self.pending_input.is_empty()
             || self
-                .last_user_key
-                .is_some_and(|at| at.elapsed() < USER_KEY_QUIET)
+                .last_prompt_input
+                .is_some_and(|at| at.elapsed() < PROMPT_INPUT_QUIET)
             || !self.output.terminal().is_some_and(prompt_ready)
         {
             return WakeTerminal::NotReady;
@@ -236,6 +235,7 @@ impl Hosted {
         if !self.pending_input.push(payload.as_bytes()) {
             return WakeTerminal::NotReady;
         }
+        self.last_prompt_input = Some(Instant::now());
         child.forward(&mut self.pending_input);
         WakeTerminal::Injected
     }
@@ -287,7 +287,7 @@ impl Hosted {
                 kept,
                 execution_directory_reported,
                 close_notice,
-                last_user_key,
+                last_prompt_input,
                 ..
             } = self;
             for index in 0..viewers.len() {
@@ -322,7 +322,7 @@ impl Hosted {
                                     output.acknowledge_results();
                                 }
                                 if input::has_user_keystroke(&typed) {
-                                    *last_user_key = Some(Instant::now());
+                                    *last_prompt_input = Some(Instant::now());
                                 }
                                 *writer = Some(viewer.id.clone());
                                 sizing.touch(viewer);

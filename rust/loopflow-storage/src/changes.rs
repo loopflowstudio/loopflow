@@ -453,41 +453,39 @@ mod tests {
         drop(writer.join().unwrap());
     }
 
-    /// `StoreWaker::wake` breaks a 20 s wait immediately without touching the
-    /// WAL, both before a WAL exists and after one is armed, and resets cleanly
-    /// so the next wait observes its timeout.
+    /// A wake is retained until the next wait consumes it, with or without a WAL.
     #[test]
     fn waker_ends_the_wait_without_a_wal_write() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
-
-        // Before any WAL file exists: a pre-wait wake is not lost.
         let mut changes = StoreChanges::watch(&path);
-        let waker = changes.waker();
-        waker.wake();
-        let started = Instant::now();
-        changes.wait(Duration::from_secs(20));
-        assert!(started.elapsed() < Duration::from_secs(2));
+        check_pending_wake(&mut changes);
 
-        // With an armed WAL and no writes: a sibling thread wakes a 20 s wait immediately.
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE t(x);")
             .unwrap();
-        let mut changes = StoreChanges::watch(&path);
-        let waker = changes.waker();
-        changes.wait(Duration::from_millis(1));
-        let nudger = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(80));
-            waker.wake();
-        });
-        let started = Instant::now();
-        changes.wait(Duration::from_secs(20));
-        assert!(started.elapsed() < Duration::from_secs(5));
-        nudger.join().unwrap();
+        changes.wait(Duration::ZERO);
+        check_pending_wake(&mut changes);
+    }
 
-        // After the user event is consumed, the next wait honors its timeout.
-        let started = Instant::now();
-        changes.wait(Duration::from_millis(30));
-        assert!(started.elapsed() >= Duration::from_millis(30));
+    #[cfg(target_os = "macos")]
+    fn check_pending_wake(changes: &mut StoreChanges) {
+        let waker = changes.waker();
+        let queue = waker.queue.as_ref().unwrap();
+        waker.wake();
+        let event = super::macos::wait_event(queue, Duration::ZERO).unwrap();
+        assert_eq!(event.filter, libc::EVFILT_USER);
+
+        waker.wake();
+        changes.wait(Duration::ZERO);
+        assert!(super::macos::wait_event(queue, Duration::ZERO).is_none());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn check_pending_wake(changes: &mut StoreChanges) {
+        changes.waker().wake();
+        assert!(*changes.signal.woken.lock().unwrap());
+        changes.wait(Duration::ZERO);
+        assert!(!*changes.signal.woken.lock().unwrap());
     }
 }

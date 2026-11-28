@@ -592,10 +592,11 @@ fn prompt_empty(line: &str, row: usize, (cursor_x, cursor_y): (u16, u16)) -> boo
         return false;
     };
     let input = input.trim();
-    input.is_empty()
-        || (usize::from(cursor_y) == row
-            && cursor_x == 2
-            && input.ends_with("(shift+tab to cycle)"))
+    let cursor_in_prompt = usize::from(cursor_y) == row;
+    if input.is_empty() {
+        return !cursor_in_prompt || cursor_x <= 2;
+    }
+    cursor_in_prompt && cursor_x == 2 && input.ends_with("(shift+tab to cycle)")
 }
 
 /// Settings for one session that let the TUI start in a worktree lf created
@@ -1110,6 +1111,13 @@ mod tests {
             "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n> x\r\n{rule}\r\n? for shortcuts   auto · Gemini 4 Neon · high\r\n"
         );
         assert!(!super::prompt_ready(&render(draft_with_footer.as_bytes())));
+
+        // The screen trims trailing spaces, but a whitespace draft moves
+        // the cursor beyond the empty prompt.
+        let spaces = format!(
+            "\x1b[?2004h\x1b[2J\x1b[H{rule}\r\n>    \r\n{rule}\r\n? for shortcuts\x1b[2;6H"
+        );
+        assert!(!super::prompt_ready(&render(spaces.as_bytes())));
 
         // Multiline pasted draft.
         let multiline = format!(

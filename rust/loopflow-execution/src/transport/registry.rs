@@ -43,6 +43,8 @@ const SETTLE_RETRY: Duration = Duration::from_secs(2);
 const STARTUP_ANSWER: Duration = Duration::from_secs(1);
 /// The longest pause between asks of a holder that has not answered.
 const PENDING_RETRY: Duration = Duration::from_secs(5);
+/// How long a caller waits for the relay to inspect an idle prompt.
+const WAKE_PROMPT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// What the server writes beside a terminal before asking its holder to start
 /// it, so that another server instance can host the same child.
@@ -239,6 +241,7 @@ struct Entry {
     nudge: Option<Nudge>,
     /// The Program Status last handed to the store.
     reported: Option<Records>,
+    wake: Option<PromptWake>,
 }
 
 /// Both steps read the terminal's size when they act: a view that takes the
@@ -257,6 +260,13 @@ pub enum WakeTerminal {
     NotReady,
     /// No live held terminal with that ID is currently hosted by this registry.
     Absent,
+}
+
+struct PromptWake {
+    prompt: String,
+    ready: crate::steer::PromptReady,
+    deadline: Instant,
+    reply: mpsc::Sender<WakeTerminal>,
 }
 
 /// SQLite and file settlement work dispatched off the held-terminals relay loop
@@ -292,12 +302,7 @@ enum Command {
         unsettled: Vec<Unsettled>,
     },
     /// Inspect a hosted terminal's VT screen and, if safely idle, paste `prompt`.
-    WakePrompt {
-        terminal: TerminalId,
-        prompt: String,
-        prompt_ready: crate::steer::PromptReady,
-        reply: mpsc::Sender<WakeTerminal>,
-    },
+    WakePrompt(TerminalId, PromptWake),
     /// Worker confirmed the exec'd provider is live so its configured directory
     /// can be reported.
     DirectoryConfirmed(TerminalId, PathBuf),
@@ -382,7 +387,7 @@ impl std::fmt::Debug for Command {
         match self {
             Self::Add(terminal, _) => write!(f, "Add({terminal})"),
             Self::Resolved { place, .. } => write!(f, "Resolved({})", place.socket.display()),
-            Self::WakePrompt { terminal, .. } => write!(f, "WakePrompt({terminal})"),
+            Self::WakePrompt(terminal, _) => write!(f, "WakePrompt({terminal})"),
             Self::DirectoryConfirmed(terminal, _) => write!(f, "DirectoryConfirmed({terminal})"),
             Self::Settled { terminal, .. } => write!(f, "Settled({terminal})"),
             #[cfg(any(test, feature = "test-support"))]
@@ -498,15 +503,24 @@ impl Registry {
         prompt_ready: crate::steer::PromptReady,
     ) -> Result<WakeTerminal> {
         let (reply, outcome) = mpsc::channel();
-        self.send(Command::WakePrompt {
-            terminal: terminal.clone(),
-            prompt: prompt.to_owned(),
-            prompt_ready,
-            reply,
-        })?;
-        outcome
-            .recv_timeout(Duration::from_secs(2))
-            .context("held terminal loop did not answer wake check")
+        let deadline = Instant::now() + WAKE_PROMPT_TIMEOUT;
+        self.send(Command::WakePrompt(
+            terminal.clone(),
+            PromptWake {
+                prompt: prompt.to_owned(),
+                ready: prompt_ready,
+                deadline,
+                reply,
+            },
+        ))?;
+        match outcome.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(outcome) => Ok(outcome),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                tracing::warn!(%terminal, "held terminal loop did not answer wake check");
+                Ok(WakeTerminal::NotReady)
+            }
+            Err(error) => Err(error).context("held terminal loop did not answer wake check"),
+        }
     }
 
     /// The terminal a holder that has not answered yet may be running for
@@ -1040,24 +1054,26 @@ fn run(
                     terminals.extend(entries);
                     unsettled.extend(ended);
                 }
-                Command::WakePrompt {
-                    terminal,
-                    prompt,
-                    prompt_ready,
-                    reply,
-                } => {
-                    let outcome = match terminals.get_mut(&terminal) {
-                        None => WakeTerminal::Absent,
-                        Some(entry) if matches!(entry.nudge, Some(Nudge::Replaying { .. })) => {
+                Command::WakePrompt(terminal, wake) => {
+                    if let Some(entry) = terminals.get_mut(&terminal) {
+                        if entry.wake.is_none() {
+                            entry.wake = Some(wake);
+                        } else {
+                            let _ = wake.reply.send(WakeTerminal::NotReady);
+                        }
+                    } else {
+                        let adopting = pending
+                            .lock()
+                            .expect("registry lock poisoned")
+                            .iter()
+                            .any(|holder| holder.terminals.contains(&terminal));
+                        let outcome = if adopting {
                             WakeTerminal::NotReady
-                        }
-                        Some(entry) => {
-                            entry
-                                .hosted
-                                .wake_idle_prompt(&mut entry.child, &prompt, prompt_ready)
-                        }
-                    };
-                    let _ = reply.send(outcome);
+                        } else {
+                            WakeTerminal::Absent
+                        };
+                        let _ = wake.reply.send(outcome);
+                    }
                 }
                 Command::DirectoryConfirmed(terminal, cwd) => {
                     if let Some(entry) = terminals.get_mut(&terminal) {
@@ -1131,6 +1147,21 @@ fn run(
             let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 entry.nudge();
                 let pass = entry.hosted.pass(&mut entry.child, &worker);
+                // Read input and output already waiting on the relay before
+                // deciding the prompt is empty.
+                if let Some(wake) = entry.wake.take() {
+                    let outcome = if matches!(&pass, Ok(Pass::Continue))
+                        && entry.nudge.is_none()
+                        && Instant::now() < wake.deadline
+                    {
+                        entry
+                            .hosted
+                            .wake_idle_prompt(&mut entry.child, &wake.prompt, wake.ready)
+                    } else {
+                        WakeTerminal::NotReady
+                    };
+                    let _ = wake.reply.send(outcome);
+                }
                 entry.report(terminal, &worker);
                 pass
             }));
@@ -1231,6 +1262,7 @@ impl Entry {
             place: place.clone(),
             nudge: None,
             reported: None,
+            wake: None,
         })
     }
 

@@ -778,6 +778,33 @@ read next",
 }
 
 #[test]
+fn a_terminal_waiting_for_its_holder_defers_wake() {
+    let _ledger = TestLedgerGuard::new();
+    let registry = Registry::open(BUILD).unwrap();
+    let terminal = TerminalId::new();
+    let place = Place::of(BUILD).unwrap();
+    registry.pending.lock().unwrap().push(super::Pending {
+        place: place.clone(),
+        terminals: vec![terminal.clone()],
+    });
+    let wake = || {
+        registry
+            .wake_idle_prompt(&terminal, crate::steer::WAKE_PROMPT, |_| true)
+            .unwrap()
+    };
+    assert_eq!(wake(), super::WakeTerminal::NotReady);
+    registry
+        .send(super::Command::Resolved {
+            place,
+            entries: Vec::new(),
+            unsettled: Vec::new(),
+        })
+        .unwrap();
+    assert_eq!(wake(), super::WakeTerminal::Absent);
+    registry.close();
+}
+
+#[test]
 fn wake_idle_prompt_guards_against_drafts_typing_and_open_pastes_but_ignores_mouse_and_focus() {
     let ledger = TestLedgerGuard::new();
     let place = holder();
@@ -810,7 +837,6 @@ printf '%s' "$line" > "{}"
 
     // Focus reports and mouse wheel events do not count as user keystrokes.
     view.type_in(b"\x1b[I\x1b[<64;10;20M\x1b[O");
-    std::thread::sleep(Duration::from_millis(50));
 
     // Caller-supplied screen predicate controls readiness (transport stays provider-agnostic).
     assert_eq!(
@@ -862,14 +888,14 @@ sleep 30
             .unwrap(),
         super::WakeTerminal::Injected
     );
-    wait_until("pasted wake prompt written", || pasted.exists());
-    assert_eq!(
-        std::fs::read_to_string(&pasted).unwrap(),
-        format!(
-            "\x1b[I\x1b[<64;10;20M\x1b[O\x1b[200~{}\x1b[201~",
-            crate::steer::WAKE_PROMPT
-        )
+    let expected = format!(
+        "\x1b[I\x1b[<64;10;20M\x1b[O\x1b[200~{}\x1b[201~",
+        crate::steer::WAKE_PROMPT
     );
+    wait_until("pasted wake prompt written", || {
+        std::fs::metadata(&pasted).is_ok_and(|file| file.len() >= expected.len() as u64)
+    });
+    assert_eq!(std::fs::read_to_string(&pasted).unwrap(), expected);
     drop(view);
     registry.close();
     kill(&place, &draft_terminal);

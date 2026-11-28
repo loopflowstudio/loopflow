@@ -18,7 +18,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
@@ -107,6 +107,7 @@ impl Waker {
 #[derive(Default)]
 pub(super) struct Watcher {
     seen: Option<(i64, i64)>,
+    last_wake_pass: Option<SystemTime>,
     terminals: Option<Arc<Registry>>,
     nudge: Option<WakeNudge>,
     deferred: bool,
@@ -139,7 +140,8 @@ impl Watcher {
     }
 
     /// Wake idle conversations if the revisions moved since the last reading,
-    /// or retry held terminals that were busy on an earlier pass.
+    /// or retry held terminals that were busy on an earlier pass. The periodic
+    /// pass also picks up steers read before a terminal became reachable.
     /// The first reading wakes too: what arrived while no server ran reaches
     /// each idle conversation now. One that already heard it gets nothing;
     /// claimed updates and confirmed steers say so.
@@ -151,6 +153,11 @@ impl Watcher {
             Ok(revision) => {
                 let moved = self.seen != Some(revision);
                 let nudged = self.nudge.as_ref().is_some_and(WakeNudge::take_pending);
+                let now = SystemTime::now();
+                let due = self.last_wake_pass.is_none_or(|last| {
+                    !now.duration_since(last)
+                        .is_ok_and(|elapsed| elapsed < UNSIGNALLED)
+                });
                 if moved {
                     self.seen = Some(revision);
                     if let Some(terminals) = &self.terminals {
@@ -168,7 +175,8 @@ impl Watcher {
                         );
                     }
                 }
-                if moved || self.deferred || nudged {
+                if moved || self.deferred || nudged || due {
+                    self.last_wake_pass = Some(now);
                     self.deferred = wake_idle(store, None, self.terminals.as_deref());
                 }
             }
@@ -922,11 +930,11 @@ mod tests {
     }
 
     fn assert_wake_pasted(pasted: &Path) {
-        wait_until("wake prompt pasted", || pasted.exists());
-        assert_eq!(
-            std::fs::read_to_string(pasted).unwrap(),
-            format!("\x1b[200~{}\x1b[201~", super::WAKE_PROMPT)
-        );
+        let expected = format!("\x1b[200~{}\x1b[201~", super::WAKE_PROMPT);
+        wait_until("wake prompt pasted", || {
+            std::fs::metadata(pasted).is_ok_and(|file| file.len() >= expected.len() as u64)
+        });
+        assert_eq!(std::fs::read_to_string(pasted).unwrap(), expected);
     }
 
     #[test]
@@ -1194,6 +1202,43 @@ printf '%s' "$line" > "{pasted}"
             watcher.read(&path);
             !watcher.deferred
         });
+        assert_wake_pasted(&pasted);
+        registry.close();
+    }
+
+    #[test]
+    fn a_steer_read_during_antigravity_launch_wakes_once_it_is_reachable() {
+        let session = "wake-agy-opening";
+        let fixture = fixture(session);
+        let _home = pin_lf_home(fixture.home.path());
+        let store = &fixture.store;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='agy',provider_thread=NULL WHERE id=?1",
+                [session],
+            )
+            .unwrap();
+        let pasted = fixture.home.path().join("pasted");
+        let (registry, _) =
+            held_agy_terminal(store, session, &agy_idle_script(&pasted), "? for shortcuts");
+        store
+            .save_session_steer(session, "Fixture author", "arrived while opening")
+            .unwrap();
+        let mut watcher = Watcher {
+            terminals: Some(registry.clone()),
+            ..Watcher::default()
+        };
+        watcher.read_with(store);
+        assert!(!watcher.deferred);
+
+        // The launch records a reachable idle session without saving another
+        // steer or Task update, and the provider has no opening hook.
+        assert!(store.record_first_boundary(&fixture.adapter).unwrap());
+        watcher.last_wake_pass = Some(std::time::UNIX_EPOCH);
+        watcher.read_with(store);
         assert_wake_pasted(&pasted);
         registry.close();
     }

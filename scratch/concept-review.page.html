@@ -1,11 +1,11 @@
 <h1>LOO-1125 · Concept Review: Post-review reconciliation &amp; loop control</h1>
 
 <p>
-  <strong>Area reviewed:</strong> The post-review reconciliation and loop-control contract across Loopflow's builtin Task Graphs (<code>build</code>, <code>plan</code>, <code>refresh</code>, <code>optimize</code>) — spanning the skill prompts (<code>realign</code>, <code>concept-review</code>, <code>implement</code>, <code>write-docs</code>, <code>ship-review</code>), the loop-decision prompt injected by <code>GraphOutput</code>, the instruction-level eval contract, and the guides that document it. Widened past <code>realign.md</code> because changing when <code>realign</code> iterates changes how it interacts with the Graph runner's shared decision criteria, <code>concept-review</code>'s single-owner review role, and the boundary between tracked files and <code>scratch/</code>.
+  <strong>Area reviewed:</strong> Post-review reconciliation and loop control across Loopflow's builtin Task Graphs (<code>build</code>, <code>plan</code>, <code>refresh</code>, <code>optimize</code>) — spanning <code>realign.md</code>, its sibling skills (<code>implement</code>, <code>concept-review</code>, <code>ship-review</code>), the loop-decision prompt injected by <code>GraphOutput</code> (<code>output.rs</code>), the Graph definitions (<code>build.yaml</code>, <code>refresh.yaml</code>), the instruction-level eval contract, and the guides (<code>docs/orchestration.md</code>, <code>AGENTS.md</code>, <code>.lf/qa/skills.md</code>). Widened past <code>realign.md</code> because changing when <code>realign</code> iterates changes how loop safety, file ownership, and review-page freshness work across the whole loop.
 </p>
 
 <p>
-  <strong>State of the work:</strong> Planning stage only. Commit <code>19768ac60a</code> adds <code>scratch/explore.page.html</code>, <code>scratch/explore.html</code>, <code>scratch/plan.md</code>, and <code>scratch/questions.md</code>. No skill, graph, Rust, or doc changes have been built yet. This review evaluates the full design in <code>scratch/plan.md</code> before Pass 1 starts.
+  <strong>State of the work:</strong> Built and committed against base <code>6deb3b0450</code> through <code>82b93dde97</code> (implementation in <code>7d0554d112</code>, docs in <code>f6c35fa490</code>). The pre-implementation review findings (<code>6c6f04ea29</code>) — runner prompt contradiction on small fixes, Pass 2 self-review spin, and leftover "repair" wording in <code>AGENTS.md:453</code> — are fixed in the branch. This review evaluates the built change as it stands on <code>HEAD</code>; live two-pass QA remains for <code>qa</code>.
 </p>
 
 <h2>Do the concepts line up?</h2>
@@ -14,242 +14,196 @@
   <thead>
     <tr>
       <th>Domain concept (what a person expects)</th>
-      <th>Code concept (with plan applied)</th>
+      <th>Code concept (on <code>HEAD</code>)</th>
       <th>Match?</th>
       <th>What is wrong</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td><strong>Any in-scope code fix triggers one more verified pass</strong><br>When <code>concept-review</code> catches even a small code or test mismatch, <code>realign</code> queues it and loops back through <code>implement</code> and <code>concept-review</code>.</td>
-      <td><code>realign.md</code> (<code>## Deciding a loop</code>: iterate on any code/test fix, however small) <em>plus</em> <code>DECISION_CRITERIA</code> in <code>rust/loopflow-execution/src/graph/output.rs</code> appended after every deciding skill's prompt.</td>
-      <td><strong>No</strong></td>
-      <td><strong>Two conflicting loop rules on the same step (biggest mismatch).</strong> <code>output.rs</code> unconditionally appends <code>DECISION_CRITERIA</code> after <code>realign.md</code>, instructing the agent to <code>iterate</code> only for a "substantial next pass" and return <code>blocked</code> when "passes shrink into small increments." A small review-fix pass collides directly with the text at the end of its own prompt.</td>
-    </tr>
-    <tr>
-      <td><strong>One reviewer, one simplifier, one planner in <code>build</code></strong><br><code>concept-review</code> reviews design fit, <code>realign</code> triages findings into the plan, <code>implement</code> builds, <code>compress</code> simplifies.</td>
-      <td><code>build.yaml</code> outer loop + <code>realign.md:28-32</code> ("Read the work once as a reviewer… is there a concept, type or path it added that the design could do without, or a simpler form of what it built? Write what you find into the plan as remaining work.").</td>
-      <td><strong>No</strong></td>
-      <td><strong>No single owner of review/simplification — and a new Pass 2 spin hazard.</strong> After <code>concept-review</code> passes every row on Pass 2, <code>realign</code> is still told to do its own mini-review and write simplifications into the plan. Under the new rule, any code item in the plan forces <code>iterate</code>, reopening the loop right before <code>compress</code>.</td>
-    </tr>
-    <tr>
-      <td><strong><code>realign</code> owns the plan, never tracked implementation files</strong><br>One bright line: <code>realign</code> writes <code>scratch/</code> (and Wave memory when asked); <code>implement</code> and <code>write-docs</code> edit the repository.</td>
-      <td><code>scratch/plan.md</code> (Q2 b: <code>realign</code> edits "documentation files, by path" inline, never code/tests) + <code>scripts/evals/instruction_levels.py</code> (<code>ACTIONS</code> has <code>write_scratch</code>, <code>edit_wave</code>, <code>implement</code> — no <code>edit_docs</code>).</td>
-      <td><strong>No</strong></td>
-      <td><strong>Fuzzy file boundary &amp; split doc ownership.</strong> In this repo (and in LOO-1125 itself), <code>.md</code> files include builtin skills compiled into <code>lf</code>, golden prompts, <code>AGENTS.md</code>, <code>.lf/qa/</code> playbooks, and <code>docs/*.md</code> (tested by <code>documented_commands</code>). "Documentation files by path" does not cleanly separate those, and diverges from <code>instruction_levels.py</code>.</td>
-    </tr>
-    <tr>
-      <td><strong><code>scratch/concept-review.html</code> matches what ships</strong><br>At <code>ship-review</code>, every in-scope "No" row from <code>concept-review</code> has been fixed and re-verified as "Yes".</td>
-      <td><code>build.yaml</code> + <code>realign.md</code> under Q2 b (inline doc fix returns <code>advance</code> without re-running <code>concept-review</code>).</td>
-      <td><strong>No</strong></td>
-      <td><strong>Stale "No" rows survive for docs mismatches.</strong> When <code>concept-review</code> flags that docs teach a different model than code and <code>realign</code> edits the doc inline and advances, <code>concept-review.html</code> keeps the stale "No" row at <code>ship-review</code> and never verifies the rewritten doc.</td>
-    </tr>
-    <tr>
-      <td><strong>Every caller and guide reflects plan-only <code>realign</code></strong><br><code>build</code>, <code>plan</code>, <code>refresh</code>, <code>optimize</code>, standalone <code>lf realign</code>, and <code>AGENTS.md</code> agree on one contract.</td>
-      <td><code>scratch/plan.md</code> updates <code>refresh.yaml</code>, <code>docs/orchestration.md</code>, <code>.lf/qa/skills.md</code>, and <code>AGENTS.md:285,410</code>, but leaves <code>AGENTS.md:453</code> ("test only a repair or a real doubt") and <code>optimize.yaml</code>'s trailing <code>graph: refresh</code> unchanged.</td>
-      <td><strong>No</strong></td>
-      <td><strong>Leftover code-repair wording in <code>AGENTS.md:453</code></strong> ("a repair" assumes <code>realign</code> still edits code). Also, in <code>optimize.yaml</code> (<code>compress → graph: refresh → measure</code>), any code mismatch <code>realign</code> writes into the plan has no <code>implement</code> step after it.</td>
-    </tr>
-    <tr>
-      <td><strong>Triage of review findings</strong><br>In-scope fixes queue for build; separate outcomes defer to <code>ship-review</code>; reversible choices proceed marked for review; irreversible choices stop the loop.</td>
-      <td><code>realign.md</code> (<code>## After a review</code>, <code>## Deciding a loop</code>) + <code>ship-review.md</code> + <code>GraphDecision::{Advance, Iterate, Blocked}</code> in <code>rust/loopflow-execution/src/graph/transitions.rs</code>.</td>
+      <td><strong>Any in-scope code or test fix gets built and re-reviewed</strong><br>When <code>concept-review</code> catches even a small code or test mismatch, <code>realign</code> queues it as the next pass and loops back through <code>implement</code> and <code>concept-review</code>.</td>
+      <td><code>realign.md</code> (<code>## After a review</code>, <code>## Deciding a loop</code>) + <code>output.rs</code> (<code>DECISION_CRITERIA</code> defers to skill rules) + <code>build.yaml</code> outer loop.</td>
       <td><strong>Yes</strong></td>
       <td>—</td>
     </tr>
     <tr>
-      <td><strong>Loop convergence without an artificial cap</strong><br>Settled findings don't re-trigger work; the decider sees which pass it is on.</td>
-      <td><code>realign.md</code> (records settled findings by substance) + <code>Decision pass N</code> in <code>rust/loopflow/src/lf/commands/graph.rs:1366</code>.</td>
+      <td><strong>Loops without a pass cap stop when passes fail to converge</strong><br>Because Loops have no fixed pass limit, repeating the same unresolved finding or making no progress always stops the Graph as <code>blocked</code>.</td>
+      <td><code>DECISION_CRITERIA</code> in <code>rust/loopflow-execution/src/graph/output.rs:10-19</code> + <code>realign.md:71-82</code> + <code>implement.md:97-112</code> + <code>docs/orchestration.md:190-193</code>.</td>
+      <td><strong>No</strong></td>
+      <td><strong>Biggest mismatch (regression in <code>7d0554d112</code>).</strong> Moving all three criteria behind <em>"If the skill gives its own loop decision rules, follow those. Otherwise use these defaults."</em> turned the universal non-convergence stop into a fallback-only default. Neither <code>realign.md</code> nor <code>implement.md</code> repeats a non-convergence <code>blocked</code> rule, so both deciders lost their circuit breaker.</td>
+    </tr>
+    <tr>
+      <td><strong>One reviewer, one simplifier, one planner in <code>build</code></strong><br><code>concept-review</code> reviews design fit, <code>realign</code> triages findings into the plan, <code>implement</code> builds, <code>compress</code> simplifies.</td>
+      <td><code>realign.md:28-30</code> (triages only the fresh review when reconciling one; keeps its quick shape check for standalone/<code>refresh</code> runs) + <code>build.yaml</code>.</td>
       <td><strong>Yes</strong></td>
-      <td>Holds once <code>realign</code>'s redundant self-review (row 2) and <code>DECISION_CRITERIA</code> conflict (row 1) are resolved.</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td><strong><code>realign</code> owns the plan, never tracked repository files</strong><br>One clear ownership line: <code>realign</code> writes <code>scratch/</code> (and Wave memory when asked); <code>implement</code> edits tracked repository files and runs focused checks.</td>
+      <td><code>realign.md:31-33,54-55,78-80,100-101</code> (inline edits allowed for <code>docs/</code> and <code>README.md</code>; explicit blocklist for skills, goldens, agent guides, QA playbooks, source comments) + <code>ship-review.md:13-15</code> + <code>scripts/evals/instruction_levels.py:11-22</code>.</td>
+      <td><strong>No</strong></td>
+      <td><strong>Open design choice (honors <code>explore</code> Q2 b).</strong> The inline user-docs exception embeds a Loopflow-specific file blocklist into a generic builtin skill, lets <code>docs/</code> edits skip <code>documented_commands</code> and <code>concept-review</code>, leaves stale "No" rows on <code>scratch/concept-review.html</code>, promises a <code>ship-review</code> handoff that <code>ship-review.md</code> does not implement, and diverges from <code>instruction_levels.py</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Builtin Graphs, docs, goldens, and QA playbooks teach one rule</strong><br>Copying a builtin Graph with <code>lf graph customize build</code> matches <code>docs/orchestration.md</code> and <code>realign.md</code>.</td>
+      <td><code>realign.md</code>, <code>tests/goldens/builtin_realign.md</code>, <code>refresh.yaml</code>, <code>docs/orchestration.md</code>, <code>AGENTS.md</code>, <code>.lf/qa/skills.md</code>, <code>instruction_levels.json</code>, and <code>rust/loopflow-definitions/src/builtins/task/graph/build.yaml:8</code>.</td>
+      <td><strong>No</strong></td>
+      <td><strong>Minor drift.</strong> <code>build.yaml:8</code> still says <code># decides: takes the review into the plan; rework, or move on</code> (the pre-LOO-1125 "rework only" phrasing), while <code>docs/orchestration.md:154</code> updated its copy of the same line to <code>code fixes (iterate) or move on (advance)</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Review triage and non-loop behavior (<code>plan</code>, <code>refresh</code>, standalone)</strong><br>Deferred outcomes go under <code>## Deferred findings</code>; reversible headless choices are marked for review; non-loop runs never emit <code>blocked</code>.</td>
+      <td><code>realign.md:51-86</code> + <code>refresh.yaml</code> + <code>plan.yaml</code>.</td>
+      <td><strong>Yes</strong></td>
+      <td>—</td>
     </tr>
   </tbody>
 </table>
 
-<h2>Biggest mismatch: <code>GraphOutput</code> contradicts <code>realign</code>'s new loop rule</h2>
+<h2>Biggest mismatch: Making loop criteria "fallback-only" dropped the non-convergence stop</h2>
 
 <p>
-  Walk a concrete <code>build</code> run when <code>concept-review</code> finds a single 3-line code mismatch:
+  Walk a failing <code>build</code> run on <code>HEAD</code> where Pass 2 does not cleanly fix Pass 1's review finding:
 </p>
 <ol>
-  <li><strong>Pass 1:</strong> <code>implement</code> finishes the planned slice and returns <code>advance</code>. <code>concept-review</code> writes <code>scratch/concept-review.html</code> with one "No" row (a leftover helper or misnamed flag).</li>
-  <li><strong><code>realign</code> runs as the outer loop's decider.</strong> <code>realign.md</code> tells it to write that fix into <code>scratch/plan.md</code> as Pass 2 and return <code>iterate</code>, however small the change.</li>
-  <li><strong>Then the runner appends <code>DECISION_CRITERIA</code> at the bottom of the prompt</strong> (<code>rust/loopflow-execution/src/graph/output.rs:11-19</code>):</li>
+  <li><strong>Pass 1:</strong> <code>concept-review</code> flags an API mismatch. <code>realign</code> writes Pass 2 into <code>scratch/plan.md</code> and returns <code>iterate</code>.</li>
+  <li><strong>Pass 2:</strong> <code>implement</code> edits the code, misses an edge case, and advances. <code>concept-review</code> re-reviews the branch and flags the same conceptual mismatch again.</li>
+  <li><strong><code>realign</code> runs on <code>Decision pass 2</code> (or 3, or 4).</strong> Because Loopflow intentionally has no pass cap in <code>rust/loopflow-execution/src/graph</code>, the only circuit breaker is the decider returning <code>blocked</code> when passes repeat without converging.</li>
 </ol>
 
-<lf-file path="rust/loopflow-execution/src/graph/output.rs" lines="9-20"></lf-file>
-<lf-file path="rust/loopflow-execution/src/graph/output.rs" lines="33-48"></lf-file>
-
 <p>
-  <strong>Failure mode:</strong> Because <code>DECISION_CRITERIA</code> lands last in the prompt, an agent obeying it sees a 3-line review fix and hits a direct contradiction — <code>iterate</code> asks for a <em>"substantial next pass"</em>, while <code>blocked</code> triggers when <em>"passes shrink into small increments."</em> Under headless execution, that pushes the decider either to return <code>blocked</code> on a valid small review fix (stalling the Task) or to rationalize <code>advance</code> (dropping the fix).
+  Now read what <code>7d0554d112</code> put into <code>DECISION_CRITERIA</code> and <code>realign.md</code>:
 </p>
 
+<lf-diff path="rust/loopflow-execution/src/graph/output.rs" lines="9-20">
+  <lf-note line="13">Tells any skill with its own loop section (realign, implement, optimize-plan) to skip the defaults below.</lf-note>
+  <lf-note line="17">The only non-convergence stop in the system now lives inside that skipped fallback block.</lf-note>
+</lf-diff>
+
+<lf-diff path="rust/loopflow-definitions/src/builtins/task/skill/realign.md" lines="71-84">
+  <lf-note line="81">realign's own blocked rule covers only irreversible design choices — nothing stops a spinning fix loop.</lf-note>
+</lf-diff>
+
 <p>
-  Notice that Loopflow's native chat checklist renderer already has the right model — it only injects generic <code>loop-or-next</code> rules when the skill <em>is</em> <code>loop-or-next</code>, and otherwise defers to the skill's own criteria:
+  <code>docs/orchestration.md</code> mirrors the same mistake, describing the non-convergence stop as default-only:
 </p>
 
-<lf-file path="rust/loopflow-execution/src/graph/instructions.rs" lines="68-78"></lf-file>
-
-<lf-component name="before-after">
-  <div slot="before">
-    <h4>Before (plan alone)</h4>
-    <p><code>realign.md</code> says: iterate on any in-scope code fix, however small.</p>
-    <p><code>output.rs</code> unconditionally appends after it: iterate only on a "substantial next pass"; block when "passes shrink into small increments."</p>
-    <p><strong>Result:</strong> Two competing authorities in the same prompt, with the generic rule getting the last word.</p>
-  </div>
-  <div slot="after">
-    <h4>After (one decision authority)</h4>
-    <p><code>DECISION_CRITERIA</code> in <code>output.rs</code> states upfront that skill-specific loop rules take precedence (and reserves <code>blocked</code> for passes that repeat without converging, not legitimate small review-fix passes).</p>
-    <p><strong>Result:</strong> Skills without a <code>## Deciding a loop</code> section still get safe defaults; <code>realign</code> (and <code>implement</code>) decide cleanly by their own stated rules without fighting the runner suffix.</p>
-  </div>
-</lf-component>
+<lf-diff path="docs/orchestration.md" lines="190-195"></lf-diff>
 
 <p>
-  <strong>Recovery check:</strong> What if a genuine non-converging spin happens (Pass 2, 3, 4 keep reopening the same finding)? <code>graph.rs:1366</code> still injects <code>Decision pass N</code>, and <code>DECISION_CRITERIA</code> still tells any decider to return <code>blocked</code> when passes repeat without progress or fail to converge. What changes is only that a single targeted review-fix pass is no longer misclassified as "shrinking into small increments."
-</p>
-
-<h2>Second mismatch: <code>realign</code>'s leftover self-review can spin Pass 2</h2>
-
-<p>
-  Look at lines 28–33 of <code>realign.md</code> as they stand today:
-</p>
-
-<lf-file path="rust/loopflow-definitions/src/builtins/task/skill/realign.md" lines="28-33"></lf-file>
-
-<p>
-  And look at where <code>realign</code> sits in <code>build.yaml</code>:
-</p>
-
-<lf-file path="rust/loopflow-definitions/src/builtins/task/graph/build.yaml" lines="1-11"></lf-file>
-
-<p>
-  Trace Pass 2 of <code>build</code> after <code>implement</code> fixes the review finding and <code>concept-review</code> writes an all-"Yes" page:
+  <strong>Why this happened:</strong> Two distinct concepts were lumped together in <code>DECISION_CRITERIA</code>:
 </p>
 <ul>
-  <li>Before LOO-1125, if <code>realign</code> did that "one look at the shape" and spotted a minor simplification, it patched it inline and returned <code>advance</code>.</li>
-  <li>With <code>scratch/plan.md</code> as written, <code>realign</code> still runs that mini-review, writes the simplification into <code>scratch/plan.md</code> as remaining work, and — because any code item in the plan forces <code>iterate</code> — triggers a Pass 3 loop on a finding <code>concept-review</code> did not raise, right before <code>compress</code> runs specifically to simplify!</li>
+  <li><strong>Step-specific progress criteria</strong> (what earns <code>advance</code> vs <code>iterate</code> — e.g. "substantial next pass" by default, "any in-scope implementation fix" in <code>realign</code>, "next credible hypothesis" in <code>optimize-plan</code>). A skill's own rules must win here.</li>
+  <li><strong>Universal loop safety</strong> (<code>blocked</code> when passes repeat without converging, make no progress, or repeat a failure with nothing learned). Because Loops have no hard pass cap, this invariant must hold for <em>every</em> decider — including <code>realign</code> and <code>implement</code>.</li>
 </ul>
 
 <lf-component name="before-after">
   <div slot="before">
-    <h4>Before (plan leaves lines 28–31 active in <code>build</code>)</h4>
-    <pre>Pass 2: implement ──▶ concept-review (all "Yes")
-                            │
-                            ▼
-                      realign runs its own shape review,
-                      spots a cleanup, writes Pass 3 ──▶ iterate!
-                      (re-runs sync/implement/concept-review
-                       for work that belongs to compress)</pre>
+    <h4>Before (<code>HEAD</code>)</h4>
+    <p><code>DECISION_CRITERIA</code> puts all three bullets behind <em>"If the skill gives its own loop decision rules, follow those. Otherwise use these defaults."</em></p>
+    <p><code>realign.md</code> lists <code>blocked</code> only for irreversible design choices.</p>
+    <p><strong>Failure mode:</strong> When a small fix fails to converge across passes, neither the runner suffix nor <code>realign.md</code> tells the decider to stop.</p>
   </div>
   <div slot="after">
-    <h4>After (self-review only when no review just ran)</h4>
-    <pre>Pass 2: implement ──▶ concept-review (all "Yes")
-                            │
-                            ▼
-                      realign reconciles the review only
-                      (0 unanswered findings) ──▶ advance ──▶ compress</pre>
+    <h4>After (universal stop + skill-specific progress)</h4>
+    <p><code>DECISION_CRITERIA</code> splits the two: skill rules govern <code>advance</code>/<code>iterate</code> and skill-specific blockers; <code>blocked</code> on repeating passes without convergence, zero progress, or repeated failure always applies.</p>
+    <p><code>realign.md</code>'s <code>blocked</code> bullet names both irreversible design choices and repeated passes that fail to resolve the same finding; <code>docs/orchestration.md</code> states the stop applies to every decider.</p>
+    <p><strong>Result:</strong> Pass 1's small fix still iterates cleanly, and a spinning Pass 3+ still stops with a clear reason.</p>
   </div>
 </lf-component>
 
-<h2>Third mismatch: The "docs inline" exception blurs ownership on real tasks</h2>
+<h2>Second mismatch: What the inline user-docs exception looks like in the built skill</h2>
 
 <p>
-  In <code>scratch/explore.html</code>, Jack chose Q2 b ("Allow realign to edit docs inline (only code/tests force iterate)"). <code>scratch/plan.md</code> operationalizes that as:
+  <code>7d0554d112</code> honored Jack's reply in <code>scratch/explore.html</code> (Q2 b: allow <code>realign</code> to edit docs inline) and narrowed it to <code>docs/</code> and <code>README.md</code> so skills, goldens, <code>AGENTS.md</code>, and QA playbooks still iterate. Reading the built text as a first-time user shows the cost of keeping that exception:
 </p>
 
-<lf-diff path="scratch/plan.md" lines="80-93"></lf-diff>
+<lf-diff path="rust/loopflow-definitions/src/builtins/task/skill/realign.md" lines="28-34">
+  <lf-note line="31">Repos whose docs live in guide/, book/, or website/ fall outside this path rule; meanwhile Loopflow's own docs/ examples are tested by documented_commands, which realign does not run.</lf-note>
+  <lf-note line="32">Hardcodes a Loopflow-repo-specific blocklist (skills, goldens, agent guides, QA playbooks) inside a generic builtin skill shipped to every repository.</lf-note>
+</lf-diff>
+
+<lf-diff path="rust/loopflow-definitions/src/builtins/task/skill/realign.md" lines="53-58">
+  <lf-note line="54">Promises a ship-review handoff to reconcile stale "No" rows on concept-review.html, but ship-review.md has no such rule.</lf-note>
+</lf-diff>
 
 <p>
-  Test that rule against <strong>LOO-1125 itself</strong> as a counterexample. Look at the files LOO-1125 plans to edit:
-</p>
-<ul>
-  <li><code>rust/loopflow-definitions/src/builtins/task/skill/realign.md</code> — Markdown, but compiled into <code>lf</code> via <code>include_str!</code> and checked by <code>golden_prompt</code>.</li>
-  <li><code>tests/goldens/builtin_realign.md</code> — Markdown, but a Rust test snapshot.</li>
-  <li><code>AGENTS.md</code> and <code>.lf/qa/skills.md</code> — Markdown, but behavioral rules for agents and QA.</li>
-  <li><code>docs/orchestration.md</code> — User documentation, yet its CLI examples are tested by <code>documented_commands</code>, and editing it inline in <code>realign</code> leaves its "No" row stale on <code>scratch/concept-review.html</code> at <code>ship-review</code>.</li>
-</ul>
-
-<p>
-  Meanwhile, <code>scripts/evals/instruction_levels.py</code> already defines <code>realign</code>'s action boundary without a separate docs permission:
+  Compare with <code>ship-review.md</code> (which reads <code>scratch/plan.md</code> for choices and <code>## Deferred findings</code>, not for overriding stale rows in <code>concept-review.html</code>) and <code>scripts/evals/instruction_levels.py</code> (which has no <code>edit_docs</code> action at all):
 </p>
 
+<lf-file path="rust/loopflow-definitions/src/builtins/task/skill/ship-review.md" lines="11-19"></lf-file>
 <lf-file path="scripts/evals/instruction_levels.py" lines="11-22"></lf-file>
 
-<p>
-  There are two clean ways to resolve this, and neither leaves the rule vague:
-</p>
-<ul>
-  <li><strong>Option A (strictest, smallest system):</strong> <code>realign</code> edits only <code>scratch/</code> (and Wave memory when asked). Even doc mismatches go into <code>scratch/plan.md</code> and iterate through <code>implement</code> → <code>concept-review</code>. Zero path-classification judgment calls, 100% current <code>concept-review.html</code>, and 1:1 match with <code>instruction_levels.py</code>. <em>Cost:</em> a docs-only review finding in <code>build</code> pays one extra 4-step pass.</li>
-  <li><strong>Option B (keep Q2 b, draw a crisp boundary):</strong> <code>realign</code> may edit only user-facing documentation files (<code>docs/</code>, <code>README.md</code>) — never builtin skills, goldens, <code>AGENTS.md</code>, <code>.lf/qa/</code>, or code comments — and <code>realign.md</code> notes plainly that inline doc fixes stay resolved in <code>scratch/plan.md</code> beside the existing review page. <em>Cost:</em> <code>concept-review.html</code> can still show a stale "No" row for a fixed doc mismatch, and agents must still classify which Markdown files count as user docs.</li>
-</ul>
-
-<h2>Small catch in the plan</h2>
-
-<p>
-  <code>scratch/plan.md:126-127</code> updates <code>AGENTS.md:285</code> and <code>:410</code> and notes that line 453 already says "reconcile the plan." Line 453 actually still assumes code repairs happen in <code>realign</code>:
-</p>
-
-<lf-file path="AGENTS.md" lines="450-458"></lf-file>
+<lf-component name="before-after">
+  <div slot="before">
+    <h4>Built today (narrowed Q2 b)</h4>
+    <p>Three file zones for <code>realign</code>: <code>scratch/</code> + Wave memory (always), <code>docs/</code> + <code>README.md</code> (inline), everything else including skills/goldens/agent guides/QA playbooks/comments (<code>implement</code> + iterate).</p>
+    <p>User-doc fixes skip <code>concept-review</code> and <code>documented_commands</code>, leaving stale "No" rows on <code>scratch/concept-review.html</code>.</p>
+  </div>
+  <div slot="after">
+    <h4>Simpler option (scratch-only <code>realign</code>)</h4>
+    <p>One rule for every repository: <code>realign</code> edits only <code>scratch/</code> (and Wave memory when asked). Every tracked repo fix — code, tests, or docs — goes through <code>implement</code> and <code>concept-review</code>.</p>
+    <p>No allowlist/blocklist in a builtin skill, 100% current <code>concept-review.html</code>, and 1:1 match with <code>instruction_levels.py</code>. <em>Cost:</em> a docs-only review finding pays one extra loop pass.</p>
+  </div>
+</lf-component>
 
 <p>
-  <code>test only a repair or a real doubt</code> should drop "a repair" (e.g., <code>reconcile the plan; run a check only when it settles a real doubt</code>), matching <code>realign.md:16-17</code>.
+  Because Jack explicitly picked Q2 b in <code>scratch/explore.html</code>, this is already logged in <code>scratch/questions.md</code> as an open question rather than overturned silently. If Q2 b stays, dropping the unbacked <code>ship-review</code> handoff claim (or teaching <code>ship-review.md</code> to check it) and phrasing the boundary generically instead of enumerating Loopflow's repo layout would still clean up the builtin.
 </p>
+
+<h2>Third mismatch: <code>build.yaml</code> comment drifted from <code>docs/orchestration.md</code></h2>
+
+<p>
+  <code>docs/orchestration.md:154</code> updated the inline comment on <code>realign</code> in its embedded <code>build</code> snippet, while the actual builtin Graph that <code>lf graph customize build</code> copies still carries the old "rework" wording:
+</p>
+
+<lf-file path="rust/loopflow-definitions/src/builtins/task/graph/build.yaml" lines="1-11">
+  <lf-note line="8">Still says "rework, or move on" — the old distinction where small mismatches did not iterate.</lf-note>
+</lf-file>
+
+<lf-diff path="docs/orchestration.md" lines="151-157"></lf-diff>
 
 <h2>Findings</h2>
 
-<lf-component name="decision" id="f1" title="Resolve DECISION_CRITERIA conflict with realign's small-fix iterate rule" recommendation="Fix here">
+<lf-component name="decision" id="f1" title="Keep the non-convergence stop universal in DECISION_CRITERIA and realign.md" recommendation="Fix here">
   <p>
-    <strong>This work.</strong> <code>rust/loopflow-execution/src/graph/output.rs:11-19</code> appends generic loop criteria ("substantial next pass", block when "passes shrink into small increments") after every deciding step's skill prompt — directly contradicting <code>realign</code>'s new rule to iterate on any in-scope code fix, however small.
+    <strong>This work.</strong> In <code>rust/loopflow-execution/src/graph/output.rs:10-19</code>, placing all three bullets behind <em>"Otherwise use these defaults"</em> opted skills with their own loop section (<code>realign</code>, <code>implement</code>, <code>optimize-plan</code>) out of the runner's non-convergence <code>blocked</code> rule. With no hard pass cap, a repeating failed fix loop has no stop instruction.
   </p>
   <p>
-    <strong>Recommendation:</strong> Update <code>DECISION_CRITERIA</code> (2–3 lines in <code>output.rs</code>) so skill-defined loop rules take precedence and <code>blocked</code> applies to passes that repeat without converging, not a targeted review-fix pass. <em>Passed over:</em> hardcoding skill names in <code>output.rs</code> (brittle for custom skills) or leaving the contradiction and hoping models ignore the suffix.
-  </p>
-</lf-component>
-
-<lf-component name="decision" id="f2" title="Scope realign's self-review so Pass 2 does not spin before compress" recommendation="Fix here">
-  <p>
-    <strong>This work.</strong> <code>realign.md:28-31</code> tells <code>realign</code> to perform its own shape review and write simplifications into the plan. After <code>concept-review</code> passes all rows on Pass 2, that instruction can inject new code work and trigger an unwanted Pass 3 right before <code>compress</code>.
-  </p>
-  <p>
-    <strong>Recommendation:</strong> Scope the "read the work once as a reviewer" paragraph in <code>realign.md</code> to runs without a fresh <code>concept-review</code> (standalone <code>realign</code>, <code>refresh</code>, or post-slice without review). When reconciling a <code>concept-review</code>, triage its findings only. <em>Passed over:</em> deleting the paragraph altogether (loses the quick shape check for standalone/<code>refresh</code> runs).
+    <strong>Recommendation:</strong> Split <code>DECISION_CRITERIA</code> so skill-specific rules govern <code>advance</code>/<code>iterate</code> and skill-specific blockers, while <code>blocked</code> on passes repeating without converging, making no progress, or repeating a failure with nothing learned always applies. Mirror that in <code>realign.md:81-82</code>, <code>docs/orchestration.md:190-193</code>, and <code>build_realign_uses_its_own_loop_rule</code> in <code>output.rs</code>. <em>Passed over:</em> adding a hard pass cap in the Graph runner (out of scope and loses legitimate long runs).
   </p>
 </lf-component>
 
-<lf-component name="decision" id="f3" title="Tighten or drop the inline docs-edit exception (Q2 b)" recommendation="Fix here">
+<lf-component name="decision" id="f2" title="Update build.yaml:8 comment to match docs/orchestration.md:154" recommendation="Fix here">
   <p>
-    <strong>This work (design choice).</strong> "Docs by file path" is ambiguous in repos where Markdown carries executable behavior (skills, goldens, <code>AGENTS.md</code>, <code>.lf/qa/</code>), diverges from <code>instruction_levels.py</code>, and still leaves stale "No" rows on <code>scratch/concept-review.html</code> when <code>realign</code> fixes a doc inline.
-  </p>
-  <p>
-    <strong>Recommendation:</strong> Make <code>realign</code> strictly <code>scratch/</code> + Wave memory (zero repo-file exceptions), or keep Q2 b narrowed explicitly to user-facing docs (<code>docs/</code>, <code>README.md</code>) and never skills/goldens/agent guides/comments. Reversible (prompt text only).
+    <strong>This work.</strong> <code>rust/loopflow-definitions/src/builtins/task/graph/build.yaml:8</code> still reads <code># decides: takes the review into the plan; rework, or move on</code> while <code>docs/orchestration.md:154</code> reads <code>code fixes (iterate) or move on (advance)</code>. Align the builtin comment so customized copies carry the new rule.
   </p>
 </lf-component>
 
-<lf-component name="decision" id="f4" title="Drop 'a repair' from AGENTS.md:453" recommendation="Fix here">
+<lf-component name="decision" id="f3" title="Decide whether to drop the inline docs/ and README.md exception in realign" recommendation="Fix here">
   <p>
-    <strong>This work.</strong> <code>AGENTS.md:453</code> says <code>realign: reconcile the plan; test only a repair or a real doubt.</code> Update alongside lines 285 and 410 so the guide doesn't imply <code>realign</code> still repairs code.
+    <strong>This work (design choice, reversible — already in <code>scratch/questions.md</code>).</strong> The built code honors Jack's <code>explore</code> reply (Q2 b), narrowed to <code>docs/</code> and <code>README.md</code>, which forced a Loopflow-specific file blocklist into the generic builtin <code>realign.md</code>, left stale "No" rows on <code>concept-review.html</code>, and added an unbacked <code>ship-review</code> handoff note.
+  </p>
+  <p>
+    <strong>Recommendation:</strong> Make <code>realign</code> strictly <code>scratch/</code> + Wave memory (every tracked repo fix iterates through <code>implement</code> and <code>concept-review</code>). <em>Passed over:</em> keeping Q2 b as built (saves a pass on doc-only findings at the cost of a leaky file rule and stale doc review rows). Leave as built until Jack rules on Q1 below so headless execution does not overturn his <code>explore</code> selection.
   </p>
 </lf-component>
 
-<lf-component name="decision" id="f5" title="Trailing refresh in optimize.yaml has no implement step after it" recommendation="Drop">
+<lf-component name="decision" id="f4" title="Trailing graph: refresh in optimize.yaml has no implement step after it" recommendation="Drop">
   <p>
-    <strong>Separate outcome (if ever needed).</strong> <code>optimize.yaml</code> ends <code>compress → graph: refresh → measure</code>. With plan-only <code>realign</code>, any non-conflict upstream drift found during <code>refresh</code> stays in <code>scratch/plan.md</code> without an <code>implement</code> step to build it. Fixing it would mean changing <code>optimize.yaml</code> (or adding a conditional branch after <code>refresh</code>), which is outside LOO-1125 and unnecessary unless <code>optimize</code> runs actually hit post-sync drift.
+    <strong>Separate outcome (already under <code>## Deferred findings</code>).</strong> <code>optimize.yaml</code> ends <code>compress → graph: refresh → measure</code>, so any non-conflict code drift <code>realign</code> writes into the plan there has no following <code>implement</code> step. Worth adding an <code>implement</code> branch to <code>optimize.yaml</code> only if real optimize runs hit post-sync code drift.
   </p>
 </lf-component>
 
 <h2>Questions</h2>
 
 <div data-choice="q1" data-label="Q1 · Inline doc fixes in realign">
-  <p>1. When <code>concept-review</code> finds a mismatch in user docs (for example, a guide describing old flag behavior) and nothing else needs changing, what should happen?</p>
-  <button data-value="a">A · Route doc fixes back through <code>implement</code> and <code>concept-review</code> too — <code>realign</code> only ever writes <code>scratch/</code> (and Wave memory when asked), so <code>concept-review.html</code> at <code>ship-review</code> never keeps a stale "No" row (Recommended)</button>
-  <button data-value="b">B · Keep Q2 b: let <code>realign</code> edit user-facing docs (<code>docs/</code>, <code>README.md</code>) inline and advance — never skills, goldens, <code>AGENTS.md</code>, QA playbooks, or code comments — accepting a stale "No" row for fixed doc items</button>
+  <p>1. When a design review finds a mismatch in user documentation (for example, a guide or README describing old behavior) and nothing else needs changing, what should happen?</p>
+  <button data-value="a">A · Send doc fixes back through <code>implement</code> and <code>concept-review</code> too — <code>realign</code> only ever edits <code>scratch/</code> (and Wave memory when asked), works the same in every repository without a path allowlist/blocklist, and never leaves a stale "No" row on the review page (Recommended)</button>
+  <button data-value="b">B · Keep inline user-doc fixes in <code>realign</code> (<code>docs/</code> and <code>README.md</code> only) to avoid an extra build pass for doc-only fixes, accepting stale "No" rows for those items and keeping the narrower file boundary</button>
 </div>
 
-<div data-choice="q2" data-label="Q2 · Shared loop-decision prompt in output.rs">
-  <p>2. Every loop decider currently gets generic runner instructions appended at the end of its prompt ("iterate only for a substantial next pass; block when passes shrink into small increments"), which clashes with <code>realign</code> iterating on a small code fix. Include a small update to that runner prompt in LOO-1125 so skill-defined loop rules win?</p>
-  <button data-value="a">A · Yes — update the shared runner decision criteria in LOO-1125 so <code>realign</code>'s own rules aren't overridden at runtime (Recommended)</button>
-  <button data-value="b">B · No — keep LOO-1125 strictly to prompt/doc files and file a separate Task for the runner prompt</button>
-</div>
-
-<div data-question="q3" data-label="Q3 · Anything else before Pass 1">
-  <p>3. Anything else to change in the plan before implementation starts?</p>
-  <textarea rows="3" placeholder="Optional notes, or reply like: 1a 2a"></textarea>
+<div data-question="q2" data-label="Q2 · Anything else before shipping">
+  <p>2. Anything else to change in the post-review loop rules before finishing this Task?</p>
+  <textarea rows="3" placeholder="Optional notes, or reply like: 1a"></textarea>
 </div>

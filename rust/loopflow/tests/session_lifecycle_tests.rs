@@ -212,7 +212,7 @@ impl Fixture {
         {
             assert!(
                 Instant::now() < deadline,
-                "Graph did not stop at its interactive step"
+                "Graph did not reach its breakpoint"
             );
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -618,7 +618,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .create_file(".lf/skills/inspect-parser.md", "Inspect the parser.");
     fixture.repo.create_file(
         ".lf/graphs/proof.yaml",
-        "- inspect-parser\n- interactive: {name: demo, id: review}\n",
+        "- inspect-parser\n- break: review\n",
     );
     fixture.repo.stage_all();
     fixture.repo.commit("Native lifecycle fixture");
@@ -708,8 +708,8 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
             .first()
             .is_some_and(|graph| graph.0.is_some());
         if finished
-            && status["execution"]["work"]["graph"]["position"]
-                == serde_json::json!({"kind": "at", "step": "review"})
+            && status["execution"]["work"]["graph"]["position"]["kind"] == "breakpoint"
+            && status["execution"]["work"]["graph"]["position"]["step"] == "review"
             && status["execution"]["status"] == "active"
         {
             break;
@@ -1663,14 +1663,14 @@ fn declared_agent_can_start_another_tasks_graph() {
     std::fs::create_dir_all(y.join(".lf/graphs")).unwrap();
     std::fs::write(
         y.join(".lf/graphs/switch-proof.yaml"),
-        "- cmd: sync --plan\n- interactive: demo\n",
+        "- cmd: sync --plan\n- break: demo\n",
     )
     .unwrap();
     // The Wave default reads the repository's committed graphs.
     std::fs::create_dir_all(fixture.repo.path().join(".lf/graphs")).unwrap();
     std::fs::write(
         fixture.repo.path().join(".lf/graphs/switch-proof.yaml"),
-        "- cmd: sync --plan\n- interactive: demo\n",
+        "- cmd: sync --plan\n- break: demo\n",
     )
     .unwrap();
     let store =
@@ -1731,8 +1731,8 @@ fn declared_agent_can_start_another_tasks_graph() {
     assert_eq!(graphs[0].0.as_deref(), Some("succeeded"));
     let status = fixture.json(&["desktop", "task", "INF-123", "--json"]);
     assert_eq!(
-        status["execution"]["work"]["graph"]["position"],
-        serde_json::json!({"kind": "at", "step": "demo"})
+        status["execution"]["work"]["graph"]["position"]["step"],
+        "demo"
     );
     let deadline = Instant::now() + PATIENCE;
     let captures = loop {
@@ -2311,6 +2311,21 @@ fn public_taskless_graph_records_distinct_completed_loop_passes() {
             "Decision pass 3. Iterating repeats 2 steps, back to work-proof.",
         ]
     );
+    let compares: Vec<bool> = ["Decision pass 1.", "Decision pass 2."]
+        .iter()
+        .map(|pass| {
+            let text = sessions
+                .values()
+                .find_map(|messages| messages[0]["text"].as_str().filter(|t| t.contains(pass)))
+                .unwrap();
+            text.contains("Compare what the preceding pass")
+        })
+        .collect();
+    assert_eq!(
+        compares,
+        [false, true],
+        "only a later pass has one to compare"
+    );
 }
 
 #[test]
@@ -2565,7 +2580,7 @@ fn promotion_explicit_sources_with_run_keep_the_selected_work() {
         let fixture = Fixture::new(true);
         fixture
             .repo
-            .create_file(".lf/graphs/pause.yaml", "- interactive: demo\n");
+            .create_file(".lf/graphs/pause.yaml", "- break: demo\n");
         fixture.repo.stage_all();
         fixture
             .repo

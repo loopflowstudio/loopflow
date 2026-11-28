@@ -3883,7 +3883,9 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
     fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
     fs::write(
         repo.path().join(".lf/graphs/hold.yaml"),
-        format!("- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+        format!(
+            "- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- break: demo\n"
+        ),
     )
     .unwrap();
     git(repo.path(), &["add", ".lf/graphs/hold.yaml"]);
@@ -4356,7 +4358,9 @@ fn start_hold_run(
         worktree.join(".lf/graphs/hold.yaml"),
         // A first step that finishes, so restarting at the stopped step differs
         // from restarting the route.
-        format!("- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+        format!(
+            "- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- break: demo\n"
+        ),
     )
     .unwrap();
     let mut run = fixture
@@ -6014,6 +6018,7 @@ fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
                 graph: serde_json::to_string(&graph).unwrap(),
                 step: "start".into(),
                 run_start: Some(serde_json::to_string(&cursor).unwrap()),
+                breakpoint: None,
             },
             Some(&plan.remote.test_lf_process()),
         )
@@ -6870,10 +6875,10 @@ fn a_served_status_for_a_task_mini_runs_is_minis_answer() {
     assert_success(&output);
     let text = String::from_utf8(output.stdout).unwrap();
     for line in [
-        "Waiting for you at demo.",
+        "At breakpoint after-demo.",
         "manual  Checkout conversation  closed",
         "parent: LOO-1",
-        "child: LOO-3  Route incoming mail  active at demo",
+        "child: LOO-3  Route incoming mail  active at after-demo",
     ] {
         assert!(text.contains(line), "{text}");
     }
@@ -6919,10 +6924,15 @@ fn a_served_run_for_a_task_mini_runs_starts_it_there() {
         .request(Operation::Write(Mutation::TaskRun {
             directory: plan.local_path.clone(),
             issue: task.to_string(),
-            graph: None,
-            from: None,
-            agent: None,
-            approve: false,
+            request: loopflow_execution::engine::task::TaskRunRequest {
+                graph: None,
+                from: None,
+                agent: None,
+                approve: false,
+                at_arrival: None,
+                decision: None,
+                reason: None,
+            },
         }))
         .unwrap()
         .result;

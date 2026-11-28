@@ -82,6 +82,8 @@ public enum WorkSelectionState: String, CaseIterable, Codable, Sendable, Hashabl
     case open, available, busy, blocked, error, unstarted, idle, active, moving, paused, backlog, working, done
     /// An open Task whose auto setting is on.
     case auto
+    /// An open Active Task parked at a Graph breakpoint.
+    case breakpoint
 }
 
 public struct WorkMemberRef: Codable, Hashable, Sendable {

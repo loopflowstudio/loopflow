@@ -11,6 +11,8 @@ forward, and verify `LF_DESKTOP=<bundle-id> lf desktop state --json` lists a
 window before handing it over. When the change works with the installed server,
 point it at `~/.lf` instead of building `lf`, noting any server change waiting
 on branch `lf`.
+Headless, build and verify the isolated `.dev` bundle without opening a window.
+Put its launch command in `scratch/demo.md`.
 
 ## Disposable Loopflow demos
 

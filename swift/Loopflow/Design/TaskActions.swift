@@ -11,6 +11,8 @@ public struct TaskActions: Equatable {
     public let auto: Auto?
     public let completeReady: Bool
     public let steps: [String]
+    public let breakpointArrival: String?
+    public let breakpointBlocker: String?
     /// The Graph's top-level steps as the workflow track draws them.
     public let track: [TaskGraph.Step]
     /// Where the control's label stands in the track: the step it replaces,
@@ -25,7 +27,7 @@ public struct TaskActions: Equatable {
 
         public func help(issue: String) -> String {
             self == .on
-                ? "lf task auto off \(issue): the run waits at its next interactive step for you, and auto-merge is disarmed"
+                ? "lf task auto off \(issue): the run waits at its next breakpoint for you, and auto-merge is disarmed"
                 : "lf task auto on \(issue): run every remaining step and land it"
         }
     }
@@ -55,7 +57,14 @@ public struct TaskActions: Equatable {
         } else {
             control = outline?.start ?? WorkflowControl(action: .run, label: "Run")
         }
-        primaryRefusal = (control?.action == .run || row.runControl.pausing) ? runRefusal : nil
+        primaryRefusal = (control?.action == .run || control?.action == .continue || row.runControl.pausing) ? runRefusal : nil
+        if !held, let graph, case .breakpoint(_, let arrival, let blocker) = graph.position {
+            breakpointArrival = arrival
+            breakpointBlocker = blocker
+        } else {
+            breakpointArrival = nil
+            breakpointBlocker = nil
+        }
         pause = held ? .unpause : row.lifecycle.isWorking ? .pause : nil
 
         if let graph {
@@ -69,10 +78,11 @@ public struct TaskActions: Equatable {
             sentence = outline?.sentence
         }
 
-        var seen = Set<String>()
-        let interactive = graph?.interactiveSteps ?? outline?.interactiveSteps ?? []
-        let choices = graph == nil && outline == nil ? [] : ["start"] + track.map(\.name) + interactive.map(\.name)
-        steps = choices.filter { seen.insert($0).inserted }
+        // The same track supplies Start from before and after Graph take-up.
+        var seen: Set<String> = [TaskGraph.start]
+        steps = graph == nil && outline == nil ? [] : [TaskGraph.start] + track.compactMap { step in
+            step.kind != .breakpoint && seen.insert(step.name).inserted ? step.name : nil
+        }
     }
 
     public var autoRefusal: String? { auto == .on ? nil : runRefusal }

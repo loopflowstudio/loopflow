@@ -18,7 +18,7 @@ public struct TaskWork: Codable, Sendable, Equatable {
 public struct TaskExecution: Decodable, Sendable, Equatable {
     public let work: TaskWork
     public let startedBy: Starter?
-    /// On: the run stands in at interactive steps. Off: it waits at its
+    /// On: the run continues through breakpoints. Off: it waits at its
     /// landing step until `lf task auto on`. `nil` when nobody set it.
     public let auto: Auto?
     /// The Task this one is stacked on; `nil` when it builds on the default branch.
@@ -123,33 +123,27 @@ public struct TaskOverview: Codable, Sendable, Equatable {
 /// The primary workflow button, read with the saved Graph cursor.
 public struct WorkflowControl: Codable, Sendable, Hashable {
     public enum Action: String, Codable, Sendable {
-        case run, pause, pausing, unpause, resume, wait, done
+        case run, `continue`, pause, pausing, unpause, resume, wait, done
     }
 
     public let action: Action
     public let label: String
 }
 
-/// The graph a Task took up and where the Task stands on it. An interactive
-/// step is where a person takes part in the Task conversation; `start` and
-/// `end` are implicit.
+/// The graph a Task took up and where the Task stands on it. A breakpoint is
+/// where a person takes part in the Task conversation. `start` and `end` are implicit.
 public struct TaskGraph: Codable, Sendable, Equatable {
-    public struct InteractiveStep: Codable, Sendable, Hashable {
-        public let name: String
-        public let skill: String
-        /// One line saying what the person does here; `nil` when the skill says nothing.
-        public let description: String?
-    }
-
-    /// `at` waits at `start`, `end` or an interactive step. `run` is a
-    /// `lf task run` carrying the Task on from `step`, running `at`; one no
+    /// `at` waits at `start`, `end`, a landing wait, or a legacy unconverted stop.
+    /// `breakpoint` is parked at a Graph breakpoint for a specific arrival.
+    /// `run` is a `lf task run` carrying the Task on from `step`, running `at`; one no
     /// longer running stopped, and the next `lf task run` starts it again at `at`.
     public enum Position: Codable, Sendable, Equatable {
         case at(step: String)
+        case breakpoint(step: String, arrival: String, blocker: String?)
         case run(step: String, at: String, lfProcessId: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
-            case kind, step, at, running
+            case kind, step, at, running, arrival, blocker
             case lfProcessId = "lf_process_id"
         }
 
@@ -158,6 +152,10 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             switch try container.decode(String.self, forKey: .kind) {
             case "at":
                 self = .at(step: try container.decode(String.self, forKey: .step))
+            case "breakpoint":
+                self = .breakpoint(step: try container.decode(String.self, forKey: .step),
+                                   arrival: try container.decode(String.self, forKey: .arrival),
+                                   blocker: try container.decode(String?.self, forKey: .blocker))
             case "run":
                 self = .run(
                     step: try container.decode(String.self, forKey: .step),
@@ -176,6 +174,11 @@ public struct TaskGraph: Codable, Sendable, Equatable {
             case .at(let step):
                 try container.encode("at", forKey: .kind)
                 try container.encode(step, forKey: .step)
+            case .breakpoint(let step, let arrival, let blocker):
+                try container.encode("breakpoint", forKey: .kind)
+                try container.encode(step, forKey: .step)
+                try container.encode(arrival, forKey: .arrival)
+                try container.encode(blocker, forKey: .blocker)
             case .run(let step, let at, let lfProcessId, let running):
                 try container.encode("run", forKey: .kind)
                 try container.encode(step, forKey: .step)
@@ -188,16 +191,21 @@ public struct TaskGraph: Codable, Sendable, Equatable {
         /// Where the Task waits, or the step its run left.
         public var step: String {
             switch self {
-            case .at(let step), .run(let step, _, _, _): step
+            case .at(let step), .breakpoint(let step, _, _), .run(let step, _, _, _): step
             }
         }
     }
 
     /// One top-level step of the Graph, as the workflow line shows it.
     public struct Step: Codable, Sendable, Hashable {
+        public enum Kind: String, Codable, Sendable, Hashable {
+            case stage
+            case stageWithBreakpoint = "stage_with_breakpoint"
+            case breakpoint
+        }
+
         public let name: String
-        /// A person takes part somewhere inside it, XOR paths included.
-        public let interactive: Bool
+        public let kind: Kind
     }
 
     public static let start = "start"
@@ -205,26 +213,29 @@ public struct TaskGraph: Codable, Sendable, Equatable {
 
     public let name: String
     public let control: WorkflowControl
-    public let interactiveSteps: [InteractiveStep]
+    /// Every breakpoint in order, including composed Graphs and XOR paths.
+    public let breakpoints: [String]
     public let position: Position
     /// The Graph's top-level steps in order.
     public let steps: [Step]
     /// The index in `steps` of the step the Task stands in; `nil` at `start` and `end`.
     public let currentStep: Int?
     /// Where the Task stands, in Rust's words: "build is running implement.
-    /// You are next needed at ship-review."
+    /// You are next needed at after-ship-review."
     public let sentence: String
 
     enum CodingKeys: String, CodingKey {
-        case name, control, position, steps, sentence
-        case interactiveSteps = "interactive_steps"
+        case name, control, breakpoints, position, steps, sentence
         case currentStep = "current_step"
     }
 
-    /// The interactive step a person takes part at now.
-    public var waitingStep: InteractiveStep? {
-        guard case .at(let step) = position else { return nil }
-        return interactiveSteps.first { $0.name == step }
+    /// The breakpoint where a person takes part now (or a legacy capture's stop).
+    public var waitingStep: String? {
+        switch position {
+        case .breakpoint(let step, _, _): return step
+        case .at(let step): return breakpoints.first { $0 == step }
+        case .run: return nil
+        }
     }
 }
 
@@ -235,7 +246,7 @@ extension TaskGraph {
         self.init(
             name: try container.decode(String.self, forKey: .name),
             control: try container.decode(WorkflowControl.self, forKey: .control),
-            interactiveSteps: try container.decode([InteractiveStep].self, forKey: .interactiveSteps),
+            breakpoints: try container.decode([String].self, forKey: .breakpoints),
             position: try container.decode(Position.self, forKey: .position),
             steps: try container.decode([Step].self, forKey: .steps),
             currentStep: try container.decode(Int?.self, forKey: .currentStep),

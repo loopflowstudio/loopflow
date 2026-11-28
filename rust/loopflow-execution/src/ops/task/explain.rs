@@ -7,24 +7,18 @@ use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::ops::run::WorkSelection;
 use crate::store::SharedStore;
 
-use super::{select_task_run, TaskProcessOptions, TaskRunSelection};
+use super::{select_task_run, SelectedGraph, TaskProcessOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskRunAction {
-    /// Run `graph` from the step `from` until the interactive step
+    /// Run `graph` from the step `from` until the breakpoint
     /// `stops_at`, or to the end when `None`.
     Run {
         graph: String,
         take_up: bool,
         from: String,
         stops_at: Option<String>,
-    },
-    /// Put the Task at the interactive step `step`, running nothing.
-    Wait {
-        graph: String,
-        take_up: bool,
-        step: String,
     },
     /// Nothing remains: the Task reaches `end`, requesting completion.
     End { graph: String, take_up: bool },
@@ -58,11 +52,6 @@ impl TaskRunExplanation {
                     None => "to the end".into(),
                 }
             ),
-            Some(TaskRunAction::Wait {
-                graph,
-                take_up,
-                step,
-            }) => format!("{}: wait at {step}; run nothing", take(graph, *take_up)),
             Some(TaskRunAction::End { graph, take_up }) => {
                 format!("{}: nothing remains; reach end", take(graph, *take_up))
             }
@@ -95,7 +84,7 @@ pub async fn explain_task_run(
     cwd: &Path,
     selection: WorkSelection<'_>,
     options: &TaskProcessOptions,
-    through: bool,
+    mode: super::TaskRunMode,
     merges: fn(&[String]) -> bool,
 ) -> TaskRunExplanation {
     let resolution = crate::ops::context::explain_context(store, cwd, selection, None).await;
@@ -105,7 +94,7 @@ pub async fn explain_task_run(
         impediments: Vec::new(),
         unavailable: Vec::new(),
     };
-    if let Err(error) = read_task_run(store, options, through, &mut report, merges).await {
+    if let Err(error) = read_task_run(store, options, mode, &mut report, merges).await {
         report.unavailable.push(error.to_string());
     }
     report
@@ -114,7 +103,7 @@ pub async fn explain_task_run(
 async fn read_task_run(
     store: &SharedStore,
     options: &TaskProcessOptions,
-    through: bool,
+    mode: super::TaskRunMode,
     report: &mut TaskRunExplanation,
     merges: fn(&[String]) -> bool,
 ) -> anyhow::Result<()> {
@@ -156,29 +145,19 @@ async fn read_task_run(
             checkout.display()
         );
     }
-    let choice = match select_task_run(
-        store,
-        &task,
-        checkout,
-        options.graph.as_deref(),
-        options.from.as_deref(),
-        false,
-        merges,
-    ) {
+    let choice = match select_task_run(store, &task, checkout, options, merges) {
         Ok(choice) => choice,
         Err(error) => {
             report.impediments.push(error.to_string());
             return Ok(());
         }
     };
-    let TaskRunSelection {
-        graph,
-        take_up,
-        start,
-        ..
-    } = choice;
+    let (graph, take_up) = match &choice.graph {
+        SelectedGraph::TakeUp(graph) => (graph, true),
+        SelectedGraph::Continue(row) => (&row.graph, false),
+    };
     let name = graph.name.clone();
-    report.action = Some(match start {
+    report.action = Some(match choice.start {
         None => {
             report.unavailable.push("Arrival requests planning completion; PR gates and eligible checkout cleanup are evaluated during settlement, not by this preview".into());
             TaskRunAction::End {
@@ -186,21 +165,11 @@ async fn read_task_run(
                 take_up,
             }
         }
-        Some(start) => match graph.interactive_at(&start.place).filter(|_| !through) {
-            Some(step) => TaskRunAction::Wait {
-                graph: name,
-                take_up,
-                step: step.into(),
-            },
-            None => TaskRunAction::Run {
-                from: graph.step_name(&start.place),
-                stops_at: (!through)
-                    .then(|| graph.next_interactive(&start.place))
-                    .flatten()
-                    .map(str::to_owned),
-                graph: name,
-                take_up,
-            },
+        Some(start) => TaskRunAction::Run {
+            from: graph.step_name(&start.place),
+            stops_at: mode.next_stop(graph, &start.place).map(str::to_owned),
+            graph: name,
+            take_up,
         },
     });
     report

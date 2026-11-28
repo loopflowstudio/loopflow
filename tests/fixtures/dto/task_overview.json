@@ -17,21 +17,9 @@
   ],
   "graph": {
     "name": "feature",
-    "control": {
-      "action": "wait",
-      "label": "Waiting: land"
-    },
-    "interactive_steps": [
-      {
-        "name": "review-design",
-        "skill": "review-design",
-        "description": "you review the plan"
-      },
-      {
-        "name": "demo",
-        "skill": "demo",
-        "description": "you try the change"
-      }
+    "breakpoints": [
+      "review-design",
+      "demo"
     ],
     "position": {
       "kind": "at",
@@ -40,27 +28,31 @@
     "steps": [
       {
         "name": "plan",
-        "interactive": false
+        "kind": "stage"
       },
       {
         "name": "review-design",
-        "interactive": true
+        "kind": "stage_with_breakpoint"
       },
       {
         "name": "build",
-        "interactive": false
+        "kind": "stage"
       },
       {
         "name": "demo",
-        "interactive": true
+        "kind": "breakpoint"
       },
       {
         "name": "land",
-        "interactive": false
+        "kind": "stage"
       }
     ],
     "current_step": 4,
-    "sentence": "Waiting at land: auto is off."
+    "sentence": "Waiting at land: auto is off.",
+    "control": {
+      "action": "wait",
+      "label": "Waiting: land"
+    }
   },
   "graph_processes": [
     {

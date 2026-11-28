@@ -23,9 +23,10 @@ Keep the installed server and schema for the live run.
 
 For CLI and server changes, use the branch `lf` with a
 [private Machine and repository](../qa/served-launches.md).
-Before the first Start, add `.lf/graphs/qa.yaml` (`- cmd: help task` then
-`- interactive: demo`), set `graph: qa` in `.lf/config.yaml`, and commit and
-push to the disposable repository's origin.
+Before the first Start, add `.lf/graphs/qa-start.yaml` (`- cmd: help task`
+then `- break`), set `graph: qa-start` in `.lf/config.yaml`, and commit and
+push to the disposable repository's origin. Don't name it `qa`: a bare step
+resolves to a Graph before a skill, so it would replace `build`'s `qa` step.
 Then `lf task create '<request>' --run --json` (stdin closed) or a served
 `task.create {run: true}` admits the Task, holds its conversation and starts
 the Graph from setup. Pass the words positionally: `--title` alone records no

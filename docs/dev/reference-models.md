@@ -47,9 +47,10 @@ boundary executors remain domain-specific because their settlement rules differ.
 
 - **Skill runner:** execute one reusable instruction set through one provider
   harness and leave local evidence.
-- **Graph composition:** sequence Skill and mechanical Command nodes, route Xor
-  branches and follow backward edges. `interactive:` marks the steps where a
-  person takes part; Task runs stop there for their conversation.
+- **Graph composition:** sequence Skill, mechanical Command, and Breakpoint
+  nodes, route Xor branches and follow backward edges. `- break` (or named
+  `- break: <name>`) marks a breakpoint where a Task run parks and wakes the
+  Task conversation to review what the preceding step produced.
 - **Durable planning:** preserve Wave and Task intent across crashes;
   each Task Graph is a fresh Graph run and the steps it starts.
 - **Task delivery:** attach one active remote branch, worktree, and PR to concrete Work.
@@ -177,7 +178,13 @@ planning history; `lf set wave.graph` changes it.
 Task status and `plan list` separate `graph_name` with its `graph_source`
 (`task`, `wave`, `repository` or `builtin`), `latest_graph_process`,
 `execution` and `run_control`. Task work and overview carry `graph`, a
-`TaskGraph` of name, interactive steps and position. The latest
+`TaskGraph` of name, breakpoints and position (`at`, `breakpoint` with its
+arrival ID and nullable blocker, or `run`). Each workflow track step is a
+`stage`, a `stage_with_breakpoint`, or a standalone `breakpoint`. A Task
+parked at a breakpoint carries
+`SelectionState::Breakpoint`, puts its condition in Now (`waiting`, or
+`blocked` when the pending verdict is blocked) even when the checkout is clear,
+and sorts to the top of status-sorted Working Tasks. The latest
 `GraphProcessDetail` is ordinary execution evidence, including completed graphs,
 not a second Task lifecycle. Task work and subscription carry `graph_processes`. Session
 membership references the exact `graph_lf_process_id`; a Task graph's run names

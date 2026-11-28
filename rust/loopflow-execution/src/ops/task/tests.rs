@@ -45,6 +45,31 @@ fn task_wait_condition_releases_terminal_tasks() {
     };
     assert!(!read(TaskWaitUntil::Terminal).1);
     assert!(!read(TaskWaitUntil::Open).1);
+    assert!(!read(TaskWaitUntil::Breakpoint).1);
+    // A parked Task releases `--until breakpoint`, while `--until submitted` waits for an open PR.
+    store
+        .sqlite
+        .take_up_task_graph(&fixture.task.id, "{}")
+        .unwrap();
+    let park = |breakpoint: Option<&str>| {
+        store
+            .sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_graphs SET breakpoint=?2 WHERE task_id=?1",
+                rusqlite::params![fixture.task.id.as_str(), breakpoint],
+            )
+            .unwrap();
+    };
+    park(Some(r#"{"id":"arrival"}"#));
+    assert!(read(TaskWaitUntil::Breakpoint).1);
+    assert!(!read(TaskWaitUntil::Open).1);
+    assert!(!read(TaskWaitUntil::Terminal).1);
+    park(None);
+    assert!(!read(TaskWaitUntil::Breakpoint).1);
+    assert!(!read(TaskWaitUntil::Open).1);
     let mut pr = runtime
         .block_on(store.active_task_pr(&fixture.task.id))
         .unwrap()
@@ -61,7 +86,24 @@ fn task_wait_condition_releases_terminal_tasks() {
     });
     runtime.block_on(store.update_task_pr(&pr)).unwrap();
     assert!(read(TaskWaitUntil::Open).1);
+    // With an open PR and a live Graph running toward a breakpoint, `--until breakpoint` keeps waiting.
+    assert!(!read(TaskWaitUntil::Breakpoint).1);
     assert!(!read(TaskWaitUntil::Terminal).1);
+    // Once parked at after-ship-review with the PR still open, `--until breakpoint` returns.
+    park(Some(r#"{"id":"arrival-2"}"#));
+    assert!(read(TaskWaitUntil::Breakpoint).1);
+    park(None);
+    // Reaching `end` also releases `--until breakpoint`.
+    store
+        .sqlite
+        .set_task_graph_step(&fixture.task.id, crate::task_graph::END)
+        .unwrap();
+    assert!(read(TaskWaitUntil::Breakpoint).1);
+    store
+        .sqlite
+        .set_task_graph_step(&fixture.task.id, crate::task_graph::START)
+        .unwrap();
+    assert!(!read(TaskWaitUntil::Breakpoint).1);
     pr.publication = None;
     runtime.block_on(store.update_task_pr(&pr)).unwrap();
     for (terminal, open) in [
@@ -82,6 +124,10 @@ fn task_wait_condition_releases_terminal_tasks() {
         assert!(
             read(TaskWaitUntil::Open).1,
             "terminal also releases submitted waits"
+        );
+        assert!(
+            read(TaskWaitUntil::Breakpoint).1,
+            "terminal also releases breakpoint waits"
         );
         store
             .sqlite
@@ -565,9 +611,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
             &fixture.store,
             &fixture.task,
             adopted.path(),
-            None,
-            None,
-            false,
+            &Default::default(),
             |_| false,
         )
         .unwrap_err();
@@ -609,9 +653,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         &fixture.store,
         &fixture.task,
         adopted.path(),
-        None,
-        None,
-        false,
+        &Default::default(),
         |_| false
     )
     .is_ok());
@@ -3089,6 +3131,257 @@ fn pr_mutation_lock_refuses_a_concurrent_writer() {
 }
 
 #[test]
+fn breakpoint_in_a_task_terminal_still_waits_for_its_conversation() {
+    let checkout = tempfile::tempdir().unwrap();
+    let graph = crate::task_graph::CapturedGraph::load("research", checkout.path())
+        .unwrap()
+        .unwrap();
+    let start = crate::task_graph::Place::default();
+    assert_eq!(
+        super::TaskRunMode::Stop.next_stop(&graph, &start),
+        Some("after-research")
+    );
+    assert_eq!(super::TaskRunMode::Headless.next_stop(&graph, &start), None);
+}
+
+#[tokio::test]
+async fn breakpoint_edges_cover_launch_failure_terminal_auto_race_and_named_restart() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let fx = task_fixture_at("EDGE-1", repo.path().canonicalize().unwrap()).await;
+    let checkout = repo.path().canonicalize().unwrap();
+    std::fs::create_dir_all(checkout.join(".lf/graphs")).unwrap();
+    std::fs::create_dir_all(checkout.join(".lf/skills")).unwrap();
+    for skill in ["step-a", "step-b"] {
+        std::fs::write(
+            checkout.join(format!(".lf/skills/{skill}.md")),
+            format!("Fixture {skill}"),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        checkout.join(".lf/graphs/edges.yaml"),
+        "- step:\n    id: first_a\n    name: step-a\n- break: after-a\n- step:\n    id: second_a\n    name: step-a\n- step-b\n- break: finish\n",
+    )
+    .unwrap();
+    let graph = crate::task_graph::CapturedGraph::load("edges", &checkout)
+        .unwrap()
+        .unwrap();
+    crate::store::task_work::take_up_task_graph(&fx.store.sqlite, &fx.task.id, &graph).unwrap();
+
+    let park = |store: &crate::store::Store,
+                step: &str,
+                index: usize|
+     -> loopflow_model::id::LfProcessId {
+        let carrier = loopflow_model::id::LfProcessId::new();
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&carrier],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE task_graphs SET breakpoint=NULL,lf_process_id=?2,run_start='{\"index\":0}' WHERE task_id=?1",
+                rusqlite::params![fx.task.id.as_str(), carrier.as_str()],
+            )
+            .unwrap();
+        }
+        let arrival = crate::store::task_work::BreakpointArrival {
+            id: carrier.clone(),
+            cursor: crate::graph::runner::ExecutionCursor {
+                index,
+                ..Default::default()
+            },
+        };
+        store
+            .sqlite
+            .arrive_task_graph(
+                &fx.task.id,
+                &carrier,
+                step,
+                Some((
+                    &serde_json::to_string(&arrival).unwrap(),
+                    "Ready for review",
+                )),
+            )
+            .unwrap();
+        carrier
+    };
+
+    // 1. Launch failure after accepting a reply retains the reply and next step for retry.
+    let first = park(&fx.store, "after-a", 1);
+    let reply = "Use the compact variant";
+    let selection = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(first.clone()),
+            reason: Some(reply.into()),
+            ..Default::default()
+        },
+        |_| false,
+    )
+    .unwrap();
+    let start = selection.start.expect("advances to second_a");
+    assert_eq!(start.cursor.index, 2);
+    assert_eq!(start.cursor.progress.handoff.as_deref(), Some(reply));
+    assert_eq!(start.cursor.progress.direction, None);
+    // Simulate carrier claiming the breakpoint then dying before running step 2.
+    let dead_carrier = loopflow_model::id::LfProcessId::new();
+    let row = crate::store::task_work::task_graph_row(&fx.store.sqlite, &fx.task.id)
+        .unwrap()
+        .unwrap();
+    assert!(crate::store::task_work::start_task_graph_run(
+        &fx.store.sqlite,
+        &fx.task.id,
+        &row,
+        &start.cursor,
+        (
+            &dead_carrier,
+            &loopflow_storage::graph_process::ExecutionStart::reserved(1)
+        ),
+    )
+    .unwrap());
+    fx.store
+        .sqlite
+        .finish_run(
+            loopflow_storage::graph_process::RunOwner::TaskCarrier,
+            &dead_carrier,
+            2,
+            Some(1),
+            Some("launch failed"),
+        )
+        .unwrap();
+    // Plain retry picks up the saved cursor at index 2 with the accepted reply intact.
+    let retry = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions::default(),
+        |_| false,
+    )
+    .unwrap();
+    let retry_start = retry.start.expect("resumes at second_a");
+    assert_eq!(retry_start.cursor.index, 2);
+    assert_eq!(retry_start.cursor.progress.handoff.as_deref(), Some(reply));
+    assert_eq!(retry_start.cursor.progress.direction, None);
+
+    // 2. Deliberate restart targeting a named occurrence with the arrival the primary saw.
+    let second = park(&fx.store, "after-a", 1);
+    let restart = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(second.clone()),
+            from: Some("second_a".into()),
+            reason: Some("Restart at second_a".into()),
+            ..Default::default()
+        },
+        |_| false,
+    )
+    .unwrap();
+    let restart_start = restart.start.expect("targets second_a");
+    assert_eq!(restart_start.cursor.index, 2);
+    assert_eq!(
+        restart_start.cursor.progress.handoff.as_deref(),
+        Some("Restart at second_a")
+    );
+    assert_eq!(restart_start.cursor.progress.direction, None);
+
+    // 3. Auto racing a late reply at a repeated marker: only the winning transition claims it.
+    let visit_one = park(&fx.store, "after-a", 1);
+    let visit_two = park(&fx.store, "after-a", 1);
+    assert_ne!(visit_one, visit_two);
+    let late = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(visit_one.clone()),
+            reason: Some("Late reply for visit 1".into()),
+            ..Default::default()
+        },
+        |_| false,
+    );
+    assert!(
+        late.unwrap_err()
+            .to_string()
+            .contains("that review has ended"),
+        "stale arrival at repeated marker is refused"
+    );
+    // And if two callers read visit_two simultaneously, only one claim succeeds.
+    let snapshot = crate::store::task_work::task_graph_row(&fx.store.sqlite, &fx.task.id)
+        .unwrap()
+        .unwrap();
+    let winner = loopflow_model::id::LfProcessId::new();
+    let loser = loopflow_model::id::LfProcessId::new();
+    assert!(crate::store::task_work::start_task_graph_run(
+        &fx.store.sqlite,
+        &fx.task.id,
+        &snapshot,
+        &restart_start.cursor,
+        (
+            &winner,
+            &loopflow_storage::graph_process::ExecutionStart::reserved(1)
+        ),
+    )
+    .unwrap());
+    assert!(!crate::store::task_work::start_task_graph_run(
+        &fx.store.sqlite,
+        &fx.task.id,
+        &snapshot,
+        &restart_start.cursor,
+        (
+            &loser,
+            &loopflow_storage::graph_process::ExecutionStart::reserved(1)
+        ),
+    )
+    .unwrap());
+
+    // 4. Terminal settlement: continuing a terminal breakpoint reaches end, requests
+    //    completion, and refuses a duplicate continuation of the same arrival.
+    let final_visit = park(&fx.store, "finish", 4);
+    let terminal = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(final_visit.clone()),
+            ..Default::default()
+        },
+        |_| false,
+    )
+    .unwrap();
+    assert!(terminal.start.is_none(), "continuing finish reaches end");
+    assert!(fx
+        .store
+        .sqlite
+        .end_task_graph(&fx.task.id, Some(&final_visit))
+        .unwrap());
+    assert!(!fx
+        .store
+        .sqlite
+        .end_task_graph(&fx.task.id, Some(&final_visit))
+        .unwrap());
+    let ended_row = fx
+        .store
+        .sqlite
+        .task_graph_row(&fx.task.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(ended_row.step, "end");
+    assert!(ended_row.breakpoint.is_none());
+    assert!(fx
+        .store
+        .sqlite
+        .task_completion_pending(&fx.task.id)
+        .unwrap()
+        .is_some());
+}
+
+#[test]
 fn abandoning_children_waits_for_live_work_but_not_an_idle_conversation() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -3269,4 +3562,319 @@ async fn a_completion_refused_inside_the_transaction_is_a_conflict() {
         fixture.store.work_status(&fixture.work).await.unwrap(),
         WorkStatus::Ready
     );
+}
+
+#[tokio::test]
+async fn breakpoint_loop_decisions_follow_graph_topology_and_scope_replies() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let checkout = repo.path().canonicalize().unwrap();
+    let fx = task_fixture_at("LOOP-1", checkout.clone()).await;
+    let graph = crate::task_graph::CapturedGraph::load("feature", &checkout)
+        .unwrap()
+        .unwrap();
+    fx.store
+        .sqlite
+        .take_up_task_graph(&fx.task.id, &serde_json::to_string(&graph).unwrap())
+        .unwrap();
+
+    let park_at = |step: &str, verdict: Option<crate::graph::transitions::GraphVerdict>| {
+        let place = graph.find(step).unwrap();
+        let mut cursor = place.cursor();
+        cursor.leaf_mut().progress.verdict = verdict;
+        let carrier = loopflow_model::id::LfProcessId::new();
+        {
+            let conn = fx.store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
+                rusqlite::params![
+                    carrier.as_str(),
+                    loopflow_model::id::TraceId::new().as_str()
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE task_graphs SET lf_process_id=?2, run_start='{}', breakpoint=NULL WHERE task_id=?1",
+                rusqlite::params![fx.task.id.as_str(), carrier.as_str()],
+            )
+            .unwrap();
+        }
+        let arrival = crate::store::task_work::BreakpointArrival {
+            id: carrier.clone(),
+            cursor,
+        };
+        fx.store
+            .sqlite
+            .arrive_task_graph(
+                &fx.task.id,
+                &carrier,
+                step,
+                Some((&serde_json::to_string(&arrival).unwrap(), "Review ready")),
+            )
+            .unwrap();
+        carrier
+    };
+
+    // 1. CLI `--from after-ship-review` parks with `verdict: None`; `--decision iterate --reason`
+    //    must still work because `after-ship-review` has a backward edge in the Graph topology.
+    let ship_arrival = park_at("after-ship-review", None);
+    let missing_reason = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(ship_arrival.clone()),
+            decision: Some(crate::graph::transitions::GraphDecision::Iterate),
+            ..Default::default()
+        },
+        |_| false,
+    );
+    assert!(missing_reason
+        .unwrap_err()
+        .to_string()
+        .contains("requires `--reason <direction>`"));
+
+    let iterate = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(ship_arrival.clone()),
+            decision: Some(crate::graph::transitions::GraphDecision::Iterate),
+            reason: Some("Fix the failing edge test".into()),
+            ..Default::default()
+        },
+        |_| false,
+    )
+    .unwrap();
+    let iterate_start = iterate.start.expect("loops back into build");
+    assert_eq!(
+        iterate_start.cursor.leaf().progress.direction.as_deref(),
+        Some("Fix the failing edge test")
+    );
+    assert_eq!(iterate_start.cursor.leaf().progress.handoff, None);
+
+    // 2. `--decision advance --reason` at `after-ship-review` puts the reply into one-step
+    //    `handoff` and clears `direction` so it never leaks past `deliver` into `verify`.
+    let ship_advance = park_at(
+        "after-ship-review",
+        Some(crate::graph::transitions::GraphVerdict {
+            decision: crate::graph::transitions::GraphDecision::Iterate,
+            summary: "earlier iteration".into(),
+        }),
+    );
+    let advance = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(ship_advance.clone()),
+            decision: Some(crate::graph::transitions::GraphDecision::Advance),
+            reason: Some("Land with follow-up note".into()),
+            ..Default::default()
+        },
+        |_| false,
+    )
+    .unwrap();
+    let advance_start = advance.start.expect("advances to deliver");
+    assert_eq!(advance_start.cursor.leaf().progress.direction, None);
+    assert_eq!(
+        advance_start.cursor.leaf().progress.handoff.as_deref(),
+        Some("Land with follow-up note")
+    );
+
+    // 3. Non-loop breakpoint (`after-explore`) refuses `--decision iterate`.
+    let explore_arrival = park_at("after-explore", None);
+    let non_loop = super::select_task_run(
+        &fx.store,
+        &fx.task,
+        &checkout,
+        &super::TaskProcessOptions {
+            at_arrival: Some(explore_arrival.clone()),
+            decision: Some(crate::graph::transitions::GraphDecision::Iterate),
+            reason: Some("nope".into()),
+            ..Default::default()
+        },
+        |_| false,
+    );
+    assert!(non_loop
+        .unwrap_err()
+        .to_string()
+        .contains("this breakpoint has no loop decision"));
+
+    // 4. Breakpoint reply comment is stored once in task_comments without creating a duplicate steer.
+    super::append_breakpoint_reply_comment(
+        &fx.store,
+        &fx.task,
+        "1b — compact layout",
+        &explore_arrival,
+    )
+    .unwrap();
+    let comments = fx.store.task_comments(&fx.task.id).unwrap();
+    assert!(comments.comments.iter().any(|c| {
+        c.body.starts_with("1b — compact layout")
+            && c.body.contains("loopflow-breakpoint:")
+            && !c.body.contains("loopflow-steer:")
+    }));
+    let steers = fx.store.task_steers(&fx.task.id).await.unwrap();
+    assert!(
+        !steers
+            .iter()
+            .any(|steer| steer.text.contains("1b — compact layout")),
+        "breakpoint reply must not create a duplicate steer: {steers:?}"
+    );
+}
+
+#[tokio::test]
+async fn task_snapshot_owns_breakpoint_actions_across_pr_phases_and_blocked_auto() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let checkout = repo.path().canonicalize().unwrap();
+    let fx = task_fixture_at("SNAP-BP-1", checkout.clone()).await;
+    let graph = crate::task_graph::CapturedGraph::load("feature", &checkout)
+        .unwrap()
+        .unwrap();
+    fx.store
+        .sqlite
+        .take_up_task_graph(&fx.task.id, &serde_json::to_string(&graph).unwrap())
+        .unwrap();
+    let local = fx.store.sqlite.saved_local_machine().unwrap().id;
+
+    let park = |step: &str,
+                verdict: Option<crate::graph::transitions::GraphVerdict>,
+                exit_blocked: bool| {
+        let mut cursor = graph.find(step).unwrap().cursor();
+        cursor.leaf_mut().progress.verdict = verdict.clone();
+        let carrier = loopflow_model::id::LfProcessId::new();
+        {
+            let conn = fx.store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
+                rusqlite::params![
+                    carrier.as_str(),
+                    loopflow_model::id::TraceId::new().as_str()
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE task_graphs SET lf_process_id=?2, run_start='{}', breakpoint=NULL WHERE task_id=?1",
+                rusqlite::params![fx.task.id.as_str(), carrier.as_str()],
+            )
+            .unwrap();
+        }
+        let arrival = crate::store::task_work::BreakpointArrival {
+            id: carrier.clone(),
+            cursor,
+        };
+        fx.store
+            .sqlite
+            .arrive_task_graph(
+                &fx.task.id,
+                &carrier,
+                step,
+                Some((&serde_json::to_string(&arrival).unwrap(), "Review ready")),
+            )
+            .unwrap();
+        if exit_blocked {
+            let graph_proc = loopflow_model::id::LfProcessId::new();
+            let compiled = crate::graph::compiled::compile("feature", &graph.steps);
+            fx.store
+                .sqlite
+                .record_graph(
+                    &graph_proc,
+                    &compiled,
+                    Some(&fx.task.id),
+                    &loopflow_storage::graph_process::ExecutionStart::reserved(1),
+                    Some(&checkout.display().to_string()),
+                    Some(&checkout.display().to_string()),
+                    None,
+                )
+                .unwrap();
+            let reason = verdict
+                .as_ref()
+                .map(|v| format!("{}{}", crate::process::GraphHeld::BLOCKED_PREFIX, v.summary))
+                .unwrap();
+            fx.store
+                .sqlite
+                .finish_run(
+                    loopflow_storage::graph_process::RunOwner::GraphRun,
+                    &graph_proc,
+                    2,
+                    Some(i32::from(crate::process::GraphHeld::EXIT)),
+                    Some(&reason),
+                )
+                .unwrap();
+        }
+    };
+
+    // 1. Open PR + parked at after-ship-review recommends Run with breakpoint sentence, NOT `lf land`.
+    let mut pr = fx.store.active_task_pr(&fx.task.id).await.unwrap().unwrap();
+    pr.publication = Some(PrPublication {
+        requested_at: time::OffsetDateTime::now_utc(),
+        presentation: Some(PrPresentation {
+            title: "T".into(),
+            body: "B".into(),
+            head_sha: "abc".into(),
+        }),
+        github: Some(GithubPr {
+            number: 42,
+            url: "https://github.com/example/repo/pull/42".into(),
+            head_sha: Some("abc".into()),
+        }),
+        merge: None,
+    });
+    fx.store.update_task_pr(&pr).await.unwrap();
+    park("after-ship-review", None, false);
+    let snap = super::snapshot::snapshot_here(&fx.store, fx.task.clone(), local.clone(), |_| false)
+        .await
+        .unwrap();
+    assert_eq!(
+        snap.actions.recommended,
+        Some(crate::ops::task_actions::TaskAction::Run)
+    );
+    assert_eq!(snap.actions.reason, "At breakpoint after-ship-review.");
+    assert!(matches!(
+        snap.work.graph.as_ref().unwrap().position,
+        crate::task_graph::TaskGraphPosition::Breakpoint { blocker: None, .. }
+    ));
+
+    // Merging a PR while this Graph is parked leaves the review available.
+    pr.merge_commit = Some("deadbeef".into());
+    fx.store.update_task_pr(&pr).await.unwrap();
+    park("after-explore", None, false);
+    let snap = super::snapshot::snapshot_here(&fx.store, fx.task.clone(), local.clone(), |_| false)
+        .await
+        .unwrap();
+    assert_eq!(
+        snap.actions.recommended,
+        Some(crate::ops::task_actions::TaskAction::Run)
+    );
+    assert_eq!(snap.actions.reason, "At breakpoint after-explore.");
+
+    // 3. Blocked worker verdict under auto:on/-b (non-zero GraphHeld::EXIT) -> NoAction with blocked sentence
+    //    and the worker's blocker on the position.
+    pr.merge_commit = None;
+    fx.store.update_task_pr(&pr).await.unwrap();
+    park(
+        "after-ship-review",
+        Some(crate::graph::transitions::GraphVerdict {
+            decision: crate::graph::transitions::GraphDecision::Blocked,
+            summary: "Two incompatible schema migrations".into(),
+        }),
+        true,
+    );
+    let snap = super::snapshot::snapshot_here(&fx.store, fx.task.clone(), local, |_| false)
+        .await
+        .unwrap();
+    assert_eq!(
+        snap.actions.recommended,
+        Some(crate::ops::task_actions::TaskAction::NoAction)
+    );
+    assert_eq!(
+        snap.actions.reason,
+        "At breakpoint after-ship-review. Blocked: Two incompatible schema migrations"
+    );
+    assert!(matches!(
+        &snap.work.graph.as_ref().unwrap().position,
+        crate::task_graph::TaskGraphPosition::Breakpoint { blocker: Some(reason), .. }
+            if reason == "Two incompatible schema migrations"
+    ));
 }

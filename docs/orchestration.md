@@ -125,7 +125,7 @@ Run any Graph directly, headless, interactively, or on another Machine:
 
 ```bash
 lf -b graph ship-api                     # headless end to end
-lf -i graph ship-api                     # every step interactive
+lf -i graph feature                      # review at breakpoints in this terminal
 lf --machine mini -b graph ship-api      # run on a remote Machine
 lf graph ship-api --context --json       # preview first step's context without launching
 ```
@@ -140,9 +140,10 @@ Mix Skills and mechanical `cmd:` steps:
 
 ### Loops (`loop:`)
 
-A `loop:` block repeats when its final step returns `iterate`. The built-in
-`build` Graph puts implementation in an inner loop and design review in an
-outer loop, then runs `compress` and `qa` once after the design settles.
+A `loop:` block repeats when its deciding Skill returns `iterate`. A trailing
+breakpoint lets you review that decision before the next pass. The built-in
+`build` Graph puts implementation in an inner loop so the outer loop reviews
+the whole change.
 
 ```yaml
 # build (builtin)
@@ -239,36 +240,67 @@ compresses and re-measures. Compose it with `deliver` to ship the win:
 
 ## Where a person takes part
 
-Mark any step `interactive:` to pause for human input; every other step runs
-headless. Built-in `feature` puts you in the loop at two high-leverage moments:
+```bash
+lf task create "Compare two layouts for the Task list" --graph feature --run
+```
+
+`explore` runs first, on its configured agent, which can differ from the one
+you talk to in the Task conversation. When it finishes, the Graph reaches a
+**breakpoint**. Open the Task from **Now** in Desktop or run
+`lf resume --task <ID>`. Its conversation links to the layouts in
+`scratch/explore.html`, recommends one and presents numbered questions.
+Ask why a layout was recommended and the Graph stays there. Reply “Use the
+compact layout and keep the keyboard shortcuts” and planning starts with
+that choice. To take the recommendation as written, run `lf task run <ID>`.
+
+Put `- break` where you want to review what the preceding step produced.
+The builtin `feature` Graph has two such stops.
 
 ```yaml
 # feature (builtin)
-- interactive: explore      # choose what to build
-- graph: plan               # kickoff, concept-review, realign, write-docs
+- step: explore
+- break
+- graph: plan
 - loop:
-    - graph: build          # sync/implement, concept-review, realign, compress, qa, publish PR
-    - interactive: ship-review  # read one summary page; iterate sends feedback back to build
-- graph: deliver            # reflect, land --wait-and-fix
+    - graph: build
+    - step: ship-review
+    - break                # review the PR before delivery
+- graph: deliver
 ```
+
+After `ship-review`, the conversation links to `scratch/ship-review.html`
+and explains what ships and what was left out. If the worker recommends
+delivery, you can still reply “Fix keyboard focus first.” The build loop
+runs again with that feedback. Open the review with
+`lf page open scratch/ship-review.html` or in Desktop Files, then use
+`⌘↩` to send your choices to the Task. If a worker reports that it is
+blocked, the reason stays visible until you resolve it. Delivery merges the
+PR and completes the Task.
+
+The built-in research Graph uses `step: research` to select the Skill with
+the same name as the Graph. It runs once per pass. To repeat the investigation
+with new direction, include the decision and your reply.
 
 ```bash
-lf task run LOO-12 feature          # stops at explore; opens in the Task conversation
-lf task run LOO-12                  # continues from where it stopped
-lf task run LOO-12 --from explore   # jump back to any step (by id, Skill, or sub-Graph)
-lf -b task run LOO-12               # run headless through all remaining steps
-lf task auto on LOO-12              # auto on: an agent stands in for you at every remaining step
+lf task run LOO-12 --decision iterate --reason "Compare keyboard use"
 ```
 
-At **`ship-review`**, Loopflow builds one comprehension page
-(`scratch/ship-review.html`) from `scratch/ship-review.page.html`: what was
-built, how it works on real diffs, the key data structures and APIs, the
-trade-offs and invariants to know going forward, findings as `Fix here` /
-`File Task` / `Drop` choices, and numbered questions—without passing-test
-counts or routine CI status. Open it with `lf page open scratch/ship-review.html`
-(or in Desktop Files), highlight text to comment, pick your choices, and press
-`⌘↩` to steer the Task directly, or move on to `deliver`, which merges the PR
-and completes the Task.
+The Task conversation includes `--at-arrival` when it continues a review.
+A reply from an earlier visit leaves the current visit available.
+
+To give a breakpoint a name, write `- break: layout-choice`.
+`lf task run <ID> --from layout-choice` goes directly to that marker.
+`lf task run <ID> --from explore` runs the Skill again. A jump straight to
+a breakpoint shows where continuing will take you. In an existing Graph,
+`interactive: explore` means `explore` followed by a breakpoint. If your Task
+was already waiting to start that Skill, its next run uses the captured Skill
+and stops with its result. A run already in progress finishes in its original
+Graph. Its recorded step numbers stay the same in history.
+
+Run `lf explore` to develop the alternatives together in your terminal.
+Run a Graph directly with `lf graph feature` to review its finished steps
+at that terminal. A direct Graph run in a Task checkout leaves the Task at
+its saved position.
 
 ### Build and customize review pages
 
@@ -355,15 +387,15 @@ lf task run LOO-13 quick    # builds from the brief, runs qa, and lands when CI 
 
 | Graph | What it does |
 |---|---|
-| `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` |
+| `feature` | Choose a direction after `explore`, then review the built change after `ship-review` |
 | `code` | Same as `feature`, starting at `plan` (default when no Graph is configured) |
 | `quick` | loop(`sync` → `implement`) → `qa` → `land --wait-and-fix` |
-| `pursue` | `plan` then `build` with no interactive stops: request to published PR |
-| `research` | Investigate and report findings without opening a PR |
+| `pursue` | `plan` then `build` from request to published PR |
+| `research` | Review the findings after each research pass and decide whether to investigate further |
 | `optimize` | Iterative measure → change → keep/revert loop |
 
 `quick` takes a small, clear change straight from the brief to a merged PR with
-no interactive step—Desktop's Start menu marks it **merges without asking**, and
+no breakpoint. Desktop's Start menu marks it **merges without asking**, and
 `lf task auto off <ID>` still pauses before `land`. A brief bigger than one
 bounded change stops `quick` at `implement`, blocked, before anything is built.
 
@@ -382,7 +414,8 @@ description: Build the endpoint, audit it, then deliver.
 steps:
 - implement
 - audit
-- interactive: demo
+- demo
+- break
 - graph: deliver
 ```
 
@@ -394,61 +427,41 @@ ship-api   Build the endpoint, audit it, then deliver.
 ```
 
 `description:` is one line saying what running the Graph gets you. Desktop's
-Start menu shows it beside the Graph's name, with a stop count taken from its
-`interactive:` steps. Every builtin has one. A Graph without it, written as a
-bare list of steps, still runs and still lists; Start offers it under
-**More ›**.
+Start menu shows it beside the Graph's name and counts the breakpoints. A
+Graph written as a bare list still runs and appears under **More ›**.
 
-`lf graph list --json` adds each Graph as a Task's workflow line draws it,
-before any Task runs it:
+This command shows the workflow from Desktop’s New Task sheet, including
+breakpoints in composed Graphs and branches.
 
-```console
-$ lf graph list --json | jq '.[] | select(.name=="code") | .workflow'
-{
-  "steps": [
-    {"name": "plan", "interactive": false},
-    {"name": "build", "interactive": false},
-    {"name": "ship-review", "interactive": true},
-    {"name": "deliver", "interactive": false}
-  ],
-  "interactive_steps": [...],
-  "sentence": "You take part at ship-review."
-}
+```bash
+lf graph list --json | jq '.[] | select(.name=="code") | .workflow'
 ```
 
-`steps` are the top-level steps, with a Graph included by `graph:` as one
-step under its name. A step is `interactive` when a person takes part anywhere
-inside it, an `xor:` branch included. `interactive_steps` lists each of those
-stops, and the stop count is its length. `sentence` is what Desktop's
-[New Task](surfaces.md#new-task) sheet shows; a Graph with no stop reads "Runs
-on its own." `workflow` is null for a Graph whose definition does not load.
+A Graph whose definition cannot load has a null `workflow`.
 
 ### Auto
 
 Auto is a setting on the Task: on, off, or never set. While it is on, the
-Task's runs stand in for you at each interactive step they reach and may merge
-the PR. Turning it on runs the Task: `lf task auto on` and Desktop's **Auto**
-toggle are one operation.
+Graph follows each worker’s proposed continuation through breakpoints and may
+merge the PR. Turning on **Auto** in Desktop also starts the Task.
 
 ```bash
-lf task auto on LOO-12              # LOO-12 · code from ship-review running as Graph run …
+lf task auto on LOO-12              # continue through breakpoints and allow merge
 lf task status LOO-12               # LOO-12  moving · auto: on by Maya, Nov 18 09:04
 lf task auto off LOO-12             # LOO-12: auto off
 ```
 
-- The run reads auto at each interactive step, not at launch: turn it on while
-  `build` runs and that run stands in at `ship-review` when it gets there.
-- `lf task auto off` kills nothing. The run waits at its next interactive step,
+- Turn auto on while `build` runs and the Graph takes the recommendation
+  when it reaches the breakpoint after `ship-review`.
+- `lf task auto off` kills nothing. The run waits at its next breakpoint,
   or before a merging step (`lf land`, `lf pr arm`, `pr-land`): "Waiting at pr
   land: auto is off (Maya). `lf task auto on INF-1` lands it." Auto-merge that
   Loopflow armed is disarmed.
 - Off stands: only `lf task auto on` turns it back on; an `auto: on` in
-  configuration never does. `lf -b task run` stands in for its own run and
-  writes no auto, so with auto off it still waits at the landing step.
-- Never set, a run that can reach a merging step before stopping lands;
-  `lf task run` prints ``merges: this run may merge the PR; `lf task auto off <ID>` stops it``
-  (runs on non-merging Graphs such as `pursue` omit it). A failing run leaves
-  auto alone.
+  configuration never does. `lf -b task run` crosses breakpoints for that invocation only.
+  With auto off it still waits at the landing step.
+- Never set, a run that reaches a merging step lands; `lf task run` says so on
+  its `merges:` line. A failing run leaves auto alone.
 - `auto: on` beside `graph:` in a Wave's config turns auto on for every Task
   that takes the Graph up. Reopening a Task clears it.
 
@@ -463,8 +476,8 @@ lf task auto off LOO-12             # LOO-12: auto off
 | Task state | Meaning |
 |---|---|
 | `unstarted` | No worktree yet |
-| `idle` | Checked out, nothing running, not at an interactive step |
-| `active` | Waiting at an interactive step in its Task conversation |
+| `idle` | Checked out with no run underway or decision pending |
+| `active` | Needs attention, including a Task at a breakpoint |
 | `moving` | Graph running, whatever the auto setting |
 | `paused` | Started Task held by [`lf task pause`](work.md#pause-a-task): Graph held, conversation available, ownership and worktree kept |
 | `done` / `abandoned` | Completed / dropped |

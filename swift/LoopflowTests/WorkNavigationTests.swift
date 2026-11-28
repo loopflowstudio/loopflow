@@ -259,8 +259,9 @@ struct WorkNavigationTests {
             throw RegistryQueryError("Unexpected command")
         }, repoPath: "/repo")
         let saved = fixtureStartedPlan([
-            ("busy", [.working, .available, .busy]), ("idle", [.working]), ("z", [.working, .available]),
-            ("error", [.working, .error, .busy]), ("a", [.working, .available]), ("blocked", [.working, .blocked, .error]),
+            ("busy", [.working, .available, .busy]), ("idle", [.working]), ("bp-second", [.working, .active, .breakpoint]),
+            ("z", [.working, .available]), ("error", [.working, .error, .busy]), ("a", [.working, .available]),
+            ("blocked", [.working, .blocked, .error]), ("bp-first", [.working, .active, .breakpoint, .available]),
         ])
         model.applySelectionPlans([saved], reason: "")
         model.applyTaskList(saved, wave: nil, reason: "")
@@ -269,10 +270,10 @@ struct WorkNavigationTests {
         for isOn in [false, true] {
             let button = try sidebar.inspect().find(SidebarStatusToggle.self).find(ViewType.Button.self)
             #expect(try button.accessibilityValue().string() == (isOn ? "On" : "Off"))
-            #expect(try button.help().string().contains(isOn ? "restore saved order" : "Blocked, Error, Available, Idle, Busy"))
+            #expect(try button.help().string().contains(isOn ? "restore saved order" : "Breakpoint, Blocked, Error, Available, Idle, Busy"))
             let action = try #require(model.searchDestinations("Sort by status").first)
             #expect(action.id == .sortWorkingTasks && action.detail.hasPrefix(isOn ? "On" : "Off"))
-            #expect(model.sidebarTaskIDs == (isOn ? ["blocked", "error", "z", "a", "idle", "busy"] : stack))
+            #expect(model.sidebarTaskIDs == (isOn ? ["bp-second", "bp-first", "blocked", "error", "z", "a", "idle", "busy"] : stack))
             #expect(model.workingTaskIDs == stack)
             try button.tap()
         }

@@ -1488,10 +1488,10 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 .as_deref()
                 .map(loopflow_execution::config::parse_duration)
                 .transpose()?;
-            let until = if until == "submitted" {
-                loopflow_execution::ops::task::TaskWaitUntil::Open
-            } else {
-                loopflow_execution::ops::task::TaskWaitUntil::Terminal
+            let until = match until.as_str() {
+                "breakpoint" => loopflow_execution::ops::task::TaskWaitUntil::Breakpoint,
+                "submitted" => loopflow_execution::ops::task::TaskWaitUntil::Open,
+                _ => loopflow_execution::ops::task::TaskWaitUntil::Terminal,
             };
             let waited = loopflow_execution::engine::task::wait(
                 issue,
@@ -2271,6 +2271,8 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             TaskCommand::Run {
                 graph,
                 from,
+                at_arrival,
+                decision,
                 name,
                 stack_on,
                 directive,
@@ -2287,13 +2289,15 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 name: name.clone(),
                 graph: graph.clone(),
                 from: from.clone(),
+                at_arrival: at_arrival.clone(),
+                decision: *decision,
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
                 from_last_fetch: false,
                 auto_on: false,
             },
-            cli.batch || cli.interactive,
+            cli.task_run_mode(),
         )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -2916,6 +2920,8 @@ fn dispatch_here(
                 issue,
                 graph,
                 from,
+                at_arrival,
+                decision,
                 name,
                 stack_on,
                 directive,
@@ -2942,6 +2948,8 @@ fn dispatch_here(
                 name: name.clone(),
                 graph: graph.clone(),
                 from: from.clone(),
+                at_arrival: at_arrival.clone(),
+                decision: *decision,
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,

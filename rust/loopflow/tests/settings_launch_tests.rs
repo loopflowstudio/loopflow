@@ -211,7 +211,7 @@ for line in sys.stdin:
         ),
         (
             ".lf/graphs/feature.yaml",
-            "- graph: pursue\n- interactive: {name: demo, id: review}\n",
+            "- graph: pursue\n- break: review\n",
         ),
     ] {
         repo.create_file(path, content);
@@ -901,10 +901,7 @@ with (home / 'session-children.jsonl').open('a') as output:
         ".lf/skills/implement.md",
         "Record the Task worker selection.",
     );
-    repo.create_file(
-        ".lf/graphs/proof.yaml",
-        "- implement\n- interactive: {name: demo, id: review}\n",
-    );
+    repo.create_file(".lf/graphs/proof.yaml", "- implement\n- break: review\n");
     repo.stage_all();
     repo.commit("Define Task worker settings fixture");
     // New Task checkouts start at the repository's main branch.

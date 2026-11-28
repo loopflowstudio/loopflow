@@ -62,13 +62,13 @@ anything:
 # .lf/skills/pause.md: "Reply with the single line "pause reached" and stop."
 # .lf/graphs/qa.yaml
 - cmd: help task
-- interactive: pause
+- break: first-stop
 - pause
-- interactive: pause
+- break: second-stop
 ```
 
-Do not use `interactive: demo` there: a Graph with nothing after its last
-interactive step ends on the first Run and marks the Task done. `lf task
+Do not put a single terminal breakpoint with nothing after it there: continuing
+past the last breakpoint ends the Graph and requests completion. `lf task
 create '<words>'` in the clone (stdin closed) seeds an unstarted Task for
 Backlog; Create & start on the phone makes one with a conversation, on the
 repository's default agent.

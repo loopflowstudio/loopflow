@@ -88,8 +88,8 @@ first reading after start is the restart and reboot case. Each reading:
    any other request, or none, is a person's, and sets the count to zero and
    clears `start_failure`.
 3. **Carries Task runs.** A Task whose `lf task run` carrier is dead gets
-   `lf task run <ID>` again, from its checkpoint; with auto on it stands
-   in at interactive steps by itself. A carrier that exits on its own clears
+   `lf task run <ID>` again, from its checkpoint; with auto on it passes
+   breakpoints by itself. A carrier that exits on its own clears
    its OS process; one found dead died, and retention, which clears it too,
    records when (`task_graphs.run_died_at`). The pass counts those starts
    (`task_graphs.restarts`, `restarted_at`), reset when the run finishes a
@@ -317,7 +317,7 @@ by a test and every server fixture must decode.
 → {"type":"checkpoint","id":"b","checkpoint":3}
 ← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
-→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false},"select":null,"request_id":null,"sender":null}
+→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false,"at_arrival":null,"decision":null,"reason":null},"select":null,"request_id":null,"sender":null}
 ← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","merges":false,"graph_process":"…","log":"…"}}
 → {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null,"sender":null}
 ← {"type":"reading","id":"d","checkpoint":"another-token","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
@@ -641,7 +641,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   `invalid`. On reconnect, supply the last applied reading's checkpoint to resume the
   same read without receiving an unchanged complete reading; see
   [Reconnect a watch](#reconnect-a-watch). `task.wait {issue,
-  until}` (`submitted` or `terminal`) reads `{reached, task}` whenever the Task
+  until}` (`breakpoint`, `submitted` or `terminal`) reads `{reached, task}` whenever the Task
   changes; after the reading whose `reached` is true and its events, the server
   sends `ended {id}` and nothing more for it. Requested once, it is that reading now, as
   `lf task wait --timeout 0s --json` prints it.
@@ -655,8 +655,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   refusal it printed; `task.auto.on` answers the same after turning auto
   on. The connection never waits on the run. `approve` is `-b`: every step
   headless to `end`, writing no auto; without it
-  the run stands in at interactive steps only while auto is on, and
-  otherwise stops before the next one. A null `agent` uses each step's
+  the run passes breakpoints only while auto is on, and
+  otherwise parks at the next one. A null `agent` uses each step's
   configured harness. `lf task run <issue> --json` and `lf task auto on --json`
   print the same value. `task.auto.off {directory, issue, reason}` turns auto off (`{issue, was_on}`); only `task.auto.on` turns it on. `task.report {message}` returns the updated thread. `task.steer`
   returns the identifier, steer ID and delivery receipt. `task.interrupt` returns its receipt.

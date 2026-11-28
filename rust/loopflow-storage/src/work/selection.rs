@@ -123,6 +123,8 @@ pub enum SelectionState {
     Done,
     /// Setting axis: the open Task's auto setting is on.
     Auto,
+    /// Graph axis: the open Active Task is parked at a Graph breakpoint.
+    Breakpoint,
 }
 
 /// The source path contains authored IDs, never array indexes or current focus.
@@ -282,7 +284,8 @@ impl Selection {
             .iter()
             .filter(|item| {
                 selected.contains(&item.key)
-                    && (item.states.contains(&SelectionState::Available)
+                    && (item.states.contains(&SelectionState::Breakpoint)
+                        || item.states.contains(&SelectionState::Available)
                         || item.states.contains(&SelectionState::Blocked)
                         || item.states.contains(&SelectionState::Error))
             })

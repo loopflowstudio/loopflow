@@ -17,21 +17,9 @@
   ],
   "graph": {
     "name": "feature",
-    "control": {
-      "action": "pause",
-      "label": "build · implement"
-    },
-    "interactive_steps": [
-      {
-        "name": "review-design",
-        "skill": "review-design",
-        "description": "you review the plan"
-      },
-      {
-        "name": "demo",
-        "skill": "demo",
-        "description": "you try the change"
-      }
+    "breakpoints": [
+      "review-design",
+      "demo"
     ],
     "position": {
       "kind": "run",
@@ -43,23 +31,27 @@
     "steps": [
       {
         "name": "plan",
-        "interactive": false
+        "kind": "stage"
       },
       {
         "name": "review-design",
-        "interactive": true
+        "kind": "stage_with_breakpoint"
       },
       {
         "name": "build",
-        "interactive": false
+        "kind": "stage"
       },
       {
         "name": "demo",
-        "interactive": true
+        "kind": "breakpoint"
       }
     ],
     "current_step": 2,
-    "sentence": "build is running implement. You are next needed at demo."
+    "sentence": "build is running implement. You are next needed at demo.",
+    "control": {
+      "action": "pause",
+      "label": "build · implement"
+    }
   },
   "graph_processes": [
     {

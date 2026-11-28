@@ -40,9 +40,12 @@ fn previews_without_a_readable_registry_are_unavailable_and_create_nothing() {
         if corrupt {
             fs::write(&database, "not a database").unwrap();
         }
-        let run =
-            crate::lf::commands::context::explain_task_run(Some("UNKNOWN-1"), &options, false)
-                .unwrap();
+        let run = crate::lf::commands::context::explain_task_run(
+            Some("UNKNOWN-1"),
+            &options,
+            loopflow_execution::ops::task::TaskRunMode::Stop,
+        )
+        .unwrap();
         assert!(run.action.is_none());
         assert!(matches!(
             run.resolution.task,
@@ -95,13 +98,18 @@ mod operation_spellings {
         ));
         for populated in [false, true] {
             let optional = |value| populated.then_some(value);
-            let cli = parse(task::spell_run(
-                "LOO-1",
-                optional("implement"),
-                optional("code"),
-                optional("codex"),
-                populated,
-            ));
+            let cli = parse(
+                task::TaskRunRequest {
+                    graph: optional("code").map(str::to_owned),
+                    from: optional("implement").map(str::to_owned),
+                    agent: optional("codex").map(str::to_owned),
+                    approve: populated,
+                    at_arrival: populated.then(loopflow_model::id::LfProcessId::new),
+                    decision: None,
+                    reason: optional("reviewed").map(str::to_owned),
+                }
+                .argv("LOO-1"),
+            );
             assert!(matches!(
                 cli.command,
                 Some(Commands::Task {
@@ -197,8 +205,8 @@ mod graph_instructions {
         assert!(plan.contains("repeat steps 3[repair].1 through 3[repair].1"));
         assert!(plan.contains("reassess at step 3[repair].2"));
         assert!(plan.contains("rejoin after step 3"));
-        assert!(plan.contains("5. Execute the skill `demo` in this conversation."));
-        assert!(plan.contains("Wait for the participant's response"));
+        assert!(plan.contains("5. Run `lf -b --skill-input /captures/demo.json skill -- demo`."));
+        assert!(plan.contains("6. At after-review, present the completed work and its proposed continuation. Wait for a reply."));
         assert!(plan.contains("Repair the findings"));
         assert!(plan.contains("A deferred check alone is not a blocker"));
         assert!(!plan.contains("Work body must not be bundled"));

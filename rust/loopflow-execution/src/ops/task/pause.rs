@@ -206,7 +206,12 @@ pub fn parked(issue: &str) -> OpsResult<Option<String>> {
         };
         let id = &task.identifier;
         let next = match graph.control.action {
-            WorkflowAction::Run => format!("`lf task run {id}` continues past it."),
+            WorkflowAction::Run | WorkflowAction::Continue => {
+                format!("`lf task run {id}` continues past it.")
+            }
+            WorkflowAction::Wait if graph.waiting_step().is_some() => {
+                return Ok(Some(graph.sentence))
+            }
             WorkflowAction::Wait => format!("`lf task auto on {id}` lands it."),
             WorkflowAction::Done => format!("`lf task complete {id}` finishes it."),
             WorkflowAction::Pause
@@ -241,6 +246,7 @@ pub(super) fn release(
                 row.graph.unpause_effect(
                     &row.step,
                     row.run.as_ref().map(|(cursor, _)| cursor),
+                    row.breakpoint.is_some(),
                     row.auto,
                     merges,
                 )
@@ -268,11 +274,11 @@ mod tests {
     use loopflow_storage::work::task::{NewTask, TaskId};
 
     #[test]
-    fn parked_names_the_command_for_human_stops_landing_waits_and_end() {
+    fn paused_breakpoint_keeps_its_arrival_and_unpauses_at_the_review() {
         let _lock = crate::journal::test_env_lock();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
-        let repo = tempfile::tempdir().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
         std::env::set_var("LF_HOME", home.path());
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -281,9 +287,10 @@ mod tests {
                 home.path().join("loopflow.db"),
             )))
             .unwrap();
+        let checkout = repo.path().canonicalize().unwrap();
         let repository_id = crate::repository::location::ensure_repository(
             &store.sqlite,
-            &repo.path().display().to_string(),
+            &checkout.display().to_string(),
         )
         .unwrap();
         let task = store
@@ -300,27 +307,52 @@ mod tests {
             .unwrap();
         let id = &task.identifier;
 
-        let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        let graph = CapturedGraph::load("code", &checkout).unwrap().unwrap();
         store
             .sqlite
             .take_up_task_graph(&task.id, &serde_json::to_string(&graph).unwrap())
             .unwrap();
 
+        let person = Starter::Person {
+            name: Some("Maya".into()),
+        };
+        let arrival = crate::store::task_work::BreakpointArrival {
+            id: loopflow_model::id::LfProcessId::new(),
+            cursor: graph.find("after-ship-review").unwrap().cursor(),
+        };
         store
             .sqlite
-            .set_task_graph_step(&task.id, "ship-review")
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_graphs SET step='after-ship-review',breakpoint=?2 WHERE task_id=?1",
+                rusqlite::params![task.id.as_str(), serde_json::to_string(&arrival).unwrap()],
+            )
             .unwrap();
         assert_eq!(
             parked(id).unwrap().as_deref(),
             Some(
-                format!("Waiting for you at ship-review. `lf task run {id}` continues past it.")
+                format!("At breakpoint after-ship-review. `lf task run {id}` continues past it.")
                     .as_str()
             )
         );
 
-        let person = Starter::Person {
-            name: Some("Maya".into()),
-        };
+        store
+            .sqlite
+            .begin_task_pause(&task.id, &person, Vec::new())
+            .unwrap();
+        store.sqlite.settle_task_pause(&task.id, false).unwrap();
+        assert_eq!(parked(id).unwrap(), None);
+        assert!(
+            super::release(id, true, crate::task_graph::tests::test_merges)
+                .unwrap()
+                .is_none()
+        );
+        let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.breakpoint, Some(arrival));
         store
             .sqlite
             .set_task_auto(

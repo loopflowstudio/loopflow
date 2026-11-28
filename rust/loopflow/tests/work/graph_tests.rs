@@ -791,50 +791,23 @@ fn graph_parsing_parity() {
 }
 
 #[test]
-fn interactive_graph_keeps_input_and_advances_only_after_each_provider_exits() {
+fn foreground_graph_asks_at_the_breakpoint_before_running_the_suffix() {
     use std::io::Write;
     use std::os::fd::FromRawFd;
     use std::os::unix::process::CommandExt;
     use std::process::Stdio;
 
-    for (flags, stop) in [
-        (vec!["-i", "graph", "conversation"], false),
-        (vec!["graph", "conversation", "-i"], false),
-        (vec!["-i", "graph", "conversation"], true),
-    ] {
+    for stop in [false, true] {
+        let flags = ["-i", "graph", "conversation"];
         let repo = loopflow_test_support::TestRepo::new();
         let home = TempDir::new().unwrap();
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
-        for name in ["first", "second"] {
-            write_skill(repo.path(), name, "Ask for input, then exit.");
-        }
-        write_graph(repo.path(), "conversation", "- first\n- second\n");
-        write_executable(
-            &bin.join("claude"),
-            r#"#!/bin/sh
-set -eu
-if [ "${1-}" = --version ]; then echo '2.1.0 (fixture)'; exit 0; fi
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --print|--output-format) echo 'unexpected headless launch' >&2; exit 1;;
-        --append-system-prompt-file|--settings) shift;;
-    esac
-    shift
-done
-first_turn=$(cat)
-case "$first_turn" in
-    *'<lf:skill:first>'*) step=first;;
-    *'<lf:skill:second>'*) step=second;;
-    *) exit 2;;
-esac
-touch "$LF_HOME/$step.ready"
-IFS= read -r answer < /dev/tty
-printf '%s' "$answer" > "$LF_HOME/$step.answer"
-[ "$answer" != stop ] || exit 130
-"#,
+        write_graph(
+            repo.path(),
+            "conversation",
+            "- cmd: graph show research\n- break\n- cmd: graph show feature\n",
         );
-
         let path = format!("{}:/usr/bin:/bin", bin.display());
         // First-open migrations in a debug build take most of the deadline;
         // finish them before the clock starts.
@@ -913,20 +886,14 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
         };
-        wait(&|| home.path().join("first.ready").exists());
-        assert!(!home.path().join("second.ready").exists());
+        wait(&|| {
+            fs::read_to_string(&log_path)
+                .unwrap()
+                .contains("Continue? [y/N]")
+        });
         master
-            .write_all(if stop { b"stop\n" } else { b"blue\n" })
+            .write_all(if stop { b"n\n" } else { b"y\n" })
             .unwrap();
-        if !stop {
-            wait(&|| home.path().join("second.ready").exists());
-            assert_eq!(
-                fs::read_to_string(home.path().join("first.answer")).unwrap(),
-                "blue"
-            );
-            master.write_all(b"green\n").unwrap();
-            wait(&|| home.path().join("second.answer").exists());
-        }
         let status = loop {
             if let Some(status) = child.try_wait().unwrap() {
                 break status;
@@ -942,20 +909,12 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
             std::thread::sleep(std::time::Duration::from_millis(20));
         };
         reader.join().unwrap();
+        let output = fs::read_to_string(&log_path).unwrap();
         assert_eq!(
-            status.success(),
+            output.contains("op: graph show feature"),
             !stop,
-            "{}",
-            fs::read_to_string(log_path).unwrap()
+            "{status}: {output}"
         );
-        if stop {
-            assert!(!home.path().join("second.ready").exists());
-        } else {
-            assert_eq!(
-                fs::read_to_string(home.path().join("second.answer")).unwrap(),
-                "green"
-            );
-        }
     }
 }
 
@@ -1637,8 +1596,7 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
             1
         );
     }
-    // `--batch` runs an interactive step headless too, standing in for the
-    // person, then the steps after it.
+    // Batch runs the worker and crosses the breakpoint from the released spelling.
     write_graph(
         repo.path(),
         "review-contribution",
@@ -2235,18 +2193,315 @@ fn three_nested_loops_each_return_to_their_own_first_step() {
     );
 }
 
-#[test]
-fn the_research_graph_stops_at_its_findings_then_reaches_end() {
+fn install_review_primary(home: &Path, checkout: &Path, task: &support::RegisteredTask) -> String {
+    let (session, thread) = support::stopped_claude_conversation(home, checkout);
+    let store = &task.store.sqlite;
+    let captured = store.session(&session).unwrap().unwrap().captured;
+    loopflow_execution::store::sessions::bind_session(store, &session, captured, &task.task.id)
+        .unwrap();
+    store.choose_task_primary(&task.task.id, &session).unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET agent_exit_code=0,agent_ended_at=1 WHERE id=?1",
+            [&session],
+        )
+        .unwrap();
+    thread
+}
+
+fn start_review_server(home: &Path) -> MachineServer {
+    fs::write(home.join("config.yaml"), "default_agent: codex\n").unwrap();
+    let path = format!("{}:/usr/bin:/bin", home.join("bin").display());
+    MachineServer::start_with_path(lf_binary(), home, &path)
+}
+
+/// A fresh feature Task on a private Machine with a quit primary conversation.
+fn with_feature_task(test: impl FnOnce(&Path, &Path, &support::RegisteredTask)) {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
-    let home = TempDir::new().unwrap();
+    let checkout = repo.path().canonicalize().unwrap();
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    let task = support::register_task_without_pr(
+        home.path(),
+        &checkout,
+        "feature-review",
+        &repo.head_sha(),
+    );
+    install_review_primary(home.path(), &checkout, &task);
+    let _server = start_review_server(home.path());
+    observe_planning(&task, &checkout);
+    repo.create_branch("feature-review");
+    test(&checkout, home.path(), &task);
+}
+
+// Wait for the handoff at the primary, not just the parked cursor.
+fn first_explore_review(
+    home: &Path,
+    task: &support::RegisteredTask,
+    result: &str,
+) -> loopflow_execution::store::task_work::BreakpointArrival {
+    let presented = support::first_inputs(home, 1);
+    let store = &task.store.sqlite;
+    let row = store.task_graph_row(&task.task.id).unwrap().unwrap();
+    assert_eq!(row.step, "after-explore");
+    let stop: loopflow_execution::store::task_work::BreakpointArrival =
+        serde_json::from_str(row.breakpoint.as_ref().unwrap()).unwrap();
+    let review = store
+        .steer_by_source(&format!("breakpoint:{}", task.task.id), stop.id.as_str())
+        .unwrap()
+        .unwrap();
+    assert!(review.text.contains(result), "{}", review.text);
+    assert!(presented.contains(&review.text), "{presented}");
+    stop
+}
+
+#[test]
+fn breakpoint_runs_the_released_pending_worker_once() {
+    with_feature_task(|checkout, home, task| {
+        let store = &task.store.sqlite;
+        let history = store.test_graph(
+            "old-feature",
+            checkout.to_str().unwrap(),
+            &[
+                ("explore", Some("succeeded")),
+                ("explore", Some("succeeded")),
+            ],
+            Some("succeeded"),
+        );
+        // Only the pending one of these identically named workers may run.
+        let capture = serde_json::json!({"name":"old-feature","steps":[
+            {"Skill":{"skill":{"name":"explore","content":"A finished prefix."},"id":null,"interactive":false,"returns":null,"sources":["old-feature"]}},
+            {"Skill":{"skill":{"name":"explore","content":"Explore the captured layout."},"id":null,"human":true,"returns":null,"sources":["old-feature"]}}
+        ]});
+        store
+            .take_up_task_graph(&task.task.id, &capture.to_string())
+            .unwrap();
+        store.set_task_graph_step(&task.task.id, "explore").unwrap();
+
+        let result = "Compare the two layouts in scratch/explore.html.";
+        let (_bin, path) = scripted_provider(home, &[result]);
+        let resume = || {
+            let output = run_lf(checkout, home, &["task", "run", "INF-123"], Some(&path));
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        resume();
+        assert_eq!(first_explore_review(home, task, result).cursor.index, 2);
+        let previous = lf_json(
+            checkout,
+            home,
+            &["graph", "show", history.as_str(), "--json"],
+        );
+        assert_eq!(step_fields(&previous, "key"), [0, 1]);
+        assert_eq!(step_fields(&previous, "label"), ["explore", "explore"]);
+        resume();
+        assert_eq!(
+            store.task_graph_row(&task.task.id).unwrap().unwrap().step,
+            "end"
+        );
+        let contexts = received_contexts(home);
+        assert_eq!(contexts.len(), 1);
+        assert!(contexts[0].contains("Explore the captured layout."));
+    });
+}
+
+#[derive(Clone, Copy)]
+enum LayoutChoice {
+    Reply,
+    Continue,
+    Auto,
+}
+
+#[test]
+fn breakpoint_feature_kickoff_receives_the_chosen_layout() {
+    run_layout_choice(LayoutChoice::Reply);
+}
+
+#[test]
+fn breakpoint_feature_kickoff_receives_the_recommendation_on_continue() {
+    run_layout_choice(LayoutChoice::Continue);
+}
+
+#[test]
+fn breakpoint_feature_kickoff_receives_the_recommendation_on_auto() {
+    run_layout_choice(LayoutChoice::Auto);
+}
+
+fn run_layout_choice(choice: LayoutChoice) {
+    let recommendation = "Plan the roomy layout so each row can show a preview.";
+    let reply = "1b — use the compact layout and keep the keyboard shortcuts";
+    let result = format!("Compare scratch/explore.html. {recommendation} 1a Roomy. 1b Compact.");
+    with_feature_task(|checkout, home, task| {
+        let (_bin, path) = scripted_provider(home, &[&result, WORK]);
+        // Explore writes its artifacts during its turn. Hold kickoff once it has
+        // read its input so the real feature Graph never runs build or delivery.
+        fs::write(
+            home.join("tool_turn.py"),
+            format!(
+                r#"
+import json, os, pathlib, subprocess
+home = pathlib.Path(os.environ["LF_HOME"])
+turn = json.loads((home / "prompts").read_text().splitlines()[-1])[1]["params"]["input"][0]["text"]
+if "<lf:skill:explore>" in turn:
+    scratch = pathlib.Path("scratch")
+    scratch.mkdir(exist_ok=True)
+    (scratch / "explore.html").write_text("<h1>Task layouts</h1><p>1a Roomy. 1b Compact.</p>")
+    (scratch / "direction.md").write_text("Recommendation: {recommendation}")
+    subprocess.run(["git", "add", "scratch/explore.html", "scratch/direction.md"], check=True)
+    subprocess.run(["git", "commit", "-qm", "Compare Task layouts"], check=True)
+elif "<lf:skill:kickoff>" in turn:
+    (home / "hold-turn").touch()
+"#
+            ),
+        )
+        .unwrap();
+        let check = |args: &[&str]| {
+            let output = run_lf(checkout, home, args, Some(&path));
+            assert!(
+                output.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        if matches!(choice, LayoutChoice::Auto) {
+            check(&["task", "auto", "on", "INF-123", "--graph", "feature"]);
+        } else {
+            check(&["task", "run", "INF-123", "feature"]);
+            let stop = first_explore_review(home, task, &result);
+            assert_eq!(stop.cursor.index, 1);
+            assert!(checkout.join("scratch/explore.html").is_file());
+            assert_eq!(received_contexts(home).len(), 1);
+            let status = run_lf(checkout, home, &["task", "status", "INF-123"], Some(&path));
+            assert!(
+                String::from_utf8_lossy(&status.stdout).contains(
+                    "latest Graph: Graph feature stopped at breakpoint after-explore; \
+                     `lf task run INF-123` continues it"
+                ),
+                "{}",
+                String::from_utf8_lossy(&status.stdout)
+            );
+            match choice {
+                LayoutChoice::Reply => check(&[
+                    "task",
+                    "run",
+                    "INF-123",
+                    "--at-arrival",
+                    stop.id.as_str(),
+                    "--reason",
+                    reply,
+                ]),
+                _ => check(&["task", "run", "INF-123"]),
+            }
+        }
+        wait_for("kickoff to read its planning input", || {
+            home.join("holding").exists()
+        });
+        check(&["task", "interrupt", "INF-123"]);
+        fs::remove_file(home.join("hold-turn")).unwrap();
+        wait_for("the feature Graph to stop", || {
+            support::recorded_graphs(home)
+                .last()
+                .is_some_and(|(end, _)| end.is_some())
+        });
+        let contexts = received_contexts(home);
+        assert_eq!(contexts.len(), 2);
+        assert!(contexts[0].contains("<lf:skill:explore>"));
+        let kickoff = &contexts[1];
+        assert!(kickoff.contains("<lf:skill:kickoff>"));
+        assert!(
+            kickoff.contains(&format!("Recommendation: {recommendation}")),
+            "{kickoff}"
+        );
+        if matches!(choice, LayoutChoice::Reply) {
+            assert!(
+                kickoff.contains(&format!(
+                    "Previous step feedback or iteration direction:\n{reply}"
+                )),
+                "{kickoff}"
+            );
+            assert_eq!(
+                kickoff.matches(reply).count(),
+                1,
+                "breakpoint reply must reach kickoff once without double-steering:\n{kickoff}"
+            );
+            assert!(task
+                .store
+                .task_comments(&task.task.id)
+                .unwrap()
+                .comments
+                .iter()
+                .any(|c| c.body.starts_with(reply) && c.body.contains("loopflow-breakpoint:")));
+        } else {
+            assert!(!kickoff.contains(reply));
+        }
+    });
+}
+
+#[test]
+fn breakpoint_batch_accepts_the_verdict_without_parking() {
+    let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    let checkout = repo.path().canonicalize().unwrap();
+    let task = support::register_task_without_pr(
+        home.path(),
+        &checkout,
+        "batch-research",
+        &repo.head_sha(),
+    );
+    let _server = start_codex_fixture_server(home.path());
+    observe_planning(&task, &checkout);
+    repo.create_branch("batch-research");
+    let (_bin, path) = scripted_provider(home.path(), &[ADVANCE]);
+    let run = run_lf(
+        &checkout,
+        home.path(),
+        &["-b", "task", "run", "INF-123", "research"],
+        Some(&path),
+    );
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let row = task
+        .store
+        .sqlite
+        .task_graph_row(&task.task.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.step, "end");
+    assert!(row.breakpoint.is_none());
+    assert!(task
+        .store
+        .sqlite
+        .task_auto(&task.task.id)
+        .unwrap()
+        .is_none());
+    assert_eq!(received_contexts(home.path()).len(), 1);
+}
+
+#[test]
+fn breakpoint_presents_finished_work() {
+    let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
+    let home = tempfile::tempdir_in("/tmp").unwrap();
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_task_without_pr(home.path(), &checkout, "research-end", &repo.head_sha());
-    let _server = start_codex_fixture_server(home.path());
+    let thread = install_review_primary(home.path(), &checkout, &task);
+    let start_server = || start_review_server(home.path());
+    let server = start_server();
     observe_planning(&task, &checkout);
     repo.create_branch("research-end");
-    let (_bin, path) = scripted_provider(home.path(), &[WORK]);
+    let answer = r#"{"decision":"advance","summary":"Findings in scratch/research.md. 1a Finish. 1b Compare keyboard use.","reason":null}"#;
+    let (_bin, path) = scripted_provider(home.path(), &[answer, ADVANCE]);
     let run = |args: &[&str]| run_lf(repo.path(), home.path(), args, Some(&path));
     let position = || {
         lf_json(
@@ -2256,33 +2511,134 @@ fn the_research_graph_stops_at_its_findings_then_reaches_end() {
         )["execution"]["work"]["graph"]["position"]
             .clone()
     };
-    let ran = run(&["task", "run", "INF-123", "research"]);
-    assert!(
-        ran.status.success(),
-        "{}",
-        String::from_utf8_lossy(&ran.stderr)
-    );
-    // A bare run may return as its Graph registers; it stops before the
-    // interactive research step.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while position()["kind"] != "at" {
-        assert!(std::time::Instant::now() < deadline, "{}", position());
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
+    let wait_for_review = |previous: Option<&str>| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            let current = position();
+            if current["kind"] == "breakpoint" && current["arrival"].as_str() != previous {
+                assert_eq!(current["step"], "after-research");
+                return current["arrival"].as_str().unwrap().to_owned();
+            }
+            assert!(std::time::Instant::now() < deadline, "{current}");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    };
+    let check = |args: &[&str]| {
+        let output = run(args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    check(&["task", "run", "INF-123", "research"]);
+    let first = wait_for_review(None);
+    let review = task
+        .store
+        .sqlite
+        .steer_by_source(&format!("breakpoint:{}", task.task.id), &first)
+        .unwrap()
+        .unwrap();
+    assert!(review
+        .text
+        .contains("scratch/research.md. 1a Finish. 1b Compare keyboard use."));
+    assert!(review.text.contains("Continuing finishes the Graph."));
+    let presented = support::first_inputs(home.path(), 1);
+    assert!(presented.contains(&review.text), "{presented}");
     assert_eq!(
-        position(),
-        serde_json::json!({"kind": "at", "step": "research"})
+        fs::read_to_string(home.path().join("resumed-thread"))
+            .unwrap()
+            .trim(),
+        thread
     );
-    // Nothing runs after the findings: the next run reaches end.
-    let ended = run(&["task", "run", "INF-123"]);
+    drop(server);
+    let _server = start_server();
+    let reply = "1b — compare keyboard use";
+    let iterated = run(&[
+        "task",
+        "run",
+        "INF-123",
+        "--at-arrival",
+        &first,
+        "--decision",
+        "iterate",
+        "--reason",
+        reply,
+    ]);
+    let launched = String::from_utf8_lossy(&iterated.stdout);
     assert!(
-        ended.status.success(),
-        "{}",
-        String::from_utf8_lossy(&ended.stderr)
+        launched.contains("research from research running"),
+        "the continued run names where it sets out: {launched}{}",
+        String::from_utf8_lossy(&iterated.stderr)
     );
+    let second = wait_for_review(Some(&first));
+    let contexts = received_contexts(home.path());
+    assert_eq!(contexts.len(), 2);
+    assert!(
+        contexts[1].contains("Decision pass 2.") && contexts[1].contains(reply),
+        "{}",
+        contexts[1]
+    );
+    let stale = run(&["task", "run", "INF-123", "--at-arrival", &first]);
+    assert!(!stale.status.success());
+    assert_eq!(position()["arrival"], second);
+    assert_eq!(
+        fs::read_to_string(home.path().join("turns"))
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
+    check(&["task", "run", "INF-123"]);
     assert_eq!(position(), serde_json::json!({"kind": "at", "step": "end"}));
     // Running the Graph left its prompt files; ending kept them.
     assert!(checkout.join(".lf/prompts").exists());
+}
+
+#[test]
+fn breakpoint_direct_graph_in_task_checkout_leaves_task_alone() {
+    with_feature_task(|checkout, home, task| {
+        let result = "Explore result in scratch/explore.html.";
+        let (_bin, path) = scripted_provider(home, &[result, ADVANCE]);
+        let run = run_lf(
+            checkout,
+            home,
+            &["task", "run", "INF-123", "feature"],
+            Some(&path),
+        );
+        assert!(
+            run.status.success(),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        let stop = first_explore_review(home, task, result);
+
+        // Run a direct Graph with a breakpoint inside the Task checkout.
+        let direct = run_lf(checkout, home, &["-b", "graph", "research"], Some(&path));
+        assert!(
+            direct.status.success(),
+            "{}",
+            String::from_utf8_lossy(&direct.stderr)
+        );
+
+        // The Task's Graph, step, parked arrival and breakpoint steers stay untouched.
+        let row = task
+            .store
+            .sqlite
+            .task_graph_row(&task.task.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.step, "after-explore");
+        let after: loopflow_execution::store::task_work::BreakpointArrival =
+            serde_json::from_str(row.breakpoint.as_ref().unwrap()).unwrap();
+        assert_eq!(after.id, stop.id);
+        assert!(task
+            .store
+            .sqlite
+            .task_completion_pending(&task.task.id)
+            .unwrap()
+            .is_none());
+    });
 }
 
 #[test]

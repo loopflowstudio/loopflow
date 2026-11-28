@@ -22,9 +22,11 @@ and names it in `--append-system-prompt-file`:
 nothing else differs between runs. The recorded word is `"surface": "tui"` or
 `"headless"` in `$LF_HOME/runs/<xx>/<capture>/manifest.json`.
 
-The Task rows need the private server from [server](server.md) and the
-`qa` Graph (`- step: <skill>` then `- interactive: demo`) pushed to a bare
-origin. Afterwards stop `lf server run` and its child `lf holder run` by PID.
+The Task rows need the private server from [server](server.md) and a
+`qa` Graph pushed to each bare origin. Put `- step: <skill>` first.
+Follow it with `- break` on the branch or `- interactive: demo` on
+a release that predates breakpoints. Afterwards stop `lf server run` and its
+child `lf holder run` by PID.
 
 Environment: put a marker variable in the launching shell and grep the
 stand-in's env file. A Task Graph worker loses `GH_TOKEN`; a batch, a chat and

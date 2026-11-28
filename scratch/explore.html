@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1096 — Explore Round 2: Vision B Across All 6 Interactive Steps</title>
+<style>
+  :root {
+    --bg: #faf9f6;
+    --surface: #ffffff;
+    --surface-2: #f3f1ec;
+    --ink: #1c1b18;
+    --ink-muted: #5c5850;
+    --ink-faint: #847f75;
+    --border: #e3dfd7;
+    --border-strong: #ccc6bb;
+    --accent: #2558a8;
+    --accent-soft: #eaf0fa;
+    --existing-bg: #eef2f7;
+    --existing-ink: #344c6e;
+    --proposed-bg: #edf6ee;
+    --proposed-ink: #225c2f;
+    --radical-bg: #f6eef9;
+    --radical-ink: #642c82;
+    --ok-bg: #eaf6ed;
+    --ok-ink: #1f5c2e;
+    --warn-bg: #fdf4e5;
+    --warn-ink: #82530b;
+    --fail-bg: #fcecec;
+    --fail-ink: #8d2626;
+    --term-bg: #171717;
+    --term-ink: #ecebe6;
+    --term-muted: #9b978f;
+    --term-accent: #7db4ff;
+    --term-ok: #7cd694;
+    --term-warn: #f0c26b;
+    --term-fail: #f28b82;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    --serif: ui-serif, Georgia, "Iowan Old Style", serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131312;
+      --surface: #1b1b19;
+      --surface-2: #242320;
+      --ink: #eeece6;
+      --ink-muted: #aba69b;
+      --ink-faint: #7b766c;
+      --border: #2e2d29;
+      --border-strong: #44423c;
+      --accent: #7ab0ff;
+      --accent-soft: #1b283d;
+      --existing-bg: #1f2836;
+      --existing-ink: #9cc0f2;
+      --proposed-bg: #1a2d1f;
+      --proposed-ink: #8cd49c;
+      --radical-bg: #2a1e33;
+      --radical-ink: #d1a3eb;
+      --ok-bg: #192d1e;
+      --ok-ink: #87d699;
+      --warn-bg: #302514;
+      --warn-ink: #ebbd6c;
+      --fail-bg: #331c1c;
+      --fail-ink: #f09595;
+      --term-bg: #0c0c0b;
+      --term-ink: #eeece6;
+      --term-muted: #8a867e;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 88px;
+  }
+
+  header {
+    margin-bottom: 32px;
+    padding-bottom: 22px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  h1 {
+    font-size: 27px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    margin: 0 0 12px;
+    font-weight: 650;
+  }
+
+  h2 {
+    font-size: 19px;
+    line-height: 1.3;
+    margin: 34px 0 12px;
+    font-weight: 650;
+  }
+
+  .lead {
+    font-size: 15.5px;
+    color: var(--ink-muted);
+    margin: 0 0 16px;
+  }
+
+  .quote {
+    margin: 14px 0 0;
+    padding: 11px 15px;
+    border-left: 3px solid var(--border-strong);
+    background: var(--surface-2);
+    border-radius: 0 6px 6px 0;
+    font-family: var(--serif);
+    font-size: 15px;
+  }
+
+  .quote footer {
+    margin-top: 5px;
+    font-family: var(--sans);
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+
+  .decision-box {
+    margin-top: 16px;
+    padding: 13px 16px;
+    background: var(--accent-soft);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+  }
+
+  .decision-box strong { color: var(--accent); }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.89em;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .badge-ok { background: var(--ok-bg); color: var(--ok-ink); }
+  .badge-warn { background: var(--warn-bg); color: var(--warn-ink); }
+  .badge-fail { background: var(--fail-bg); color: var(--fail-ink); }
+  .badge-existing { background: var(--existing-bg); color: var(--existing-ink); }
+  .badge-proposed { background: var(--proposed-bg); color: var(--proposed-ink); }
+  .badge-radical { background: var(--radical-bg); color: var(--radical-ink); }
+
+  /* Step selector & detail */
+  .step-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .step-tab {
+    appearance: none;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--ink-muted);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    padding: 6px 11px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .step-tab:hover { border-color: var(--accent); color: var(--ink); }
+
+  .step-tab[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .dot-ok { background: #3aa757; }
+  .dot-warn { background: #d9941e; }
+  .dot-fail { background: #d94646; }
+  .step-tab[aria-pressed="true"] .dot { box-shadow: 0 0 0 1.5px rgba(255,255,255,0.8); }
+
+  .step-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin-bottom: 18px;
+  }
+
+  .step-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .step-card-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 650;
+  }
+
+  .step-graphs {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin: 0 0 12px;
+  }
+
+  .step-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  @media (max-width: 620px) {
+    .step-cols { grid-template-columns: 1fr; }
+  }
+
+  .box {
+    background: var(--surface-2);
+    border-radius: 7px;
+    padding: 11px 13px;
+    font-size: 13.5px;
+  }
+
+  .box h3 {
+    margin: 0 0 5px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+  }
+
+  .box p { margin: 0; }
+
+  .term {
+    margin-top: 12px;
+    background: var(--term-bg);
+    color: var(--term-ink);
+    border-radius: 7px;
+    padding: 12px 14px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-x: auto;
+  }
+
+  .t-muted { color: var(--term-muted); }
+  .t-accent { color: var(--term-accent); }
+  .t-ok { color: var(--term-ok); }
+  .t-warn { color: var(--term-warn); }
+  .t-fail { color: var(--term-fail); }
+
+  /* Traps */
+  .traps {
+    display: grid;
+    gap: 12px;
+    margin: 14px 0 28px;
+  }
+
+  .trap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3.5px solid #d9941e;
+    border-radius: 0 8px 8px 0;
+    padding: 13px 16px;
+    font-size: 14px;
+  }
+
+  .trap.trap-hard { border-left-color: #d94646; }
+
+  .trap strong { display: block; margin-bottom: 4px; font-size: 14.5px; }
+
+  /* Vision panels */
+  .vision {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 22px 24px 20px;
+    margin-bottom: 22px;
+  }
+
+  .vision-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .vision-title {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 650;
+  }
+
+  .vision-letter {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink-faint);
+    margin-right: 6px;
+  }
+
+  .vision-truth {
+    margin: 6px 0 14px;
+    color: var(--ink);
+  }
+
+  .strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 12px;
+    background: var(--surface-2);
+    border-radius: 7px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-muted);
+    margin-bottom: 14px;
+  }
+
+  .strip .node {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  @media (max-width: 620px) {
+    .meta-grid { grid-template-columns: 1fr; }
+  }
+
+  .meta-block {
+    background: var(--surface-2);
+    border-radius: 7px;
+    padding: 11px 13px;
+    font-size: 13.5px;
+  }
+
+  .meta-block h3 {
+    margin: 0 0 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+  }
+
+  .meta-block ul { margin: 0; padding-left: 18px; }
+  .meta-block li { margin-bottom: 4px; }
+  .meta-block li:last-child { margin-bottom: 0; }
+
+  .demo-block {
+    margin-top: 12px;
+    padding: 11px 13px;
+    border: 1px dashed var(--border-strong);
+    border-radius: 7px;
+    font-size: 13.5px;
+  }
+
+  .demo-block h3 {
+    margin: 0 0 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+  }
+
+  .demo-block p { margin: 0; }
+
+  /* Summary table */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    margin-top: 12px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  th {
+    background: var(--surface-2);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-muted);
+    font-weight: 600;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  .cell-ok { color: var(--ok-ink); font-weight: 500; }
+  .cell-warn { color: var(--warn-ink); font-weight: 500; }
+  .cell-fail { color: var(--fail-ink); font-weight: 500; }
+
+  /* Questions */
+  section.questions {
+    margin-top: 38px;
+    padding-top: 26px;
+    border-top: 1px solid var(--border);
+  }
+
+  .q-list { list-style: none; padding: 0; margin: 14px 0 0; }
+
+  .q-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 15px 17px;
+    margin-bottom: 13px;
+  }
+
+  .q-title { font-weight: 600; margin: 0 0 7px; font-size: 15px; }
+  .q-num { font-family: var(--mono); color: var(--accent); margin-right: 6px; }
+  .q-opts { list-style: none; padding: 0; margin: 0; font-size: 14px; }
+  .q-opts li { padding: 3px 0; color: var(--ink-muted); }
+  .q-opts strong { font-family: var(--mono); color: var(--ink); margin-right: 6px; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="eyebrow">LOO-1096 · Explore Round 2 · Auditing Vision B against all 6 interactive steps</div>
+  <h1>Does "Graph runs Turn 1" work for every interactive step we wrote?</h1>
+  <p class="lead">
+    Mostly yes—four of six interactive skills (<code>explore</code>, <code>ship-review</code>, <code>verify</code>, <code>design</code>) were already written around doing heavy preparation before asking numbered questions. Two (<code>research</code> and <code>demo</code>) plus every skill's <code>## Headless</code> section expose three concrete traps that determine how Vision B should actually be built.
+  </p>
+
+  <blockquote class="quote">
+    "ok B is kinda interesting but we have to make sure it actually works with how the differnet interactive steps weve written work. I tink it shoul"
+    <footer>Jack Heart · 2026-11-24</footer>
+  </blockquote>
+
+  <div class="decision-box">
+    <strong>Decision needed:</strong> If we go with Vision B, which thread model fits best—<strong>B1</strong> (fresh native step thread per interactive step), <strong>B2</strong> (Turn 1 runs directly onto the one primary Task thread), or <strong>B3</strong> (Graph pre-builds the artifact, primary owns the conversation)—or keep <strong>A</strong> (PR #2042) as the base?
+  </div>
+</header>
+
+<h2>1. Audit of all 6 real <code>interactive:</code> steps</h2>
+<p class="lead">Every <code>interactive:</code> step in <code>rust/loopflow-definitions/src/builtins/</code> and <code>.lf/graphs/</code>. Click each to inspect what Turn 1 does and where it trips.</p>
+
+<div class="step-tabs" role="region" aria-label="Interactive step audit">
+  <button class="step-tab" data-step="explore" aria-pressed="true"><span class="dot dot-ok"></span>explore</button>
+  <button class="step-tab" data-step="ship-review" aria-pressed="false"><span class="dot dot-ok"></span>ship-review</button>
+  <button class="step-tab" data-step="verify" aria-pressed="false"><span class="dot dot-ok"></span>verify</button>
+  <button class="step-tab" data-step="design" aria-pressed="false"><span class="dot dot-ok"></span>design</button>
+  <button class="step-tab" data-step="research" aria-pressed="false"><span class="dot dot-warn"></span>research</button>
+  <button class="step-tab" data-step="demo" aria-pressed="false"><span class="dot dot-fail"></span>demo</button>
+</div>
+
+<div class="step-card" id="step-card"></div>
+
+<h2>2. Three real traps Vision B has to handle</h2>
+<div class="traps">
+  <div class="trap">
+    <strong>Trap 1 — Turn 1 is "opening move for a human," NOT "Headless / With nobody there"</strong>
+    <code>ship-review.md</code> ("With nobody there: fix small things, file findings, go on to delivery"), <code>verify.md</code> ("Headless, decide and keep moving"), <code>explore.md</code> ("Headless: recommend one"), and <code>demo.md</code> ("With nobody there: say the demo didn't happen and finish") all treat headless execution as <em>nobody is coming</em>. Vision B's Turn 1 runs without a person typing <em>yet</em>, but a person <strong>is</strong> joining next—so the Graph must frame Turn 1 as <em>"Someone is joining this conversation after your opening turn: do the opening preparation and stop with numbered questions; never auto-decide, edit code, file Tasks, or advance."</em> Only <code>-b</code> / <code>auto on</code> uses the headless auto-decide framing.
+  </div>
+  <div class="trap">
+    <strong>Trap 2 — <code>research.yaml</code> has a redundant double step</strong>
+    <code>research.yaml</code> currently writes <code>- step: research</code> followed by <code>- interactive: research</code> inside a loop—which only existed because <code>interactive:</code> stopped before doing any work. Under Vision B, either <code>research.yaml</code> collapses to a single <code>- interactive: research</code> (cleaner!), or Turn 1 detects the note already exists and formats the reviewable HTML page without re-researching.
+  </div>
+  <div class="trap trap-hard">
+    <strong>Trap 3 — <code>demo</code> launches live apps &amp; servers (focus stealing + process teardown)</strong>
+    <code>.lf/skills/demo.md</code> builds an isolated <code>Loopflow Dev.app</code> bundle and opens a window or runs a disposable server. Running that silently in the background when <code>pursue</code> finishes would pop windows on macOS while you're working elsewhere—and if Turn 1 ran as a short-lived worker, exiting Turn 1 would tear down the demo server before you tried it. Fix: Turn 1 builds the bundle/fixture state and hands back a ready command without popping focus, <em>or</em> <code>demo</code> (or any step with live side effects) opts into running on open / inside a held session.
+  </div>
+</div>
+
+<h2>3. Three concrete ways to build Vision B (vs. Existing A)</h2>
+
+<!-- B1 -->
+<article class="vision">
+  <div class="vision-header">
+    <h3 class="vision-title"><span class="vision-letter">B1</span>Step-Owned Thread (Fresh Native Skill Per Step)</h3>
+    <span class="badge badge-proposed">Proposed</span>
+  </div>
+  <p class="vision-truth">
+    When the Graph reaches <code>interactive: &lt;skill&gt;</code>, the Graph runs Turn 1 of <code>&lt;skill&gt;</code> as a real provider thread (with <code>&lt;skill&gt;.md</code> as its actual skill, on that step's <code>agent:</code>), pauses after Turn 1, and hands that thread to Desktop / <code>lf open</code> as the Task's active conversation for that step.
+  </p>
+  <div class="strip">
+    <span class="node">Graph reaches interactive:</span> →
+    <span class="node">runs &lt;skill&gt; Turn 1 (any harness)</span> →
+    <span class="node">parks live thread + artifact</span> →
+    <span class="node">you attach directly to it</span>
+  </div>
+  <div class="demo-block">
+    <h3>First slice demo</h3>
+    <p>Start a Task on <code>code</code> and close its pane. When <code>pr-publish</code> succeeds, the Graph runs <code>ship-review</code> Turn 1 on <code>agy</code> or Claude with <code>ship-review.md</code> as its skill, writes <code>scratch/ship-review.html</code>, and marks the step thread ready. Click the Task: you land straight in the <code>ship-review</code> conversation with the questions already printed—zero wait.</p>
+  </div>
+  <div class="meta-grid">
+    <div class="meta-block">
+      <h3>Appeal</h3>
+      <ul>
+        <li><strong>Works on all 5 harnesses today</strong>—including <code>agy</code> even while another pane is open—because Turn 1 uses the Graph's worker driver, not idle wake.</li>
+        <li><strong>Cleanest prompt &amp; context:</strong> Each interactive step runs with its real skill (<code>explore.md</code>, <code>ship-review.md</code>, <code>verify.md</code>), zero <code>task-session</code> hat-switching, zero <code>lf help</code>.</li>
+        <li><strong>Honors per-step <code>agent:</code>:</strong> <code>interactive: { name: ship-review, agent: claude }</code> actually runs on Claude.</li>
+      </ul>
+    </div>
+    <div class="meta-block">
+      <h3>Cost &amp; risk</h3>
+      <ul>
+        <li><strong>Breaks "one continuous Task thread":</strong> Each interactive stop starts a fresh provider thread; conversational context from <code>explore</code> doesn't carry into <code>ship-review</code> except via <code>scratch/</code>.</li>
+        <li><strong>Who runs <code>lf task run</code> after you answer?</strong> A step-owned thread running <code>ship-review.md</code> isn't <code>task-session</code>—it needs the closing rule (write answers to <code>scratch/</code>, steer, advance Graph) wired into interactive steps or a tiny shared footer.</li>
+        <li><strong>Pane handoff in Desktop:</strong> If you left the old conversation open, Desktop has to switch or offer the new step thread.</li>
+      </ul>
+    </div>
+  </div>
+</article>
+
+<!-- B2 -->
+<article class="vision">
+  <div class="vision-header">
+    <h3 class="vision-title"><span class="vision-letter">B2</span>Primary-Thread Turn 1 (One Continuous Conversation, Driven Automatically)</h3>
+    <span class="badge badge-proposed">Proposed</span>
+  </div>
+  <p class="vision-truth">
+    Keep the Task's <strong>one</strong> primary conversation—when the Graph reaches an interactive step, it drives Turn 1 directly onto that primary thread (via headless resume if closed/new, or live wake if open) with the active skill injected inline.
+  </p>
+  <div class="strip">
+    <span class="node">Graph reaches interactive:</span> →
+    <span class="node">primary closed? headless resume Turn 1</span> / <span class="node">open? wake with inline skill</span> →
+    <span class="node">same thread waits for you</span>
+  </div>
+  <div class="demo-block">
+    <h3>First slice demo</h3>
+    <p>Start a Task on <code>feature</code>, do <code>explore</code>, then quit the terminal while <code>build</code> runs. When <code>pr-publish</code> finishes, the Graph resumes that <em>exact same</em> native thread headlessly for Turn 1 of <code>ship-review</code> (injecting <code>ship-review.md</code>), writes <code>scratch/ship-review.html</code>, and pauses. Reopen the Task: your <code>explore</code> chat is above, and <code>ship-review</code>'s opening questions are right at the bottom.</p>
+  </div>
+  <div class="meta-grid">
+    <div class="meta-block">
+      <h3>Appeal</h3>
+      <ul>
+        <li><strong>One continuous Task thread forever:</strong> You keep full conversational memory from <code>explore</code> → <code>ship-review</code> → <code>verify</code>, and Desktop never switches threads under you.</li>
+        <li><strong>Zero wait even when you quit the session:</strong> Headless resume runs Turn 1 on the primary's native thread while you're away (works on Claude, Codex, OpenCode, Pi, and <code>agy</code>).</li>
+        <li><strong>No <code>lf help</code> round-trip:</strong> The captured graph's <code>skill.skill.content</code> is injected straight into the turn prompt.</li>
+      </ul>
+    </div>
+    <div class="meta-block">
+      <h3>Cost &amp; risk</h3>
+      <ul>
+        <li><strong>Two paths (open vs. closed):</strong> Closed primary uses headless resume (works on all 5 harnesses); open primary still needs idle wake (so open idle <code>agy</code> depends on LOO-1098).</li>
+        <li><strong>Locking a live TUI:</strong> Must strictly verify no interactive client holds the primary's native thread before running a headless resume turn on it (otherwise two processes write the same provider transcript).</li>
+        <li><strong>Context growth:</strong> Long Tasks accumulate history across all steps in one thread.</li>
+      </ul>
+    </div>
+  </div>
+</article>
+
+<!-- B3 -->
+<article class="vision">
+  <div class="vision-header">
+    <h3 class="vision-title"><span class="vision-letter">B3</span>Two-Phase Step: Graph Prepares Artifact, Primary Owns the Conversation</h3>
+    <span class="badge badge-proposed">Proposed</span>
+    <span class="badge badge-radical">Cleanest seam</span>
+  </div>
+  <p class="vision-truth">
+    Separate <em>preparation</em> from <em>conversation</em>: the Graph runs a fast headless preparation turn for the interactive step (producing <code>scratch/explore.html</code>, <code>scratch/ship-review.html</code>, or <code>verify</code>'s headless check note—never popping <code>demo</code> windows), then hands the finished artifact to the Task's primary conversation via PR #2042's <code>step:</code> handoff.
+  </p>
+  <div class="strip">
+    <span class="node">Graph prepares artifact (any harness, even quit)</span> →
+    <span class="node">writes scratch/&lt;step&gt;.html + summary</span> →
+    <span class="node">step: handoff to primary</span> →
+    <span class="node">primary opens straight to questions</span>
+  </div>
+  <div class="demo-block">
+    <h3>First slice demo</h3>
+    <p>Build PR #2042 + one addition: before settling at <code>ship-review</code> (or <code>verify</code> / <code>explore</code>), the Graph runs a single non-mutating prep pass that builds <code>scratch/ship-review.html</code> and extracts the numbered questions. Whether your primary was quit, on <code>agy</code>, or open on Claude, the page is <em>already built</em>; when the primary wakes or opens, it reads the ready summary and presents the questions in ~2 seconds instead of ~50.</p>
+  </div>
+  <div class="meta-grid">
+    <div class="meta-block">
+      <h3>Appeal</h3>
+      <ul>
+        <li><strong>Builds directly on PR #2042 instead of throwing it away:</strong> Keeps <code>arrival</code>, <code>step:</code> scoping, and the one continuous primary conversation.</li>
+        <li><strong>Zero locking hazard:</strong> Preparation runs in an isolated worker (never touches the primary's live native thread), so it works safely on all 5 harnesses even while an <code>agy</code> TUI is open!</li>
+        <li><strong>Clean opt-out for <code>demo</code>:</strong> Interactive steps declare whether they have a background prep turn (<code>explore</code>, <code>ship-review</code>, <code>verify</code>, <code>design</code>, <code>research</code>: yes; <code>demo</code>: build-only or on-open).</li>
+      </ul>
+    </div>
+    <div class="meta-block">
+      <h3>Cost &amp; risk</h3>
+      <ul>
+        <li><strong>Two agents touch the step:</strong> The prep worker builds the page, and the primary conversation discusses it—if you ask "why did you propose option 2?", the primary reads <code>scratch/ship-review.html</code> + code rather than remembering having drafted it.</li>
+        <li><strong>Still relies on LOO-1098</strong> for an open idle <code>agy</code> terminal to pop up the summary automatically (though <code>scratch/ship-review.html</code> is already on disk ready to view in Desktop).</li>
+      </ul>
+    </div>
+  </div>
+</article>
+
+<!-- Comparison -->
+<h2>4. Side-by-side comparison</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Question</th>
+        <th>A · PR #2042</th>
+        <th>B1 · Step Thread</th>
+        <th>B2 · Primary Turn 1</th>
+        <th>B3 · Prep + Primary</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Artifact ready before you click in?</strong></td>
+        <td class="cell-fail">No (if quit or <code>agy</code>)</td>
+        <td class="cell-ok">Yes, always</td>
+        <td class="cell-ok">Yes (when closed/new)</td>
+        <td class="cell-ok">Yes, always</td>
+      </tr>
+      <tr>
+        <td><strong>One continuous Task thread?</strong></td>
+        <td class="cell-ok">Yes</td>
+        <td class="cell-fail">No (1 thread / step)</td>
+        <td class="cell-ok">Yes</td>
+        <td class="cell-ok">Yes</td>
+      </tr>
+      <tr>
+        <td><strong>Agent remembers drafting the page?</strong></td>
+        <td class="cell-ok">Yes</td>
+        <td class="cell-ok">Yes</td>
+        <td class="cell-ok">Yes</td>
+        <td class="cell-warn">Reads it from scratch/</td>
+      </tr>
+      <tr>
+        <td><strong>Safe while open <code>agy</code> TUI sits idle?</strong></td>
+        <td class="cell-warn">Safe, stays silent</td>
+        <td class="cell-ok">Yes (own thread)</td>
+        <td class="cell-warn">Needs LOO-1098 wake</td>
+        <td class="cell-ok">Prep runs safely; wake via LOO-1098</td>
+      </tr>
+      <tr>
+        <td><strong><code>demo</code> safety (no popups / server stays alive)</strong></td>
+        <td class="cell-ok">Runs when you're there</td>
+        <td class="cell-warn">Needs on-open / build-only</td>
+        <td class="cell-warn">Needs on-open / build-only</td>
+        <td class="cell-ok">Opt-in prep per step</td>
+      </tr>
+      <tr>
+        <td><strong>Reuses PR #2042?</strong></td>
+        <td>Is PR #2042</td>
+        <td>Replaces most of it</td>
+        <td>Reuses ~half</td>
+        <td class="cell-ok">Builds straight on top</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<section class="questions">
+  <h2>Questions for Round 2</h2>
+  <p class="lead" style="margin-bottom: 12px;">Answer like <code>1b, 2a, 3a</code> or tell me what to reshape.</p>
+  <ol class="q-list">
+    <li class="q-item">
+      <p class="q-title"><span class="q-num">1.</span>Which thread model do you want for Vision B?</p>
+      <ul class="q-opts">
+        <li><strong>1a — B1:</strong> Each interactive step gets its own clean native-skill thread; <code>scratch/</code> carries memory across steps.</li>
+        <li><strong>1b — B2:</strong> Keep one continuous primary Task thread; run Turn 1 headlessly onto it when closed/new, wake it when open.</li>
+        <li><strong>1c — B3:</strong> Graph prepares the artifact/checks in a worker, then hands the finished page to the primary conversation (builds on PR #2042).</li>
+        <li><strong>1d — A:</strong> Stick with PR #2042 as-is (maybe inline skill text instead of <code>lf help</code>) and let LOO-1098 solve <code>agy</code> wake.</li>
+      </ul>
+    </li>
+    <li class="q-item">
+      <p class="q-title"><span class="q-num">2.</span>How should <code>demo</code> behave under an auto-starting interactive step?</p>
+      <ul class="q-opts">
+        <li><strong>2a</strong> Build the <code>.dev</code> bundle / fixture state ahead of time, but don't pop open an app window until I'm in the conversation.</li>
+        <li><strong>2b</strong> Mark <code>demo</code> as wait-for-person (no background Turn 1); start it only when the conversation opens or wakes.</li>
+      </ul>
+    </li>
+    <li class="q-item">
+      <p class="q-title"><span class="q-num">3.</span>What about <code>research.yaml</code>'s <code>step: research</code> → <code>interactive: research</code> pair?</p>
+      <ul class="q-opts">
+        <li><strong>3a</strong> Collapse <code>research.yaml</code> to a single <code>interactive: research</code> step under B (Turn 1 does the research and pauses for review).</li>
+        <li><strong>3b</strong> Leave <code>research.yaml</code> alone and let Turn 1 format the review page from what <code>step: research</code> already wrote.</li>
+      </ul>
+    </li>
+    <li class="q-item">
+      <p class="q-title"><span class="q-num">4.</span>Ship PR #2042 first or hold LOO-1096 and build the chosen B variant here?</p>
+      <ul class="q-opts">
+        <li><strong>4a</strong> Ship PR #2042 now (already built &amp; tested) and file the chosen B upgrade as the next Task.</li>
+        <li><strong>4b</strong> Build the chosen B variant directly in LOO-1096 before merging.</li>
+      </ul>
+    </li>
+  </ol>
+</section>
+
+</main>
+
+<script>
+const STEPS = {
+  explore: {
+    name: "explore",
+    badge: ["badge-ok", "Clean fit for B"],
+    graphs: "feature.yaml (step 1 of 6)",
+    turn1: "Reads the Task brief, scratch/, and codebase; dreams 3–4 distinct visions by mechanism; writes scratch/explore.html with numbered questions; pauses for your reaction.",
+    catch: "Trap 1 applies: explore.md has a '## Headless' section that recommends one vision and exits. Under B, Turn 1 must use 'interactive-opening' framing so it presents the visions and waits for you instead of acting headless.",
+    trace: `<span class="t-muted">Create Task on feature: "interactive step should start right away"</span>
+<span class="t-accent">→ Graph runs explore Turn 1 (interactive-opening mode)</span>
+  Reads task_updates.rs, wake.rs, human_session.rs
+  Writes <span class="t-ok">scratch/explore.html</span> (4 mechanisms + numbered questions)
+<span class="t-ok">→ Pauses for your reply.</span>  No "Waiting for you at explore."`
+  },
+  "ship-review": {
+    name: "ship-review",
+    badge: ["badge-ok", "Biggest win for B"],
+    graphs: "code.yaml, feature.yaml (inside review loop)",
+    turn1: "Gathers plan.md, concept-review.html, qa.html, git log, questions.md, PR checks; writes scratch/tour.yaml and scratch/ship-review.html with numbered questions; waits for decisions on what ships vs. follow-ups.",
+    catch: "Trap 1 is critical here: ship-review.md's '## With nobody there' section tells a headless agent to make small edits, file Tasks, and advance to delivery! Turn 1 under B MUST explicitly prohibit edits, filing Tasks, and advancing—those belong to Turn 2+ after you answer.",
+    trace: `<span class="t-muted">build finishes pr-publish (PR #2042 open)</span>
+<span class="t-accent">→ Graph runs ship-review Turn 1 (interactive-opening mode — no edits, no filing)</span>
+  Reads plan.md, concept-review.html, qa.html, git log, PR checks
+  Writes <span class="t-ok">scratch/ship-review.html</span> + updates scratch/tour.yaml
+<span class="t-ok">→ Pauses with numbered questions 1–4.</span>  Already ready when you click in.`
+  },
+  verify: {
+    name: "verify",
+    badge: ["badge-ok", "Huge win for B"],
+    graphs: "code.yaml, feature.yaml (final step after deliver)",
+    turn1: "Checks post-merge CI for the exact merge SHA; runs 'Done when' claims headless first against main in an isolated home; records commands and outputs under scratch/; shows what it checked for you to judge.",
+    catch: "Trap 1 applies: verify.md ends with 'With someone in the conversation, show what you checked and let them judge the experience. Headless, decide and keep moving.' Under B, Turn 1 does all the headless checks and stops before calling lf task complete (unless auto is on).",
+    trace: `<span class="t-muted">deliver merges PR #2042 onto main</span>
+<span class="t-accent">→ Graph runs verify Turn 1 (interactive-opening mode)</span>
+  Checks post-merge CI for merge SHA → green
+  Builds main in private LF_HOME, verifies headless claims
+  Records output in <span class="t-ok">scratch/verify.md</span>
+<span class="t-ok">→ Pauses: "Headless checks passed; here's what to feel in Desktop."</span>`
+  },
+  design: {
+    name: "design",
+    badge: ["badge-ok", "Good fit (needs brief)"],
+    graphs: "redesign.yaml (step 1 of 2, before pursue)",
+    turn1: "Reads existing checkout, scratch/, and brief; explores alternatives; writes a first concrete draft to scratch/plan.md + open questions to scratch/questions.md; stops with numbered questions.",
+    catch: "redesign.yaml is used on already-started Tasks. If you trigger redesign with a steer or brief, Turn 1 drafts a sharp concrete redesign right away. If triggered bare with no direction yet, Turn 1 reads the current implementation/plan and asks targeted questions about what's wrong before rewriting scratch/plan.md.",
+    trace: `<span class="t-muted">lf task run LOO-12 redesign</span>
+<span class="t-accent">→ Graph runs design Turn 1 (interactive-opening mode)</span>
+  Reads existing branch diff, scratch/plan.md, and your direction
+  Drafts redesign options + delete list in <span class="t-ok">scratch/plan.md</span>
+<span class="t-ok">→ Pauses with numbered design questions.</span>  Launches nothing, files nothing.`
+  },
+  research: {
+    name: "research",
+    badge: ["badge-warn", "Redundant double step"],
+    graphs: "research.yaml (loop: step: research → interactive: research)",
+    turn1: "Maps the codebase for the question asked, writes sourced notes under scratch/, and formats a self-contained HTML review page with a diagram, sources, counterexamples, and numbered questions.",
+    catch: "Trap 2: research.yaml ALREADY has a headless 'step: research' right before 'interactive: research'—that split only existed because interactive steps used to stop cold! Under B, research.yaml should collapse to a single '- interactive: research' inside the loop (or Turn 1 builds the HTML review page from the already-written note).",
+    trace: `<span class="t-warn">Current research.yaml:</span>  step: research (headless) → interactive: research
+<span class="t-ok">Under Vision B:</span>        loop: [ interactive: research ]
+  Turn 1 maps the territory + writes <span class="t-ok">scratch/research.html</span>
+  You ask follow-ups or say "done" → loop exits cleanly.`
+  },
+  demo: {
+    name: "demo",
+    badge: ["badge-fail", "Side-effect & process trap"],
+    graphs: ".lf/graphs/kickoff-demo.yaml (after pursue)",
+    turn1: "Sets the stage: builds an isolated .dev bundle or private-Machine fixture, launches the app window or CLI state so you can feel it, and stays out of the way while you react.",
+    catch: "Trap 3 (real blocker if ignored): (1) Launching Loopflow Dev.app silently at 2:48 PM pops a window and steals macOS focus while you're working elsewhere; (2) a short-lived Graph worker exiting after Turn 1 would kill any disposable server it spawned; (3) demo.md's Headless section says 'With nobody there, say the demo didn't happen and finish.' Fix: Turn 1 builds the .dev bundle & fixture only (no window launch), OR demo opts into wait-for-person / held-session start.",
+    trace: `<span class="t-fail">Naive Vision B on demo:</span>
+  14:48  Worker finishes pursue → runs demo Turn 1
+  14:50  Loopflow Dev.app pops over your editor; worker exits → kills demo server!
+
+<span class="t-ok">Safe Vision B on demo:</span>
+  Option 2a: Turn 1 builds .dev bundle + seeds fixture → prints 1-click open cmd
+  Option 2b: demo marks itself on_open (no background Turn 1; starts when you open)`
+  }
+};
+
+function renderStep(key) {
+  const s = STEPS[key];
+  document.getElementById("step-card").innerHTML = `
+    <div class="step-card-head">
+      <h3 class="step-card-title"><code>interactive: ${s.name}</code></h3>
+      <span class="badge ${s.badge[0]}">${s.badge[1]}</span>
+    </div>
+    <p class="step-graphs">Used in: ${s.graphs}</p>
+    <div class="step-cols">
+      <div class="box">
+        <h3>What Turn 1 does</h3>
+        <p>${s.turn1}</p>
+      </div>
+      <div class="box">
+        <h3>Catch / requirement under Vision B</h3>
+        <p>${s.catch}</p>
+      </div>
+    </div>
+    <div class="term">${s.trace}</div>
+  `;
+  document.querySelectorAll(".step-tab").forEach(btn => {
+    btn.setAttribute("aria-pressed", btn.dataset.step === key ? "true" : "false");
+  });
+}
+
+document.querySelectorAll(".step-tab").forEach(btn => {
+  btn.addEventListener("click", () => renderStep(btn.dataset.step));
+});
+
+renderStep("explore");
+</script>
+</body>
+</html>

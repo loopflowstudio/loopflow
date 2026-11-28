@@ -1,0 +1,241 @@
+<h1>Pause Task Graphs at breakpoints instead of interactive steps</h1>
+
+<p>
+  <strong>LOO-1096</strong> · <a href="https://github.com/loopflowstudio/loopflow/pull/2042">PR #2042</a> ·
+  <code>e3fc33746d</code> · reading order in <code data-path="scratch/tour.yaml">scratch/tour.yaml</code>
+</p>
+
+<blockquote>
+  <p>
+    <strong>Sync required before delivery:</strong> PR #2042 is 12 commits behind <code>origin/main</code> with 57 merge conflicts — including <code>#2036</code> (<code>lf task pause</code>), <code>#2048</code> (review pages / <code>lf page build</code>), <code>#2049</code> (finishing Tasks at merge and deleting <code>verify</code>), <code>#2047</code> (reordering <code>build</code>/<code>plan</code>, adding <code>quick</code>, deleting <code>kickoff-demo.yaml</code>), and <code>#2050</code>–<code>#2057</code>. Delivery needs a sync and conflict-resolution pass first.
+  </p>
+</blockquote>
+
+<h2>1. What was built</h2>
+
+<p>
+  Every reviewable skill (<code>explore</code>, <code>ship-review</code>, <code>design</code>, <code>research</code>, <code>demo</code>) now runs as an ordinary headless Graph worker on its own configured <code>agent</code> and model, followed by a standalone <code>- break</code> marker. Instead of stopping <em>before</em> an <code>interactive:</code> step and asking your Task conversation to switch hats and run the skill on its own model, the worker finishes first, parks at <code>- break</code>, and wakes the Task's primary conversation — or starts it in a held terminal if you quit it — with the summary, <code>scratch/</code> artifact links, recommended continuation, and numbered questions already waiting.
+</p>
+
+<lf-component name="before-after">
+  <div slot="before">
+    <p><strong>Before:</strong> Graph paused before <code>interactive: explore</code> and <code>interactive: ship-review</code>; the primary conversation ran the skill itself on its own model.</p>
+<pre>steps:
+- interactive: explore
+- graph: plan
+- loop:
+    - loop:
+        - graph: build
+        - interactive: ship-review
+    - graph: deliver</pre>
+  </div>
+  <div slot="after">
+    <p><strong>After:</strong> Skills run headless on their configured <code>skills.&lt;name&gt;.agent</code>, then park at <code>- break</code> and wake the Task conversation.</p>
+<pre>steps:
+- step: explore
+- break
+- graph: plan
+- loop:
+    - loop:
+        - graph: build
+        - step: ship-review
+        - break
+    - graph: deliver</pre>
+  </div>
+</lf-component>
+
+<p>
+  <strong>How to try it:</strong>
+  <code>env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo build -p loopflow --bin lf &amp;&amp; ROOT=/tmp/lf-demo-bp &amp;&amp; rm -rf "$ROOT" &amp;&amp; mkdir -p "$ROOT/home" "$ROOT/repo" &amp;&amp; git -C "$ROOT/repo" init -b main &amp;&amp; echo "# Demo" &gt; "$ROOT/repo/README.md" &amp;&amp; git -C "$ROOT/repo" add . &amp;&amp; git -C "$ROOT/repo" commit -m init &amp;&amp; env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') LF_HOME="$ROOT/home" LF_BIN="$PWD/target/debug/lf" "$PWD/target/debug/lf" -C "$ROOT/repo" task create 'Compare two layouts for the Task list' --graph feature --run --setting 'skills.explore.agent=claude:sonnet'</code>
+</p>
+
+<h3>Real output · Quit primary wakes at breakpoint and you override the recommendation</h3>
+<p>From real-Claude QA (<code data-path="scratch/qa.html">scratch/qa.html</code>, <code>claude:haiku</code> worker, default Claude primary). The primary ran <code>/exit</code> while the worker executed; parking at <code>after-note</code> restarted the primary in a held terminal with this turn:</p>
+
+<pre># 1. Worker finishes, parks at `after-note`, wakes the quit primary:
+The naming run (5b7f4cc2) finished and the Task is waiting for your review at the after-note step.
+
+What the worker produced: one file, scratch/note.md, with two candidate names for the command-line tool. Nothing else was edited.
+- recipe: matches the repo name and the README title ("recipe tool"). It's short and easy to type.
+- cookbook: names the collection of recipes rather than the act of running one.
+
+Recommendation: use recipe, and check for name clashes before release.
+Question 1: Which name?
+- a) recipe (recommended)
+- b) cookbook
+Once you choose, the Task moves on to its final step, echo.
+
+# 2. You reply overriding the recommendation:
+&gt; 1b, go with cookbook; it reads better on a shelf of tools
+
+# 3. Primary continues this exact arrival:
+$ lf task run --at-arrival 35738b2d-… \
+    --reason '"1b, go with cookbook; it reads better on a shelf of tools" (selects option b: `cookbook`, over the recommended `recipe`)'
+b0b5de · naming from echo running as Graph run …
+
+# 4. Next worker receives your exact words (cleared once that step settles):
+# Received
+"1b, go with cookbook; it reads better on a shelf of tools" (selects option b: `cookbook`, over the recommended `recipe`)</pre>
+
+<h3>Real output · Waiting for breakpoints, loop overrides, and blocked verdicts</h3>
+<pre># Wait for a review stop even when a PR is already open:
+$ lf task wait c917ac --until breakpoint --timeout 300
+  Graph cmdbreak: At breakpoint check.
+  latest Graph: Graph cmdbreak stopped at breakpoint check; `lf task run c917ac` continues it · started by QA Person
+  action: run  (At breakpoint check.)
+
+# Override a loop breakpoint's verdict without resetting loop pass counts:
+$ lf task run a57fc7 --decision iterate --reason 'try names that start with k'
+a57fc7 · naming-loop from note running as Graph run …
+
+# Blocked verdict at a breakpoint (stops even under auto: on):
+  SelectionState::Breakpoint, Blocked, NextMoveOwner::User
+  actions: no_action (At breakpoint after-ship-review. Blocked: …)
+  Desktop workflow bar omits plain "Continue"; reply in conversation with --at-arrival / --decision</pre>
+
+<h2>2. How it works</h2>
+
+<h3>Compiling <code>- break</code> and translating legacy <code>interactive:</code></h3>
+<p>
+  <code>- break</code> compiles to <code>ConcreteStep::Breakpoint</code> and gets an automatic name (<code>after-&lt;prev&gt;</code>, or <code>break</code> at step 0, deduplicated with <code>#2</code>). Legacy <code>interactive: &lt;skill&gt;</code> compiles into the same worker-then-breakpoint pair so existing Graphs keep working until LOO-1100 removes the reader. Inside a loop, the backward edge moves from the deciding skill to its trailing breakpoint so the worker's verdict is held for review.
+</p>
+
+<lf-diff path="rust/loopflow-execution/src/graph/mod.rs" lines="1308-1343">
+  <lf-note line="1315">Legacy <code>interactive: &lt;skill&gt;</code> compiles as the skill worker followed by an unnamed breakpoint.</lf-note>
+  <lf-note line="1329">When a loop ends in <code>skill</code> + <code>break</code>, the backward edge attaches to the breakpoint so the worker's verdict pauses for review.</lf-note>
+</lf-diff>
+
+<h3>Stopping at a breakpoint and waking the primary conversation</h3>
+<p>
+  In the Graph runner, hitting <code>ConcreteStep::Breakpoint</code> checks <code>continue_at_breakpoint</code> (returns <code>true</code> under <code>-b</code> or <code>auto: on</code> unless the verdict is <code>blocked</code>, else <code>false</code>). When it stops, <code>execute</code> builds the handoff from the preceding worker's answer or verdict, resolves any <code>scratch/</code> paths to real files on disk, and records the arrival atomically via <code>arrive_task_graph</code> — which also queues the task update that wakes the primary conversation (or starts it held if stopped).
+</p>
+
+<lf-diff path="rust/loopflow-execution/src/graph/runner.rs" lines="153-166">
+  <lf-note line="159">Auto/batch runs settle straight through non-blocked breakpoints; interactive runs park and return <code>StoppedAt</code>.</lf-note>
+</lf-diff>
+
+<lf-diff path="rust/loopflow/src/lf/commands/graph.rs" lines="624-647">
+  <lf-note line="629">A <code>blocked</code> verdict on a breakpoint still parks at the breakpoint name with the blocker attached.</lf-note>
+  <lf-note line="638">Stores <code>BreakpointArrival</code> on <code>task_graphs</code> and writes the handoff text in one transaction.</lf-note>
+</lf-diff>
+
+<lf-diff path="rust/loopflow/src/lf/commands/graph.rs" lines="1112-1178">
+  <lf-note line="1120">Embeds the exact <code>--at-arrival &lt;carrier&gt;</code> command so stale clicks or replies can't advance a later review.</lf-note>
+  <lf-note line="1136">Prefers the deciding skill's verdict summary, then falls back to the preceding worker's recorded final answer or command outcome.</lf-note>
+</lf-diff>
+
+<h3>Continuing from a breakpoint</h3>
+<p>
+  <code>continue_from_breakpoint</code> validates <code>--at-arrival</code>, applies any <code>--decision advance|iterate</code> override on loop breakpoints, carries <code>--reason</code> as a one-step handoff (or loop iteration direction), clears <code>cursor.producer</code>, and advances the cursor without losing enclosing XOR routes or loop pass counts.
+</p>
+
+<lf-diff path="rust/loopflow-execution/src/ops/task.rs" lines="1053-1107">
+  <lf-note line="1063">Refuses <code>--decision</code> on non-loop breakpoints like <code>after-explore</code>.</lf-note>
+  <lf-note line="1077">Iterating without a prior verdict requires <code>--reason</code> so the next loop pass knows what to change.</lf-note>
+</lf-diff>
+
+<h2>3. Key data structures and APIs</h2>
+
+<p>One additive SQLite column on <code>task_graphs</code> carries the parked visit, mirrored across Rust DTOs, CLI flags, and Swift models:</p>
+
+<lf-diff path="rust/loopflow-storage/src/migrations/task_graph_breakpoint.sql">
+  <lf-note line="1">Additive column storing serialized <code>BreakpointArrival</code> JSON while parked; <code>NULL</code> once continued.</lf-note>
+</lf-diff>
+
+<lf-diff path="rust/loopflow-execution/src/store/task_work.rs" lines="256-272">
+  <lf-note line="259"><code>id</code> is the Graph carrier's <code>LfProcessId</code> (unique per arrival); <code>cursor</code> preserves exact XOR path, loop counts, and pending verdict.</lf-note>
+</lf-diff>
+
+<lf-file path="rust/loopflow-execution/src/task_graph.rs" lines="409-440">
+  <lf-note line="424"><code>TaskGraphPosition::Breakpoint</code> replaces overloaded <code>At</code> waits and surfaces <code>arrival</code> + <code>blocked</code> directly on the wire.</lf-note>
+</lf-file>
+
+<lf-diff path="rust/loopflow-execution/src/engine/task.rs" lines="316-354">
+  <lf-note line="322"><code>task.run</code> accepts <code>at_arrival</code>, <code>decision</code>, and <code>reason</code> over the server protocol and CLI alike.</lf-note>
+</lf-diff>
+
+<lf-file path="rust/loopflow-storage/src/sqlite/selections.rs" lines="288-320">
+  <lf-note line="304"><code>SelectionState::Breakpoint</code> is set only on open <code>Active</code> Tasks so breakpoints float first in <strong>Now</strong> and stay distinct from LOO-1078's shelved <code>Paused</code>.</lf-note>
+</lf-file>
+
+<h2>4. Trade-offs and invariants going forward</h2>
+
+<ul>
+  <li><strong>Plain Continue accepts the worker's recommended loop verdict.</strong> If <code>ship-review</code> or <code>research</code> recommends <code>iterate</code>, plain <code>lf task run</code> (or Desktop's <em>Continue</em>) iterates; if it recommends <code>advance</code>, it advances. Overriding uses <code>--decision advance|iterate</code> on that arrival (<code>--at-arrival</code>) rather than <code>--from</code>, which resets loop counts.</li>
+  <li><strong>Blocked breakpoints hide Desktop's plain <em>Continue</em> button.</strong> Even under <code>auto: on</code>, a <code>blocked</code> verdict parks with <code>blocked: true</code>, sets <code>actions.recommended = no_action</code>, and tells you to answer in the conversation with <code>--at-arrival</code> / <code>--decision</code> rather than offering a button that errors.</li>
+  <li><strong>Sidebar drag order stays intact when "Sort by status" is off.</strong> Tasks at a breakpoint float first in <strong>Now</strong> and when <strong>Sort by status</strong> is on, but manual sidebar drag order is untouched when sorting by status is off.</li>
+  <li><strong>Workflow bar shows breakpoints as separate items; "Start from…" lists runnable stages.</strong> Breakpoints render beside their step (<code>explore · 👤 after-explore · plan · …</code>) matching <code>lf graph show</code>; <em>Start from…</em> lists real stages so picking <code>ship-review</code> runs a fresh review instead of jumping to an empty producerless stop.</li>
+  <li><strong>Initial-step review Graphs (<code>feature</code>, <code>redesign</code>, <code>research</code>, or leading <code>- break</code>).</strong> On <code>task create --graph feature --run</code>, <code data-path="rust/loopflow-execution/src/ops/human_session/setup.rs">setup.rs</code> spawns <code>lf task run</code> (running <code>explore</code> headless first) and immediately starts Turn 1 of the primary conversation. Turn 1 reports <code>explore</code> moving and goes idle; <code>after-explore</code> wakes it once <code>explore</code> finishes (immediately on Claude/Codex/OpenCode/Pi; on next turn in <code>agy</code> until LOO-1098). A literal leading <code>- break</code> compiles as <code>break</code> and parks immediately on step 0, though its handoff still uses the generic "Present the result, links…" phrasing.</li>
+  <li><strong>Two skill modes only.</strong> Builtin skills have direct interactive use (<code>lf &lt;skill&gt;</code>) and headless Graph worker mode (propose a default plan of action that continues if nobody intervenes). No third "headless-before-breakpoint" mode exists.</li>
+  <li><strong>Sync onto <code>origin/main</code> adopts #2036, #2047, #2048, and #2049.</strong> Resolving the 57 conflicts means: dropping edits to deleted <code>verify.md</code> / <code>kickoff-demo.yaml</code>; keeping <code>SelectionState::Breakpoint</code> distinct from <code>#2036</code>'s <code>Paused</code>; preserving <code>#2048</code>'s review-page skill rules (<code>lf page build</code> / <code>lf page open</code>) on <code>ship-review</code>/<code>explore</code>/<code>qa</code>/<code>demo</code>; and re-verifying DTO fixtures and Rust/Swift suites on the merged head.</li>
+  <li><strong>Untested live surfaces:</strong> real Desktop GUI click-through (covered by headless Swift tests), Codex as worker/primary (weekly quota exhausted during QA), and a live blocked worker verdict (unit-tested only). No auth, credential, telemetry, or deployment paths changed.</li>
+</ul>
+
+<h2>5. Findings</h2>
+
+<lf-component name="decision" id="f1" title="Sync 12 commits / 57 merge conflicts from origin/main" recommendation="Fix here">
+  <p>PR #2042 is <code>DIRTY</code> against <code>origin/main</code> (<code>#2034</code>, <code>#2036</code> Pause, <code>#2047</code> graph reorder, <code>#2048</code> review pages, <code>#2049</code> verify removal, <code>#2050</code>–<code>#2057</code>). Must be synced, conflict-resolved, and verified before delivery.</p>
+</lf-component>
+
+<lf-component name="decision" id="f2" title="RoadmapView row Continue omits --at-arrival" recommendation="Fix here">
+  <p><code>TaskWorkflowBar</code> and iOS pass <code>--at-arrival &lt;id&gt;</code>, while clicking <em>Continue</em> on a row in <code data-path="swift/LoopflowMac/Views/RoadmapView.swift">RoadmapView.swift</code> calls <code>startTask(nil)</code> because <code>RoadmapTask</code> doesn't carry <code>breakpoint_arrival</code> yet. Small DTO addition for uniform arrival safety.</p>
+</lf-component>
+
+<lf-component name="decision" id="f3" title="Retired human: parse error copy in graph/mod.rs" recommendation="Fix here">
+  <p>Parse errors for the retired <code>human:</code> key in <code data-path="rust/loopflow-execution/src/graph/mod.rs">graph/mod.rs</code> still mention <code>interactive: &lt;skill&gt;</code>, and the unknown-mapping error omits <code>break</code>. Three-line copy fix during sync (or leave with LOO-1100).</p>
+</lf-component>
+
+<lf-component name="decision" id="f4" title="Producerless / leading - break handoff wording" recommendation="Drop">
+  <p>Jumping via <code>--from &lt;breakpoint&gt;</code> or putting <code>- break</code> at step 0 has no producer process, so the handoff omits <code>scratch/</code> links but still prints "Present the result, links, proposed next action and questions in this conversation."</p>
+</lf-component>
+
+<lf-component name="decision" id="f5" title="Already tracked: Antigravity idle wake (LOO-1098) &amp; legacy interactive: removal (LOO-1100)" recommendation="Drop">
+  <p>Both are already tracked: <strong>LOO-1098</strong> (currently at <code>ship-review</code>) handles immediate <code>agy</code> idle wake; <strong>LOO-1100</strong> retires temporary <code>interactive:</code> YAML/capture compatibility readers after this release ships.</p>
+</lf-component>
+
+<lf-component name="decision" id="f6" title="Five pre-existing QA edges outside LOO-1096" recommendation="Drop">
+  <p>(1) Claude <code>Esc</code> mid-tool fires no Stop hook; (2) limit retry keeps the captured agent until interrupt/fresh run; (3) builtin <code>build.yaml</code> names <code>qa</code> bare (shadowed by a repo <code>qa</code> Graph); (4) status prints running step UUID; (5) <code>TaskRow.next</code> prints <code>lf task run</code> when <code>actions.recommended</code> is <code>NoAction</code> on blocked Tasks.</p>
+</lf-component>
+
+<h2>6. Decisions for this review</h2>
+
+<div data-choice="q1" data-label="1. Sync &amp; small fixes">
+  <p><strong>1. Sync onto <code>origin/main</code> (required — 57 conflicts) and small fixes before delivery?</strong></p>
+  <button data-value="1a">1a · Sync onto main (adopting #2036 Pause, #2047 graphs, #2048 review pages, #2049 verify removal), plus fix RoadmapView --at-arrival and graph/mod.rs copy</button>
+  <button data-value="1b">1b · Sync onto main only (skip RoadmapView breakpoint_arrival; leave graph/mod.rs copy for LOO-1100)</button>
+</div>
+
+<div data-choice="q2" data-label="2. Plain Continue on iterate recommendation">
+  <p><strong>2. When a reviewer recommends another loop pass (<code>iterate</code>), what should plain Continue (<code>lf task run</code>) do?</strong></p>
+  <button data-value="2a">2a · Built: follow the worker's recommendation (iterate or advance); use --decision only to override</button>
+  <button data-value="2b">2b · Always advance on plain Continue unless you explicitly ask to iterate</button>
+</div>
+
+<div data-choice="q3" data-label="3. Sidebar order when Sort by status is off">
+  <p><strong>3. When "Sort by status" is off in Desktop's sidebar, where should a Task at a breakpoint sit?</strong></p>
+  <button data-value="3a">3a · Built: keep manual drag order intact; float breakpoints first in Now and when Sort by status is on</button>
+  <button data-value="3b">3b · Float breakpoints to the top of the sidebar even when Sort by status is off</button>
+</div>
+
+<div data-choice="q4" data-label="4. Workflow bar breakpoint display">
+  <p><strong>4. How should Desktop's workflow bar show breakpoints?</strong></p>
+  <button data-value="4a">4a · Built: separate marked item beside its step (explore · 👤 after-explore · plan), matching lf graph show</button>
+  <button data-value="4b">4b · Put the person badge on the preceding step (explore 👤 · plan) to keep the bar narrower</button>
+</div>
+
+<div data-choice="q5" data-label="5. Blocked breakpoint button in Desktop">
+  <p><strong>5. On a blocked breakpoint in Desktop, what should the main button do?</strong></p>
+  <button data-value="5a">5a · Built: hide plain Continue and show the blocker reason so you reply in the conversation</button>
+  <button data-value="5b">5b · Keep Continue visible and focus the conversation input when clicked</button>
+</div>
+
+<div data-choice="q6" data-label="6. Pre-existing QA edges">
+  <p><strong>6. What should happen to the five pre-existing QA edges (f6)?</strong></p>
+  <button data-value="6a">6a · Drop here (no new Task)</button>
+  <button data-value="6b">6b · File one grouped follow-up Task (say which items to include in a note below)</button>
+</div>
+
+<div data-question="notes" data-label="Additional notes or edits">
+  <p>Anything else to adjust before syncing and delivering (for example, initial-step <code>task create --run</code> behavior or leading <code>- break</code> copy)?</p>
+  <textarea></textarea>
+</div>

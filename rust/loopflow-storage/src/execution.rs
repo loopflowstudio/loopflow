@@ -58,13 +58,13 @@ impl TaskLocation {
 pub enum TaskState {
     /// No checkout yet.
     Unstarted,
-    /// A checkout, no Graph running and not at an interactive step: before its first run,
+    /// A checkout, no Graph running and not at a breakpoint: before its first run,
     /// or after a stopped one.
     Idle,
-    /// Between Graphs at an interactive step, in a conversation in its Task Session.
+    /// Parked at a breakpoint, its Task conversation presenting what the preceding step produced.
     Active,
-    /// A Graph runs for it. Its auto setting says whether the run stands in
-    /// at interactive steps or stops there for a person.
+    /// A Graph runs for it. Its auto setting says whether the run passes
+    /// breakpoints or stops there for a person.
     Moving,
     /// Execution is held until explicitly unpaused.
     Paused,

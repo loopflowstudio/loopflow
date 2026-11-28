@@ -2,4 +2,4 @@ description: Investigate and report, with no PR. The Task ends on findings you a
 steps:
 - loop:
     - step: research
-    - interactive: research
+    - break

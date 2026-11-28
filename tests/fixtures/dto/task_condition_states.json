@@ -76,7 +76,8 @@
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "completed": {
     "task": {
@@ -178,7 +179,6 @@
             "id": null,
             "label": "implement",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue"
@@ -190,7 +190,6 @@
             "id": null,
             "label": "compress",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue"
@@ -202,7 +201,6 @@
             "id": null,
             "label": "sync",
             "kind": "op",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue",
@@ -215,7 +213,6 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue",
@@ -228,7 +225,6 @@
             "id": null,
             "label": "loop-or-next",
             "kind": "skill",
-            "interactive": false,
             "returns_to": 0,
             "sources": [
               "pursue"
@@ -240,7 +236,6 @@
             "id": null,
             "label": "pr-publish",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "pursue"
@@ -374,7 +369,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "stale": {
     "task": {
@@ -476,7 +472,6 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -488,7 +483,6 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -501,7 +495,6 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -514,7 +507,6 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -526,8 +518,7 @@
             "key": 4,
             "id": "demo",
             "label": "demo",
-            "kind": "skill",
-            "interactive": true,
+            "kind": "breakpoint",
             "returns_to": null,
             "sources": [
               "feature",
@@ -540,7 +531,6 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -553,7 +543,6 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -568,7 +557,6 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -587,7 +575,6 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -642,7 +629,8 @@
       "open",
       "moving",
       "working"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "unavailable": {
     "task": {
@@ -746,7 +734,8 @@
       "open",
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "user_wait": {
     "task": {
@@ -848,7 +837,6 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -860,7 +848,6 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -873,7 +860,6 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -886,7 +872,6 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -898,8 +883,7 @@
             "key": 4,
             "id": "demo",
             "label": "demo",
-            "kind": "skill",
-            "interactive": true,
+            "kind": "breakpoint",
             "returns_to": null,
             "sources": [
               "feature",
@@ -912,7 +896,6 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -925,7 +908,6 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -940,7 +922,6 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -959,7 +940,6 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1015,7 +995,8 @@
       "open",
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "dirty": {
     "task": {
@@ -1119,7 +1100,8 @@
       "open",
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   "authored_commits": {
     "task": {
@@ -1221,7 +1203,6 @@
             "id": "design",
             "label": "task-design",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1233,7 +1214,6 @@
             "id": "implement",
             "label": "implement",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1246,7 +1226,6 @@
             "id": null,
             "label": "realign",
             "kind": "skill",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1259,7 +1238,6 @@
             "id": "decide",
             "label": "loop-or-next",
             "kind": "skill",
-            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1271,8 +1249,7 @@
             "key": 4,
             "id": "demo",
             "label": "demo",
-            "kind": "skill",
-            "interactive": true,
+            "kind": "breakpoint",
             "returns_to": null,
             "sources": [
               "feature",
@@ -1285,7 +1262,6 @@
             "id": "decide_delivery",
             "label": "loop-or-next",
             "kind": "skill",
-            "interactive": false,
             "returns_to": 1,
             "sources": [
               "feature",
@@ -1298,7 +1274,6 @@
             "id": null,
             "label": "xor-route",
             "kind": "xor",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature"
@@ -1313,7 +1288,6 @@
                     "id": "patch",
                     "label": "patch",
                     "kind": "skill",
-                    "interactive": false,
                     "returns_to": null,
                     "sources": [],
                     "paths": []
@@ -1332,7 +1306,6 @@
             "id": null,
             "label": "pr land -c",
             "kind": "op",
-            "interactive": false,
             "returns_to": null,
             "sources": [
               "feature",
@@ -1413,6 +1386,113 @@
       "open",
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
+  },
+  "breakpoint": {
+    "task": {
+      "id": "breakpoint",
+      "identifier": "W2-A8",
+      "name": "Review layout options",
+      "description": "",
+      "rank": 8,
+      "assignee": null,
+      "state": "started",
+      "completed_at": null,
+      "due_date": null,
+      "sync": {
+        "actions": []
+      },
+      "tracker_id": null,
+      "parent_id": null,
+      "tracker_state": {
+        "state": "available",
+        "synced_at": null
+      },
+      "repo_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "machine_id": "home_00000000000000000000000000000001",
+        "machine_label": "build-server",
+        "slug": "breakpoint",
+        "branch": "jack/breakpoint",
+        "worktree": "/src/loopflow.breakpoint",
+        "base_commit": "fixture-base",
+        "local_exists": true
+      }
+    },
+    "runtime": {
+      "work_id": "breakpoint",
+      "status": "active",
+      "completion_pending": null,
+      "reason": "ready",
+      "updated_at": "2026-07-15T00:00:30Z",
+      "provider": "codex",
+      "owner": {
+        "person": "Jack Heart",
+        "person_id": null,
+        "person_key": "jack@loopflow.studio",
+        "machine": {
+          "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+          "label": "mini"
+        }
+      }
+    },
+    "next_move": {
+      "owner": "user",
+      "reason": "At breakpoint after-explore."
+    },
+    "section": "working",
+    "owned_by_you": true,
+    "runs_on": null,
+    "actions": {
+      "recommended": "run",
+      "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "At breakpoint after-explore.",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 30,
+      "local_progress": {
+        "state": "observed",
+        "unsettled": false,
+        "dirty": false,
+        "authored_commits": false,
+        "recovery_required": false,
+        "reason": null
+      },
+      "unresolved_execution": true
+    },
+    "graph_name": "feature",
+    "latest_graph_process": null,
+    "execution": {
+      "state": "idle",
+      "reason": "No active execution",
+      "step": null,
+      "captured": null,
+      "died": null,
+      "outlook": null
+    },
+    "run_control": {
+      "pausing": false,
+      "unavailable": null
+    },
+    "pr": null,
+    "graph_source": null,
+    "lifecycle": "active",
+    "selection_states": [
+      "open",
+      "active",
+      "working",
+      "breakpoint"
+    ],
+    "working_group": null,
+    "breakpoint_arrival": null
   }
 }

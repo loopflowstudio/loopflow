@@ -25,8 +25,8 @@ liveness is not permission. A run listed in status is not a live process: its
    ambiguous, ask; headless, say so and stop.
 
 2. **Know where it stands.** A Task runs one graph (`work.graph` in status) and
-   stands at a step of it. At an interactive step it waits in its conversation
-   for a person; say which step.
+   stands at a step of it. A breakpoint opens a review of the finished work
+   in its Task conversation.
 
    ```bash
    lf task run <issue>                 # continue, or rerun a stopped run
@@ -41,13 +41,13 @@ liveness is not permission. A run listed in status is not a live process: its
    can't approve a design or skip a review.
 
 3. **Advance it.** `lf task run` returns once the graph is running and stops at
-   the next interactive step. Read a failed step's log before anything else,
+   the next breakpoint. Read a failed step's log before anything else,
    fix the cause if you can, and retry with `--reason "<what changed>"` only
    when something changed. Never relaunch to get past a blocker.
 
-   `lf task auto on` turns auto on: the run stands in at the interactive steps and
-   may merge the PR. `lf -b task run` stands in for its own run, and a run
-   with no interactive step left ahead may merge it too. Use them only when asked to ship or land. After
+   `lf task auto on` follows the workers’ recommendations through breakpoints
+   and may merge the PR. `lf -b task run` does this for one run. A run
+   with no breakpoint left ahead may merge it too. Use them only when asked to ship or land. After
    someone turns auto off (`lf task auto off`), only a requested `lf task auto on` turns
    it on again.
 

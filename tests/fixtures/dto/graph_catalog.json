@@ -11,7 +11,6 @@
           "id": "design",
           "label": "task-design",
           "kind": "skill",
-          "interactive": false,
           "returns_to": null,
           "sources": [
             "feature"
@@ -23,7 +22,6 @@
           "id": "implement",
           "label": "implement",
           "kind": "skill",
-          "interactive": false,
           "returns_to": null,
           "sources": [
             "feature",
@@ -36,7 +34,6 @@
           "id": null,
           "label": "realign",
           "kind": "skill",
-          "interactive": false,
           "returns_to": null,
           "sources": [
             "feature",
@@ -49,7 +46,6 @@
           "id": "decide",
           "label": "loop-or-next",
           "kind": "skill",
-          "interactive": false,
           "returns_to": 1,
           "sources": [
             "feature",
@@ -61,8 +57,7 @@
           "key": 4,
           "id": "demo",
           "label": "demo",
-          "kind": "skill",
-          "interactive": true,
+          "kind": "breakpoint",
           "returns_to": null,
           "sources": [
             "feature",
@@ -75,7 +70,6 @@
           "id": "decide_delivery",
           "label": "loop-or-next",
           "kind": "skill",
-          "interactive": false,
           "returns_to": 1,
           "sources": [
             "feature",
@@ -88,7 +82,6 @@
           "id": null,
           "label": "xor-route",
           "kind": "xor",
-          "interactive": false,
           "returns_to": null,
           "sources": [
             "feature"
@@ -103,7 +96,6 @@
                   "id": "patch",
                   "label": "patch",
                   "kind": "skill",
-                  "interactive": false,
                   "returns_to": null,
                   "sources": [],
                   "paths": []
@@ -122,7 +114,6 @@
           "id": null,
           "label": "pr land -c",
           "kind": "op",
-          "interactive": false,
           "returns_to": null,
           "sources": [
             "feature",
@@ -200,33 +191,29 @@
       "steps": [
         {
           "name": "design",
-          "interactive": false
+          "kind": "stage"
         },
         {
           "name": "pursue",
-          "interactive": true
+          "kind": "stage_with_breakpoint"
         },
         {
           "name": "xor-route",
-          "interactive": false
+          "kind": "stage"
         },
         {
           "name": "queue",
-          "interactive": false
+          "kind": "stage"
         }
       ],
+      "breakpoints": [
+        "demo"
+      ],
+      "sentence": "You take part at demo.",
       "start": {
         "action": "run",
         "label": "Run: design"
-      },
-      "interactive_steps": [
-        {
-          "name": "demo",
-          "skill": "demo",
-          "description": "Put the change in someone's hands so they can feel it."
-        }
-      ],
-      "sentence": "You take part at demo."
+      }
     }
   },
   {

@@ -7,6 +7,26 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func breakpointOffersContinuationForThePresentedArrival() throws {
+        let data = try loadFixtureData("task_graph_breakpoint.json")
+        let graph = try JSONDecoder().decode(TaskGraph.self, from: data)
+        #expect(graph.position == .breakpoint(step: "after-research", arrival: "11111111-1111-4111-8111-111111111111", blocker: nil))
+        #expect(graph.breakpoints == ["after-research"])
+        #expect(graph.waitingStep == "after-research")
+        #expect(graph.steps.map(\.kind) == [.stage, .breakpoint])
+        #expect(graph.control.action == .continue)
+        #expect(graph.control.label == "Continue")
+        #expect(try JSONDecoder().decode(TaskGraph.self, from: JSONEncoder().encode(graph)) == graph)
+
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var position = try #require(wire["position"] as? [String: Any])
+        position.removeValue(forKey: "blocker")
+        wire["position"] = position
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskGraph.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
     @Test func screenReadsDecodeTheirCompletePayloads() throws {
         let board = try JSONDecoder().decode(PlanBoard.self, from: loadFixtureData("plan_board.json"))
         #expect(!board.tasks.items.isEmpty)
@@ -209,8 +229,8 @@ struct DTOFixtureTests {
     @Test func taskRunExplanationsPreserveActionsAndMissingEvidence() throws {
         let data = try loadFixtureData("task_run_explanations.json")
         let reports = try JSONDecoder().decode([TaskRunExplanation].self, from: data)
-        #expect(reports[0].action == .run(graph: "feature", takeUp: true, from: "start", stopsAt: "explore"))
-        #expect(reports[1].action == .wait(graph: "feature", takeUp: false, step: "demo"))
+        #expect(reports[0].action == .run(graph: "feature", takeUp: true, from: "start", stopsAt: "after-explore"))
+        #expect(reports[1].action == .run(graph: "feature", takeUp: false, from: "demo", stopsAt: "after-demo"))
         #expect(reports[2].action == .end(graph: "proof", takeUp: false))
         #expect(reports[3].action == nil)
         #expect(try JSONDecoder().decode([TaskRunExplanation].self, from: JSONEncoder().encode(reports)) == reports)
@@ -451,12 +471,11 @@ struct DTOFixtureTests {
         #expect(work.graphProcesses[0].state == .current)
         let graph = try #require(work.graph)
         #expect(graph.name == "feature")
-        #expect(graph.interactiveSteps.map(\.name) == ["review-design", "demo"])
-        #expect(graph.interactiveSteps.map(\.description) == ["you review the plan", "you try the change"])
+        #expect(graph.breakpoints == ["review-design", "demo"])
         #expect(graph.position == .run(step: "review-design", at: "implement", lfProcessId: work.graphProcesses[0].id, running: true))
         #expect(graph.waitingStep == nil)
         #expect(graph.steps.map(\.name) == ["plan", "review-design", "build", "demo"])
-        #expect(graph.steps.map(\.interactive) == [false, true, false, true])
+        #expect(graph.steps.map(\.kind) == [.stage, .stageWithBreakpoint, .stage, .breakpoint])
         #expect(graph.currentStep == 2)
         #expect(graph.control == WorkflowControl(action: .pause, label: "build · implement"))
         #expect(graph.sentence == "build is running implement. You are next needed at demo.")

@@ -159,14 +159,16 @@ pub struct TaskCommentThread {
 }
 
 impl SqliteStore {
-    /// The Task's comments that are not also steers. A direction comment
-    /// reaches Sessions once, as the steer saved with source `comment:<id>`.
+    /// The Task's comments that are not direction. A direction comment
+    /// reaches Sessions once, as the steer saved with source `comment:<id>`;
+    /// a breakpoint reply reaches the next step as its handoff.
     pub fn task_undirected_comments(&self, task: &TaskId) -> StoreResult<Vec<TaskComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare_cached(
             "SELECT id,body,author,created_at FROM task_comments c
              WHERE task_id=?1
                AND NOT EXISTS(SELECT 1 FROM steers s WHERE s.source='comment:'||c.id)
+               AND instr(c.body,'<!-- loopflow-breakpoint:')=0
              ORDER BY created_at,id",
         )?;
         let comments = query

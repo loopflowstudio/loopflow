@@ -115,7 +115,7 @@ public struct TaskRow<Trailing: View>: View {
                 if let status { word(status) }
                 if auto {
                     Text("Auto")
-                        .help("Auto is on: the run takes the interactive steps and lands the Task")
+                        .help("Auto is on: the run continues through breakpoints and lands the Task")
                         .accessibilityIdentifier("work-task-auto-\(id)")
                 }
                 if let context {

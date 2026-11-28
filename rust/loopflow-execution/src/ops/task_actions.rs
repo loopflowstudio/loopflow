@@ -31,6 +31,20 @@ pub struct TaskActionModel {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BreakpointActionEvidence<'a> {
+    pub blocked: bool,
+    pub sentence: &'a str,
+}
+
+impl BreakpointActionEvidence<'_> {
+    /// Whether this parked breakpoint owns the Task's execution state: always when
+    /// idle, and when blocked if the worker's pending verdict is blocked.
+    pub fn owns_execution(self, state: TaskExecutionState) -> bool {
+        state == TaskExecutionState::Idle || (state == TaskExecutionState::Blocked && self.blocked)
+    }
+}
+
 #[derive(Debug)]
 pub struct TaskActionEvidence<'a> {
     pub status: TaskState,
@@ -40,12 +54,26 @@ pub struct TaskActionEvidence<'a> {
     pub latest_pr_presentation_current: Option<bool>,
     /// The Task's Graph stands at `end`.
     pub at_end: bool,
+    /// The Task's Graph is parked at a breakpoint.
+    pub breakpoint: Option<BreakpointActionEvidence<'a>>,
     pub open_children: u32,
     pub completion_refusal: Option<&'a str>,
     pub run_refusal: Option<&'a str>,
     pub ci: Option<&'a CiObservation>,
     pub predecessor_phase: Option<PrPhase>,
     pub launch_refusal: Option<&'a str>,
+}
+
+impl<'a> TaskActionEvidence<'a> {
+    /// Execution that still determines the next action after a Graph run parks.
+    pub fn pending_execution(&self) -> Option<&'a TaskExecutionSnapshot> {
+        self.execution.filter(|execution| {
+            execution.state != TaskExecutionState::Idle
+                && !self
+                    .breakpoint
+                    .is_some_and(|stop| stop.owns_execution(execution.state))
+        })
+    }
 }
 
 pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
@@ -61,21 +89,31 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     {
         return action(TaskAction::NoAction, &execution.reason);
     }
-    let finished = Finished::of(evidence.status, evidence.latest_pr_phase, evidence.at_end);
+    let finished = Finished::of(
+        evidence.status,
+        evidence.latest_pr_phase,
+        evidence.at_end,
+        evidence.breakpoint.is_some(),
+    );
     if finished.is_none() {
-        if let Some(execution) = evidence
-            .execution
-            .filter(|execution| execution.state != TaskExecutionState::Idle)
-        {
+        if let Some(execution) = evidence.pending_execution() {
             return action(TaskAction::NoAction, &execution.reason);
         }
         if let Some(refusal) = evidence.launch_refusal {
             return action(TaskAction::NoAction, refusal);
         }
     }
-    let model = match finished {
-        Some(finished) => finished_action(finished, evidence),
-        None => phase_action(evidence),
+    let model = match (finished, evidence.breakpoint) {
+        (Some(finished), _) => finished_action(finished, evidence),
+        (None, Some(breakpoint)) => action(
+            if breakpoint.blocked {
+                TaskAction::NoAction
+            } else {
+                TaskAction::Run
+            },
+            breakpoint.sentence,
+        ),
+        (None, None) => phase_action(evidence),
     };
     let model = apply_predecessor(model, evidence.predecessor_phase);
     apply_run_refusal(model, evidence.run_refusal)
@@ -138,9 +176,15 @@ pub enum Finished {
 }
 
 impl Finished {
-    /// `None` while the Task still has work of its own, or is closed.
-    pub fn of(status: TaskState, pr: Option<PrPhase>, at_end: bool) -> Option<Self> {
-        if status.is_terminal() {
+    /// `None` while the Task still has work of its own (including a parked
+    /// breakpoint), or is closed.
+    pub fn of(
+        status: TaskState,
+        pr: Option<PrPhase>,
+        at_end: bool,
+        at_breakpoint: bool,
+    ) -> Option<Self> {
+        if status.is_terminal() || at_breakpoint {
             return None;
         }
         match pr {
@@ -221,7 +265,7 @@ pub fn ci_failure_reason(ci: &CiObservation) -> String {
 mod tests {
     use time::OffsetDateTime;
 
-    use super::{derive_task_actions, TaskAction, TaskActionEvidence};
+    use super::{derive_task_actions, BreakpointActionEvidence, TaskAction, TaskActionEvidence};
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
     use loopflow_storage::execution::TaskState;
     use loopflow_storage::work::task::{
@@ -236,6 +280,7 @@ mod tests {
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
             at_end: false,
+            breakpoint: None,
             open_children: 0,
             completion_refusal: None,
             run_refusal: None,
@@ -458,5 +503,78 @@ mod tests {
         let model = derive_task_actions(&evidence);
 
         assert_eq!(model.recommended, Some(TaskAction::Run));
+    }
+
+    #[test]
+    fn parked_breakpoint_owns_action_across_pr_phases_and_blocked_verdicts() {
+        // after-explore with no PR recommends Run with the breakpoint sentence.
+        let mut explore = evidence(PrPhase::Working, None);
+        explore.latest_pr_phase = None;
+        explore.breakpoint = Some(BreakpointActionEvidence {
+            blocked: false,
+            sentence: "At breakpoint after-explore.",
+        });
+        let model = derive_task_actions(&explore);
+        assert_eq!(model.recommended, Some(TaskAction::Run));
+        assert_eq!(model.reason, "At breakpoint after-explore.");
+
+        // after-ship-review with an open PR does not fall through to `lf land`.
+        let mut ship_review = evidence(PrPhase::Open, None);
+        ship_review.breakpoint = Some(BreakpointActionEvidence {
+            blocked: false,
+            sentence: "At breakpoint after-ship-review.",
+        });
+        let model = derive_task_actions(&ship_review);
+        assert_eq!(model.recommended, Some(TaskAction::Run));
+        assert_eq!(model.reason, "At breakpoint after-ship-review.");
+
+        // after-verify with a merged PR is not treated as Finished::Merged.
+        let mut verify = evidence(PrPhase::Merged, None);
+        verify.breakpoint = Some(BreakpointActionEvidence {
+            blocked: false,
+            sentence: "At breakpoint after-verify.",
+        });
+        let model = derive_task_actions(&verify);
+        assert_eq!(model.recommended, Some(TaskAction::Run));
+        assert_eq!(model.reason, "At breakpoint after-verify.");
+
+        // Blocked worker verdict (auto off -> Idle, auto on / -b -> Blocked) emits NoAction
+        // with the breakpoint sentence rather than generic execution error text.
+        for state in [TaskExecutionState::Idle, TaskExecutionState::Blocked] {
+            let execution = TaskExecutionSnapshot {
+                state,
+                reason: "blocked: Two incompatible schema migrations".into(),
+                step: Some("ship-review".into()),
+                captured: None,
+                died: None,
+                outlook: None,
+            };
+            let mut blocked = evidence(PrPhase::Open, None);
+            blocked.execution = Some(&execution);
+            blocked.breakpoint = Some(BreakpointActionEvidence {
+                blocked: true,
+                sentence:
+                    "At breakpoint after-ship-review. Blocked: Two incompatible schema migrations",
+            });
+            let model = derive_task_actions(&blocked);
+            assert_eq!(model.recommended, Some(TaskAction::NoAction));
+            assert_eq!(
+                model.reason,
+                "At breakpoint after-ship-review. Blocked: Two incompatible schema migrations"
+            );
+        }
+
+        // Launch and run refusals still suppress Run at a breakpoint.
+        let mut refused = explore;
+        refused.run_refusal = Some("Task worktree is still initializing");
+        let model = derive_task_actions(&refused);
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(model.reason, "Task worktree is still initializing");
+
+        refused.run_refusal = None;
+        refused.launch_refusal = Some("next launch configuration is invalid");
+        let model = derive_task_actions(&refused);
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(model.reason, "next launch configuration is invalid");
     }
 }

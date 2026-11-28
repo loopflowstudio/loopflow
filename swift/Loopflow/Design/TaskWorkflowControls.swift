@@ -31,7 +31,7 @@ public struct TaskWorkflowControls<Items: View>: View {
 
     public var body: some View {
         HStack(spacing: Spacing.sm) {
-            primary
+            if actions.breakpointBlocker == nil { primary }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: Spacing.xs) { track(folded: false) }
                 HStack(spacing: Spacing.xs) { track(folded: true) }
@@ -41,6 +41,13 @@ public struct TaskWorkflowControls<Items: View>: View {
             .accessibilityElement(children: .contain)
             .accessibilityHint(actions.sentence ?? "")
             .accessibilityIdentifier("task-workflow-track")
+            if let blocker = actions.breakpointBlocker {
+                Text(blocker)
+                    .font(Typography.meta)
+                    .foregroundStyle(palette.warning)
+                    .lineLimit(1)
+                    .help(blocker)
+            }
             Spacer(minLength: Spacing.md)
             HStack(spacing: Spacing.md) {
                 auto
@@ -58,7 +65,14 @@ public struct TaskWorkflowControls<Items: View>: View {
             if index == actions.chip {
                 chip
             } else if !folded {
-                stepButton(step, index: index)
+                if step.kind == .breakpoint {
+                    stepLabel(step, index: index)
+                        .fixedSize()
+                        .help("Breakpoint: \(step.name)")
+                        .accessibilityIdentifier("task-workflow-step-\(index)")
+                } else {
+                    stepButton(step, index: index)
+                }
             }
         }
         if actions.chip >= actions.track.count { chip }
@@ -69,19 +83,16 @@ public struct TaskWorkflowControls<Items: View>: View {
             || actions.control?.action == .pause || actions.control?.action == .pausing
     }
 
-    private func stepButton(_ step: TaskGraph.Step, index: Int) -> some View {
-        Button { run(step.name) } label: {
-            HStack(spacing: Spacing.xxs) {
-                if step.interactive {
-                    Image(systemName: "person.fill").font(Typography.meta)
-                        .accessibilityLabel("you take part")
-                }
-                Text(step.name)
-            }
+    private func stepLabel(_ step: TaskGraph.Step, index: Int) -> some View {
+        WorkflowStepLabel(step: step)
             .foregroundStyle(index < actions.chip ? palette.textSecondary : palette.textTertiary)
             .padding(.horizontal, Spacing.xs)
             .frame(height: transport)
-            .contentShape(Rectangle())
+    }
+
+    private func stepButton(_ step: TaskGraph.Step, index: Int) -> some View {
+        Button { run(step.name) } label: {
+            stepLabel(step, index: index).contentShape(Rectangle())
         }
         .buttonStyle(StepButtonStyle())
         .fixedSize()
@@ -112,8 +123,14 @@ public struct TaskWorkflowControls<Items: View>: View {
         } label: {
             HStack(spacing: Spacing.xs) {
                 // Folded on a narrow pane, the chip truncates before Auto and ✓ move.
-                Text(pending ?? actions.control?.label ?? "Reading workflow…").lineLimit(1).truncationMode(.tail)
-                    .font(Typography.textStrong)
+                if pending == nil, actions.breakpointArrival != nil,
+                   actions.track.indices.contains(actions.chip),
+                   actions.track[actions.chip].kind == .breakpoint {
+                    WorkflowStepLabel(step: actions.track[actions.chip])
+                } else {
+                    Text(pending ?? actions.control?.label ?? "Reading workflow…").lineLimit(1).truncationMode(.tail)
+                        .font(Typography.textStrong)
+                }
                 Image(systemName: "chevron.down").imageScale(.small)
             }
             .foregroundStyle(ink)
@@ -173,7 +190,7 @@ public struct TaskWorkflowControls<Items: View>: View {
         default: "play.fill"
         }
         let primaryAction: (() -> Void)? = switch control?.action {
-        case .run: { run(nil) }
+        case .run, .continue: { run(nil) }
         case .pause: { pause(.pause) }
         case .unpause, .resume: { pause(.unpause) }
         case .done, .wait, .pausing, nil: nil

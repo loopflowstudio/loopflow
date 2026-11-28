@@ -106,8 +106,8 @@ time (120 s after `observed_at`) needs `program_status` NULL: one OSC 7501
 report leaves `{"seen":true}` for good, so use a fresh conversation, then
 `lf steer <task> '…'` and fire `--moment tool` to deliver it, which sets
 `yielded=0`; the title turns Available 120 s later with no revision moving
-(`select * from store_revisions` before and after). A Task at an
-interactive step needs `graph:` in `.lf/config.yaml` committed and merged
+(`select * from store_revisions` before and after). A Task at a
+breakpoint needs `graph:` in `.lf/config.yaml` committed and merged
 into the Task's checkout before `lf task run`. `sample <server> 1` shows
 `title-reader` in `recv` when nothing is due and `recv_timeout` when a
 deadline is armed.

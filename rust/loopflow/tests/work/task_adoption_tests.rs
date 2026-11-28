@@ -30,7 +30,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
         // The Project names a graph; its planning is what the launches below test.
         repo.create_file(
             ".lf/graphs/adoption.yaml",
-            "- cmd: sync --plan\n- interactive: demo\n",
+            "- cmd: sync --plan\n- break: demo\n",
         );
         repo.stage_all();
         repo.commit("Fixture planning");

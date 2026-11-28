@@ -64,7 +64,7 @@ fn loop_passes(graphs: &[GraphExecution]) -> BTreeMap<String, u32> {
                 .node_at(step.key)
                 .is_some_and(|node| node.returns_to.is_some());
             if decides && next.key <= step.key && next.iterations != step.iterations {
-                *passes.entry(graph.label(step)).or_default() += 1;
+                *passes.entry(step.label(&graph.compiled)).or_default() += 1;
             }
         }
     }
@@ -180,7 +180,6 @@ mod tests {
                 id: None,
                 label: "review".into(),
                 kind: crate::graph::GraphNodeKind::Skill,
-                interactive: false,
                 returns_to: Some(0),
                 sources: Vec::new(),
                 paths: Vec::new(),

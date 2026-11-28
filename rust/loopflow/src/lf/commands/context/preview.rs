@@ -217,9 +217,7 @@ fn preview_graph(
             arguments: message.unwrap_or_default().to_owned(),
         });
         let mut input = message.unwrap_or_default().to_owned();
-        if let Some(step) = items.first() {
-            GraphOutput::append_step_instructions(step, &mut input);
-        }
+        GraphOutput::append_step_instructions(&items, 0, &mut input);
         Some(Box::new(run::preview_prompt(
             repo,
             Some(&skill.skill.name),
@@ -237,7 +235,7 @@ fn preview_graph(
         inputs: &mut Vec<GraphNodeInput>,
     ) {
         for node in nodes {
-            let input = if node.kind == GraphNodeKind::Op {
+            let input = if matches!(node.kind, GraphNodeKind::Op | GraphNodeKind::Breakpoint) {
                 GraphInput::NotAgent
             } else if let Some(input) = current.take() {
                 GraphInput::Current { input }
@@ -269,6 +267,9 @@ impl GraphContextPreview {
         fn labels(nodes: &[GraphNode], text: &mut String) {
             for node in nodes {
                 text.push_str(&format!("\n{}: {}", node.key, node.label));
+                if node.kind == GraphNodeKind::Breakpoint {
+                    text.push_str(" [break]");
+                }
                 if let Some(target) = node.returns_to {
                     text.push_str(&format!(" (returns to {target})"));
                 }
@@ -290,7 +291,18 @@ impl GraphContextPreview {
                 GraphInput::Unavailable { reason } => {
                     text.push_str(&format!("unavailable: {reason}"))
                 }
-                GraphInput::NotAgent => text.push_str("not an agent prompt (command not executed)"),
+                GraphInput::NotAgent => {
+                    let detail = if self
+                        .compiled
+                        .node_at(node.node)
+                        .is_some_and(|n| n.kind == GraphNodeKind::Breakpoint)
+                    {
+                        "breakpoint"
+                    } else {
+                        "command not executed"
+                    };
+                    text.push_str(&format!("not an agent prompt ({detail})"));
+                }
             }
         }
         text

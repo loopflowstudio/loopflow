@@ -5,7 +5,7 @@ Read when the change touches how Antigravity (`agy`) launches, its hooks, or wha
 Real `agy` (signed in under the account's real `HOME`), branch `lf`, isolated
 `LF_HOME`. The default model is free-tier Gemini; a step costs nothing here.
 Set up as `.lf/qa/opencode-pi-workers.md` does (repo with a bare origin,
-`.lf/graphs/qa.yaml` of `- step: implement` then `- interactive: ship-review`,
+`.lf/graphs/qa.yaml` of `- step: implement`, `- step: ship-review`, `- break`,
 `graph: qa`, `lf server run` with stdin closed), then:
 
 ```bash

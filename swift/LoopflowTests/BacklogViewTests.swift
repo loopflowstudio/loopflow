@@ -271,21 +271,21 @@ struct BacklogViewTests {
     @Test func startFlowsReadStopsMergesAndPiecesFromTheCatalog() throws {
         func entry(_ name: String, _ description: String?, _ steps: [[String: Any]], includedBy: [String] = [],
                    runs: String = "task") throws -> GraphCatalogEntry {
-            let stops = steps.filter { $0["interactive"] as? Bool == true }
-                .map { ["name": $0["label"], "skill": $0["label"], "description": NSNull()] }
+            let stops = steps.filter { $0["kind"] as? String == "breakpoint" }
+                .compactMap { $0["label"] as? String }
             let json: [String: Any] = ["name": name, "description": description ?? NSNull(), "source": NSNull(),
                                        "compiled": ["name": name, "steps": steps], "composition": NSNull(), "unavailable": NSNull(),
-                                       "workflow": ["start": ["action": "run", "label": "Run"], "steps": [[String: Any]](), "interactive_steps": stops, "sentence": ""],
+                                       "workflow": ["start": ["action": "run", "label": "Run"], "steps": [[String: Any]](), "breakpoints": stops, "sentence": ""],
                                        "included_by": includedBy, "runs": runs]
             return try JSONDecoder().decode(GraphCatalogEntry.self, from: JSONSerialization.data(withJSONObject: json))
         }
-        func node(_ key: Int, _ label: String, kind: String = "skill", interactive: Bool = false) -> [String: Any] {
-            ["key": key, "id": NSNull(), "label": label, "kind": kind, "interactive": interactive, "returns_to": NSNull(),
+        func node(_ key: Int, _ label: String, kind: String = "skill") -> [String: Any] {
+            ["key": key, "id": NSNull(), "label": label, "kind": kind, "returns_to": NSNull(),
              "sources": [], "paths": []]
         }
         let catalog = [
             try entry("code", "Build and deliver. You try it.", [
-                node(0, "implement"), node(1, "demo", interactive: true), node(2, "land --wait-and-fix", kind: "op")]),
+                node(0, "implement"), node(1, "after-demo", kind: "breakpoint"), node(2, "land --wait-and-fix", kind: "op")]),
             try entry("auto", "Request to merged PR.", [node(0, "implement"), node(1, "land --wait-and-fix", kind: "op")]),
             try entry("incident", "Unbreak it.", [node(0, "unbreak")]),
             try entry("build", "Build the plan in chunks.", [node(0, "implement")], includedBy: ["code", "auto"]),

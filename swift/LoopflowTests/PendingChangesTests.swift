@@ -70,6 +70,7 @@ struct PendingChangesTests {
         json["projection"] = ["visible": members, "suppressed": []]
         json["contents"] = members.enumerated().map { index, member in
             ["work": member["work"]!, "title": "Task \(index + 1)", "states": states, "identifier": "LOO-\(index + 1)",
+             "breakpoint_arrival": NSNull(),
              "working_group": states.contains("auto") ? "shipping" : "active", "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "open_children": 0, "face": NSNull(),
              "pane_revision": NSNull()]
         }
@@ -238,7 +239,7 @@ struct PendingChangesTests {
         // Ending the task stream (switching away from the Task) releases any change held only by it.
         changes.read("task", Reading.available("work", readAt: Revisions(["planning": 5])))
         changes.make(.run(task: "LOO-1"), subject: "LOO-1", verb: "started",
-                     write: .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: nil, agent: nil, approve: false),
+                     write: .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: nil, agent: nil, approve: false, atArrival: nil, decision: nil, reason: nil),
                      notices: notices, show: nil)
         await machine.answer(Revisions(["planning": 6]))
         changes.read("planning", Reading.available("plan", readAt: Revisions(["planning": 6])))

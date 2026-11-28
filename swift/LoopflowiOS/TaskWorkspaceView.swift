@@ -200,7 +200,7 @@ struct TaskWorkspaceView: View {
         return TaskWorkflowControls(task: row, actions: actions, pending: feed.pendingChanges.controlRequest(for: issue),
             run: { step in
                 change(.run(task: issue), "started",
-                       .taskRun(directory: directory, issue: issue, graph: nil, from: step, agent: nil, approve: false))
+                       .taskRun(directory: directory, issue: issue, graph: nil, from: step, agent: nil, approve: false, atArrival: step == nil ? actions.breakpointArrival : nil, decision: nil, reason: nil))
             }, pause: { action in
                 feed.pendingChanges.setPause(action, issue: issue, directory: directory, notices: feed.notices, show: nil) {
                     await feed.refresh()

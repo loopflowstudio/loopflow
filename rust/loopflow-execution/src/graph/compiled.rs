@@ -10,7 +10,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::graph::{flatten_resolved, resolve_graph, return_target, ResolvedGraphItem};
+use crate::graph::{
+    flatten_resolved, occurrences, resolve_graph, return_target, ResolvedGraphItem,
+};
 
 use std::path::Path;
 
@@ -236,8 +238,16 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                 id: skill.id.clone(),
                 label: skill.skill.name.clone(),
                 kind: GraphNodeKind::Skill,
-                interactive: skill.interactive,
                 sources: skill.sources.clone(),
+                paths: Vec::new(),
+            },
+            ConcreteStep::Breakpoint(stop) => GraphNode {
+                key,
+                id: Some(stop.name.clone()),
+                label: stop.name.clone(),
+                kind: GraphNodeKind::Breakpoint,
+                returns_to: return_target(steps, index).map(|target| result[target].key),
+                sources: stop.sources.clone(),
                 paths: Vec::new(),
             },
             ConcreteStep::Command(op) => GraphNode {
@@ -245,7 +255,6 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                 id: None,
                 label: op.item.display_name(),
                 kind: GraphNodeKind::Op,
-                interactive: false,
                 returns_to: None,
                 sources: op.sources.clone(),
                 paths: Vec::new(),
@@ -265,7 +274,6 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                     id: None,
                     label: branch.router.name.clone(),
                     kind: GraphNodeKind::Xor,
-                    interactive: false,
                     returns_to: None,
                     sources: branch.sources.clone(),
                     paths,
@@ -283,24 +291,11 @@ pub fn location(
     steps: &[ConcreteStep],
     cursor: &ExecutionCursor,
 ) -> anyhow::Result<(u32, Vec<Vec<u32>>)> {
-    fn count(steps: &[ConcreteStep]) -> usize {
-        steps
-            .iter()
-            .map(|step| {
-                1 + match step {
-                    ConcreteStep::Xor(branch) => {
-                        branch.paths.values().map(|path| count(&path.steps)).sum()
-                    }
-                    _ => 0,
-                }
-            })
-            .sum()
-    }
     fn locate(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> anyhow::Result<usize> {
         let step = steps
             .get(cursor.index)
             .ok_or_else(|| anyhow::anyhow!("cursor has no captured node"))?;
-        let mut index = count(&steps[..cursor.index]);
+        let mut index = occurrences(&steps[..cursor.index]).count();
         if let Some(child) = cursor.child.as_deref() {
             let (ConcreteStep::Xor(branch), NestedCursor::Xor { selected, cursor }) = (step, child)
             else {
@@ -311,7 +306,7 @@ pub fn location(
                 if name == selected {
                     return Ok(index + locate(&path.steps, cursor)?);
                 }
-                index += count(&path.steps);
+                index += occurrences(&path.steps).count();
             }
             anyhow::bail!("cursor selects an uncaptured XOR alternative");
         }
@@ -359,7 +354,7 @@ mod tests {
     #[test]
     fn a_catalog_entry_outlines_the_workflow_a_task_would_show() {
         use super::graph_catalog;
-        use crate::task_graph::{CapturedGraph, TaskGraph};
+        use crate::task_graph::{CapturedGraph, TaskGraph, WorkflowStepKind};
         let repo = tempfile::tempdir().unwrap();
         let graphs = repo.path().join(".lf/graphs");
         std::fs::create_dir_all(&graphs).unwrap();
@@ -383,32 +378,39 @@ mod tests {
         let steps: Vec<_> = code
             .steps
             .iter()
-            .map(|step| (step.name.as_str(), step.interactive))
+            .map(|step| (step.name.as_str(), step.kind))
             .collect();
         assert_eq!(
             steps,
             [
-                ("plan", false),
-                ("build", false),
-                ("ship-review", true),
-                ("deliver", false),
+                ("plan", WorkflowStepKind::Stage),
+                ("build", WorkflowStepKind::Stage),
+                ("ship-review", WorkflowStepKind::Stage),
+                ("after-ship-review", WorkflowStepKind::Breakpoint),
+                ("deliver", WorkflowStepKind::Stage),
             ]
         );
-        assert_eq!(code.sentence, "You take part at ship-review.");
+        assert_eq!(code.breakpoints, ["after-ship-review"]);
+        assert_eq!(code.sentence, "You take part at after-ship-review.");
+        assert_eq!(
+            outline("feature").unwrap().breakpoints,
+            ["after-explore", "after-ship-review"]
+        );
         assert_eq!(
             outline("feature").unwrap().sentence,
-            "You take part at explore and ship-review."
+            "You take part at after-explore and after-ship-review."
         );
 
         let conditional = outline("conditional").unwrap();
-        let interactive: Vec<_> = conditional
+        let stops: Vec<_> = conditional
             .steps
             .iter()
-            .filter(|step| step.interactive)
+            .filter(|step| step.kind == WorkflowStepKind::StageWithBreakpoint)
             .map(|step| step.name.as_str())
             .collect();
-        assert_eq!(interactive, ["xor-route"]);
-        assert_eq!(conditional.sentence, "You take part at demo.");
+        assert_eq!(stops, ["xor-route"]);
+        assert_eq!(conditional.breakpoints, ["after-demo"]);
+        assert_eq!(conditional.sentence, "You take part at after-demo.");
 
         assert_eq!(outline("alone").unwrap().sentence, "Runs on its own.");
         assert_eq!(outline("broken"), None);
@@ -416,10 +418,11 @@ mod tests {
         // A Task that takes the Graph up reads the same steps and stops.
         for name in ["code", "conditional"] {
             let captured = CapturedGraph::load(name, repo.path()).unwrap().unwrap();
-            let task = TaskGraph::read(&captured, "start".into(), None, None, None, |_| false);
+            let task =
+                TaskGraph::read(&captured, "start".into(), None, None, None, None, |_| false);
             let outline = outline(name).unwrap();
             assert_eq!(task.steps, outline.steps, "{name}");
-            assert_eq!(task.interactive_steps, outline.interactive_steps, "{name}");
+            assert_eq!(task.breakpoints, outline.breakpoints, "{name}");
         }
     }
 
@@ -565,24 +568,35 @@ mod tests {
     }
 
     #[test]
-    fn retained_graph_nodes_preserve_review_stages_after_field_rename() {
-        let node: super::GraphNode = serde_json::from_str(
+    fn retained_graph_nodes_ignore_retired_per_skill_flags_and_project_breakpoints() {
+        for legacy in [
             r#"{"key":0,"id":"review","label":"demo","kind":"skill","human":true,
                 "returns_to":null,"sources":["code"],"paths":[]}"#,
-        )
-        .unwrap();
-        assert!(node.interactive);
-        let current = serde_json::to_value(&node).unwrap();
-        assert_eq!(current["interactive"], true);
-        assert!(current.get("human").is_none());
-        assert_eq!(
-            serde_json::from_value::<super::GraphNode>(current).unwrap(),
-            node
-        );
+            r#"{"key":0,"id":"review","label":"demo","kind":"skill","interactive":true,
+                "returns_to":null,"sources":["code"],"paths":[]}"#,
+        ] {
+            let node: super::GraphNode = serde_json::from_str(legacy).unwrap();
+            assert_eq!(node.kind, GraphNodeKind::Skill);
+            let current = serde_json::to_value(&node).unwrap();
+            assert!(current.get("interactive").is_none());
+            assert!(current.get("human").is_none());
+            assert_eq!(
+                serde_json::from_value::<super::GraphNode>(current).unwrap(),
+                node
+            );
+        }
 
-        let missing = r#"{"key":0,"id":null,"label":"demo","kind":"skill",
-            "returns_to":null,"sources":[],"paths":[]}"#;
-        assert!(serde_json::from_str::<super::GraphNode>(missing).is_err());
+        let repo = tempfile::tempdir().unwrap();
+        let graph = load_graph("research", repo.path()).unwrap();
+        let compiled = crate::graph::compiled::compile(
+            &graph.name,
+            &compile_graph(&graph, repo.path()).unwrap(),
+        );
+        assert_eq!(compiled.steps.len(), 2);
+        assert_eq!(compiled.steps[0].kind, GraphNodeKind::Skill);
+        assert_eq!(compiled.steps[1].kind, GraphNodeKind::Breakpoint);
+        assert_eq!(compiled.steps[1].label, "after-research");
+        assert_eq!(compiled.steps[1].returns_to, Some(compiled.steps[0].key));
     }
 
     fn compile_builtin(repo: &std::path::Path, name: &str) -> super::CompiledGraph {
@@ -591,9 +605,9 @@ mod tests {
     }
 
     #[test]
-    fn builtin_graphs_compile_expected_steps_and_loops_without_stops() {
-        type Case<'a> = (&'a str, &'a [&'a str], &'a [(usize, usize)]);
+    fn builtin_graphs_keep_their_delivery_boundaries_without_breakpoints() {
         let repo = tempfile::tempdir().unwrap();
+        type Case<'a> = (&'a str, &'a [&'a str], &'a [(usize, usize)]);
         let cases: &[Case<'_>] = &[
             ("refresh", &["sync", "realign"], &[]),
             ("task-design", &["kickoff"], &[]),
@@ -639,7 +653,10 @@ mod tests {
                 "{name}"
             );
             assert!(
-                compiled.steps.iter().all(|s| !s.interactive),
+                compiled
+                    .steps
+                    .iter()
+                    .all(|s| s.kind != GraphNodeKind::Breakpoint),
                 "{name} should have no interactive stops"
             );
             let actual_returns: Vec<_> = compiled

@@ -86,7 +86,21 @@ false`). A finished batch (`lf -b : '…'`) is in no listing; read its ID from
 `agent_sessions` with Python's `sqlite3` on `file:…/loopflow.db?mode=ro`
 (the `sqlite3` CLI fails to open the live store read-only). The Task's primary
 conversation waits on Claude's `--add-dir` trust dialog for a fresh `/tmp`
-repository; attach with `lf resume --task <task>` and choose "Yes, add it".
+repository; attach with `lf resume --task <task>` and choose "Yes, add it"
+(Down, then Enter: Enter alone picks "No, exit"). A primary the server starts
+again, after `/exit` or a crash, asks again. To render a raw PTY capture, run
+`uv run --with pyte` from the checkout; the `65535u` it shows is Claude's
+kitty-keyboard pop, not input.
+
+Breakpoint handoffs on real Claude: a Graph `- step: note`, `- break`,
+`- step: echo` with one-line skills on `claude:haiku` parks in about a minute.
+`lf task wait <task> --until breakpoint` returns at the park. The reply's
+`--reason` shows once in `lf task show <task> --json` under
+`comments.comments` with a `loopflow-breakpoint:` marker; the next worker's
+first message is in its transcript under
+`~/.claude/projects/<cwd with / and . as ->/`. Read `steers` from
+`loopflow.db?mode=ro` to see what reached the primary (`breakpoint:<task>`
+for handoffs, `update:` for Task news).
 
 An earlier build's Session owner: in a fresh home, before the branch opens it,
 run the installed `lf -i -a claude : '<msg>'` (with `LF_BIN` unset) under a PTY
@@ -164,8 +178,8 @@ crash that lost one, move that file away. Read which thread a start used from
 each fresh start adds one input to the Session. The notice prints on the starting terminal: a person's `lf
 resume` shows it, a viewer attaching to the pass's terminal later does not.
 
-A Task run: add `.lf/graphs/qarun.yaml` (`- implement` then `- interactive:
-ship-review`), commit it, and `lf task run <task> qarun`. Its headless step
+A Task run: add `.lf/graphs/qarun.yaml` (`- implement`, `- ship-review`,
+`- break`), commit it, and `lf task run <task> qarun`. Its headless step
 needs a stand-in `claude` first on both the server's and the CLI's
 private `PATH` that, for `-p`, reads one line, waits for a marker file, prints a
 stream-json `result` line, and otherwise reads and echoes terminal input. Kill
@@ -177,4 +191,33 @@ With the server up the death is noticed on the minute tick; a server start
 reads at once, after its start-up retention has cleared the dead carrier's
 pid (`task_graphs.run_died_at` keeps that it died). The headless stand-in is
 `lf --batch`'s child, in its own group: kill it by pid as well.
-`lf task run <task> qarun` at the interactive step passes it and ends the run.
+`lf task run <task> qarun` at the breakpoint continues past it and ends the run.
+For the end-to-end `feature` walkthrough (`docs/orchestration.md#where-a-person-takes-part`),
+configure different agents for `explore` and the Task conversation, quit the
+conversation during `explore`, reopen from **Now** or `lf resume --task <ID>`,
+open `scratch/explore.html`, and reply with the non-recommended layout so
+`kickoff` receives both the recommendation and the chosen direction.
+
+# A breakpoint review on real providers
+
+Keep the real `HOME` so `claude` and `codex` keep their logins; isolate only
+`LF_HOME`, put the branch `lf` first on `PATH` and set `LF_BIN` to it. Give
+the workers another model than the primary in `.lf/config.yaml`
+(`agent: claude` with `skills: {explore: {agent: claude:sonnet}}`). A provider
+out of quota keeps its captured agent across retries: change the setting with
+`lf set skills.explore.agent …`, then `lf task interrupt` and `lf task run`.
+`lf task create '<words>' --run --graph feature --json` runs explore and parks
+at `after-explore` in about two minutes.
+
+Attach with `lf resume --task <id>` under a PTY driver. The `--add-dir` trust
+dialog's cursor starts on the exit choice: Enter alone ends Claude with exit 1
+(the recovery pass restarts it); send ↓ (`ESC [ B`), then Enter. A driver
+that answers no kitty keyboard query leaves `65535u` in the prompt; Ctrl+U
+clears it. Esc during a tool call ends the turn without a Stop hook, so the
+server does not wake that conversation with a parked handoff; the next typed
+prompt delivers it. Read what the primary ran from its transcript,
+`~/.claude/projects/-private-tmp-<…>-repo-<task dir>/<provider_thread>.jsonl`,
+and what the next worker received from `<checkout>/.lf/prompts/*-steer.md`.
+Interrupt and `lf task hold` before the Graph reaches `build`: its `qa` step
+resolves to any repository Graph named `qa`. Stop each primary `claude` (a
+child of `lf holder run`) by PID, then the holder, then the server.

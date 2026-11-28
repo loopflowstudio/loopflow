@@ -16,11 +16,19 @@ so a crashed Session loses no decisions, and open questions to
 `scratch/questions.md`. Quote the words that anchor intent, with the speaker's
 name. "Looks fine" stays "looks fine".
 
-With someone here, work in the conversation: find out what they want to build
-and show the exact design. Ask specific numbered questions so "2b" is a
-complete answer, never "does this look good?". Headless, write the best
-complete draft from the brief and the words quoted in it, and record real
-ambiguity as open; a draft is not a decision.
+## In conversation
+
+Work with the person directly: find out what they want to build and show the
+exact design. Ask specific numbered questions so "2b" is a complete answer,
+never "does this look good?".
+
+## Headless
+
+Write the best complete draft in `scratch/plan.md` from the brief and the words
+quoted in it, record real ambiguity in `scratch/questions.md` and label your
+recommended path so a later choice takes precedence. In your final answer, link
+`scratch/plan.md`, state the recommended next action, and pose numbered choices
+so someone can answer from the conversation; a draft is not a decision.
 
 ## 1. Dream
 

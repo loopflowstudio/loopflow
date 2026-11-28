@@ -614,7 +614,7 @@ impl CreationFixture {
             .create_file(".lf/config.yaml", "agent: claude\n");
         fixture.repo.create_file(
             ".lf/graphs/feature.yaml",
-            "- cmd: help task\n- interactive: demo\n",
+            "- cmd: help task\n- break: demo\n",
         );
         fixture.repo.create_file(
             ".lf/graphs/gate.yaml",

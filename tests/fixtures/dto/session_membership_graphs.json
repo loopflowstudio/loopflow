@@ -7,7 +7,6 @@
         "id": null,
         "label": "kickoff",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -16,8 +15,7 @@
         "key": 1,
         "id": null,
         "label": "review-design",
-        "kind": "skill",
-        "interactive": true,
+        "kind": "breakpoint",
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -32,7 +30,6 @@
         "id": null,
         "label": "kickoff",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -41,8 +38,7 @@
         "key": 1,
         "id": null,
         "label": "review-design",
-        "kind": "skill",
-        "interactive": true,
+        "kind": "breakpoint",
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -52,7 +48,6 @@
         "id": null,
         "label": "implement",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -67,7 +62,6 @@
         "id": null,
         "label": "kickoff",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -76,8 +70,7 @@
         "key": 1,
         "id": null,
         "label": "review-design",
-        "kind": "skill",
-        "interactive": true,
+        "kind": "breakpoint",
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -87,7 +80,6 @@
         "id": null,
         "label": "implement",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -97,7 +89,6 @@
         "id": null,
         "label": "compress",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -107,7 +98,6 @@
         "id": null,
         "label": "route",
         "kind": "xor",
-        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": [
@@ -120,7 +110,6 @@
                 "id": null,
                 "label": "patch",
                 "kind": "skill",
-                "interactive": false,
                 "returns_to": null,
                 "sources": [],
                 "paths": []
@@ -130,7 +119,6 @@
                 "id": null,
                 "label": "implement",
                 "kind": "skill",
-                "interactive": false,
                 "returns_to": null,
                 "sources": [],
                 "paths": []
@@ -149,7 +137,6 @@
         "id": null,
         "label": "loop-or-next",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -159,7 +146,6 @@
         "id": null,
         "label": "pr-publish",
         "kind": "skill",
-        "interactive": false,
         "returns_to": null,
         "sources": [],
         "paths": []
@@ -168,8 +154,7 @@
         "key": 9,
         "id": null,
         "label": "demo",
-        "kind": "skill",
-        "interactive": true,
+        "kind": "breakpoint",
         "returns_to": null,
         "sources": [],
         "paths": []

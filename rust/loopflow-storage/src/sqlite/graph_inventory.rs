@@ -179,8 +179,8 @@ pub struct GraphExecutionFacts {
 }
 
 /// The Graph a Task took up and never ran: it stands at `start`, no run
-/// carries it and no GraphProcess was started for it. A Task waiting at an
-/// interactive step has run. A conversation opening on such a Task
+/// carries it and no GraphProcess was started for it. A Task parked at a
+/// breakpoint has run. A conversation opening on such a Task
 /// owes its setup, and the Task reads as starting that Graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnrunGraph {
@@ -655,6 +655,46 @@ impl SqliteStore {
         Ok(process_inputs(&conn, &[process])?.remove(process))
     }
 
+    /// One recorded Graph step and its Graph run, resolved against the Graph
+    /// definition that run captured.
+    pub fn graph_step_detail(
+        &self,
+        step: &LfProcessId,
+    ) -> StoreResult<Option<(LfProcessId, crate::execution::GraphStepProcess)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row = conn
+            .query_row(
+                &format!(
+                    "SELECT {},gs.graph_lf_process_id,gs.node,gs.iterations,g.compiled
+                     FROM graph_process_steps gs
+                     JOIN graph_processes g ON g.lf_process_id=gs.graph_lf_process_id
+                     WHERE gs.lf_process_id=?1",
+                    run_columns("gs")
+                ),
+                [step],
+                |row| {
+                    Ok((
+                        read_run(row)?,
+                        row.get::<_, LfProcessId>("graph_lf_process_id")?,
+                        row.get::<_, u32>("node")?,
+                        row.get::<_, String>("iterations")?,
+                        row.get::<_, String>("compiled")?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((run, graph_id, key, iterations, compiled)) = row else {
+            return Ok(None);
+        };
+        let compiled: CompiledGraph = serde_json::from_str(&compiled)?;
+        let step = GraphStep {
+            run,
+            key,
+            iterations: serde_json::from_str(&iterations)?,
+        };
+        Ok(Some((graph_id, step.detail(&compiled))))
+    }
+
     /// Execution facts of `graphs`: their latest steps' captured inputs, and
     /// unended Graph runs in `tasks`' work.
     pub fn graph_execution_facts<'a>(
@@ -758,7 +798,6 @@ impl SqliteStore {
                     id: None,
                     label: (*label).into(),
                     kind: crate::graph::GraphNodeKind::Skill,
-                    interactive: false,
                     returns_to: None,
                     sources: Vec::new(),
                     paths: Vec::new(),
@@ -1087,7 +1126,7 @@ mod tests {
             graph
                 .steps
                 .iter()
-                .map(|step| graph.label(step))
+                .map(|step| step.label(&graph.compiled))
                 .collect::<Vec<_>>(),
             ["design", "implement"]
         );
@@ -1152,7 +1191,6 @@ mod tests {
                 sources: vec![],
                 paths: vec![],
                 label: "implement".into(),
-                interactive: false,
                 kind: crate::graph::GraphNodeKind::Skill,
             }],
         };

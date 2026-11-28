@@ -39,6 +39,8 @@ pub struct TaskDetailFacts {
     pub graph_names: HashMap<TaskId, String>,
     /// The step each Task stands at on its graph; absent while a run carries it.
     pub steps: HashMap<TaskId, String>,
+    /// Each Task parked at a breakpoint: its breakpoint name and saved arrival JSON.
+    pub breakpoints: HashMap<TaskId, (String, String)>,
     /// Auto marks set on these Tasks.
     pub auto: HashMap<TaskId, AutoState>,
     pub tracker_actions: HashMap<TaskId, TrackerActions>,
@@ -99,6 +101,7 @@ impl SqliteStore {
         }
         let mut graph_names = HashMap::new();
         let mut steps = HashMap::new();
+        let mut breakpoints = HashMap::new();
         {
             let need_graph = ids_json(
                 inspect
@@ -108,7 +111,7 @@ impl SqliteStore {
             );
             let mut query = snapshot.prepare(
                 "SELECT task_id,json_extract(graph,'$.name'),step,run_start,
-                        CASE WHEN task_id IN (SELECT value FROM json_each(?2)) THEN graph END
+                        CASE WHEN task_id IN (SELECT value FROM json_each(?2)) THEN graph END,breakpoint
                  FROM task_graphs WHERE task_id IN (SELECT value FROM json_each(?1))",
             )?;
             let mut rows = query.query(params![&json, need_graph])?;
@@ -117,6 +120,7 @@ impl SqliteStore {
                 graph_names.insert(id.clone(), row.get::<_, String>(1)?);
                 let step: String = row.get(2)?;
                 let run_start: Option<String> = row.get(3)?;
+                let breakpoint: Option<String> = row.get(5)?;
                 if let Some(graph) = row.get::<_, Option<String>>(4)? {
                     match graph_detail(GraphDetailInput {
                         graph: &graph,
@@ -124,6 +128,7 @@ impl SqliteStore {
                         cursor: run_start.as_deref(),
                         auto: auto.get(&id).copied(),
                         paused: resumes_on_unpause.contains(&id),
+                        at_breakpoint: breakpoint.is_some(),
                     })? {
                         GraphDetail::Ships(true) => {
                             working_groups.insert(id.clone(), WorkingGroup::Shipping);
@@ -135,6 +140,9 @@ impl SqliteStore {
                     }
                 }
                 if run_start.is_none() {
+                    if let Some(arrival) = breakpoint {
+                        breakpoints.insert(id.clone(), (step.clone(), arrival));
+                    }
                     steps.insert(id, step);
                 }
             }
@@ -207,6 +215,7 @@ impl SqliteStore {
             )?,
             graph_names,
             steps,
+            breakpoints,
             auto,
             tracker_actions: super::planning_sync::task_tracker_actions_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
@@ -225,6 +234,7 @@ pub struct GraphDetailInput<'a> {
     pub auto: Option<AutoState>,
     /// Active Working Tasks check Shipping; Paused Tasks check whether unpause resumes.
     pub paused: bool,
+    pub at_breakpoint: bool,
 }
 
 #[derive(Debug, Clone, Copy)]

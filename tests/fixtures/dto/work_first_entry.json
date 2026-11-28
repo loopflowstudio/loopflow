@@ -259,7 +259,8 @@
             "open",
             "unstarted",
             "backlog"
-          ]
+          ],
+          "breakpoint_arrival": null
         }
       ],
       "truncated": false

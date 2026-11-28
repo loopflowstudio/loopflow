@@ -61,19 +61,19 @@ that fits:
   `lf task run <issue-id> --reason "<what changed>"`. A stopped Graph is
   history and can't be resumed. Report an unchanged failure; don't repeat it.
 - **A Graph ends where it was written to.** A finished Graph or a published PR
-  doesn't complete the Task. A Task at an interactive step is available to the
-  person there: never continue past their step, pick a new direction or arm a
-  merge they didn't approve.
+  doesn't complete the Task. A Task at a breakpoint is available for review in
+  its conversation: never continue past the review, pick a new direction or arm
+  a merge they didn't approve.
 - **Finish merged work.** Let a live Graph finish. Otherwise, when the
   outcome holds, run `lf task complete <issue>` and reread status. Retry
   completion alone, never by re-arming a merged PR.
 
 Tasks progress independently of this pass; their Graphs do the work, so don't
 perform a Graph's steps here. `lf task run <issue-id>` continues a Task you
-own to its next interactive step, and `lf task status` follows it. `lf task
-auto on` turns auto on, so the run stands in at interactive steps and may
-merge the PR; `lf -b task run` stands in for its own run, and a run with no
-interactive step left ahead may merge it too. Use them only when asked to ship or land. Start
+own to its next breakpoint, and `lf task status` follows it. `lf task
+auto on` follows the workers’ recommendations through breakpoints and may
+merge the PR; `lf -b task run` does this for one run, and a run with no
+breakpoint left ahead may merge it too. Use them only when asked to ship or land. Start
 remaining work on your Tasks without asking. Don't approve reviews, cancel
 Tasks or change direction.
 

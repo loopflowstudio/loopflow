@@ -80,19 +80,42 @@ pub(super) async fn snapshot_here(
     let work_set =
         crate::store::task_work::task_work(&store.sqlite, &task.id, merges).map_err(task_error)?;
     let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
-    if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
-        if let Some((step, off)) = work_set
-            .graph
-            .as_ref()
-            .and_then(|graph| graph.landing_stop(auto.as_ref()))
-        {
-            if status == crate::durable::TaskState::Paused {
-                execution.reason = format!("Waiting at {step} while the Task is paused");
-            } else {
-                execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
-                execution.reason =
-                    crate::ops::task::auto::landing_wait(step, off, &task.identifier);
+    let mut breakpoint_evidence = None;
+    if let Some(graph) = work_set.graph.as_ref() {
+        match &graph.position {
+            crate::task_graph::TaskGraphPosition::Breakpoint { step, blocker, .. } => {
+                let blocked = blocker.is_some();
+                let evidence = crate::ops::task_actions::BreakpointActionEvidence {
+                    blocked,
+                    sentence: graph.sentence.as_str(),
+                };
+                if status != crate::durable::TaskState::Paused
+                    && evidence.owns_execution(execution.state)
+                {
+                    // A run that parked ended its carrier; the Graph itself goes on.
+                    execution.reason = if blocked {
+                        graph.sentence.clone()
+                    } else {
+                        format!(
+                            "Graph {} stopped at breakpoint {step}; `lf task run {}` continues it",
+                            graph.name, task.identifier
+                        )
+                    };
+                    breakpoint_evidence = Some(evidence);
+                }
             }
+            _ if execution.state == crate::ops::task_execution::TaskExecutionState::Idle => {
+                if let Some((step, off)) = graph.landing_stop(auto.as_ref()) {
+                    if status == crate::durable::TaskState::Paused {
+                        execution.reason = format!("Waiting at {step} while the Task is paused");
+                    } else {
+                        execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
+                        execution.reason =
+                            crate::ops::task::auto::landing_wait(step, off, &task.identifier);
+                    }
+                }
+            }
+            _ => {}
         }
     }
     let parent_pr = match task.parent_pr_id.as_ref() {
@@ -147,6 +170,7 @@ pub(super) async fn snapshot_here(
                     crate::task_graph::TaskGraphPosition::At { step } if step == crate::task_graph::END
                 )
             }),
+            breakpoint: breakpoint_evidence,
             open_children: store
                 .sqlite
                 .open_task_child_count(&task.id)

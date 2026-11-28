@@ -90,7 +90,9 @@ struct TaskWorkflowBar: View {
                                   outline: model.workflowOutline(task.graphName),
                                   autoPending: model.pendingChanges.autoRequest(for: task.task.identifier))
         TaskWorkflowControls(task: task, actions: actions, pending: model.pendingChanges.controlRequest(for: task.task.identifier),
-                             run: { model.startTaskFromInput(nil, from: $0, task: task) },
+                             run: { step in
+                                 model.startTaskFromInput(nil, from: step, arrival: step == nil ? actions.breakpointArrival : nil, task: task)
+                             },
                              pause: { model.setPause($0, task: task) }, interrupt: { model.interruptStep(task) },
                              toggleAuto: { if actions.auto == .on { model.turnAutoOff(task) } else { model.turnAutoOn(task) } },
                              complete: { model.beginComplete(task) }) {

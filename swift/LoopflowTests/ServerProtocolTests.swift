@@ -274,7 +274,7 @@ struct ServerProtocolTests {
 
     @Test func coreLoopWritesShareTheRustWriteContract() throws {
         let writes: [(String, String, ServedWrite)] = [
-            ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: "implement", agent: "claude", approve: false)),
+            ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: "implement", agent: "claude", approve: false, atArrival: nil, decision: nil, reason: nil)),
             ("task_auto_on", "auto-on-1", .taskAutoOn(directory: "/repo", issue: "LOO-1")),
             ("task_auto_off", "auto-1", .taskAutoOff(directory: "/repo", issue: "LOO-1")),
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
@@ -325,7 +325,7 @@ struct ServerProtocolTests {
                 #expect(try encoded(.request(id: id, operation: .command(write), select: nil, requestID: requestID)) == value(name), "\(name)")
             } catch { Issue.record("\(name): \(error)") }
         }
-        #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: nil, agent: nil, approve: true).argv
+        #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: nil, agent: nil, approve: true, atArrival: nil, decision: nil, reason: nil).argv
             == ["--batch", "task", "run", "LOO-1", "--json"])
         guard case .response(_, _, .object(let running)) = try answer("task_running") else {
             Issue.record("Missing task.run result"); return

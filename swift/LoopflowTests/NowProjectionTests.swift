@@ -64,11 +64,33 @@ struct NowProjectionTests {
         #expect(input.rows.first?.wave!.name == "product")
     }
 
+    @Test("Breakpoints lead their Now group even when clear and keep oldest-first peer order")
+    func breakpointsLeadNowGroupWithPeerOrder() throws {
+        let olderWait = try roadmapTask(condition: "waiting", reason: "Merge PR", lifecycle: "idle",
+                                        recommended: "open_pr", updatedAt: "2026-07-14T10:00:00Z", id: "wait-old")
+        let newerWait = try roadmapTask(condition: "waiting", reason: "Merge PR", lifecycle: "idle",
+                                        recommended: "open_pr", updatedAt: "2026-07-14T12:00:00Z", id: "wait-new")
+        let olderBreak = try roadmapTask(condition: "waiting", reason: "At breakpoint after-explore.", lifecycle: "active",
+                                         recommended: "run", graphHasRun: false,
+                                         selectionStates: ["open", "active", "working", "breakpoint"],
+                                         updatedAt: "2026-07-15T01:00:00Z", id: "break-old")
+        let newerBreak = try roadmapTask(condition: "waiting", reason: "At breakpoint after-ship-review.", lifecycle: "active",
+                                         recommended: "run", graphHasRun: true,
+                                         selectionStates: ["open", "active", "working", "breakpoint"],
+                                         updatedAt: "2026-07-15T02:00:00Z", id: "break-new")
+        #expect(olderBreak.need == .waiting)
+        let sections = nowSections(from: [newerWait, newerBreak, olderWait, olderBreak], waves: [])
+        #expect(sections.map(\.group) == [.waiting])
+        #expect(sections[0].rows.map(\.id) == ["break-old", "break-new", "wait-old", "wait-new"])
+    }
+
     @Test("Shared fixture preserves all Task conditions and the spoken reason")
     func sharedConditionFixturePreservesProjection() throws {
         let tasks = try loadConditionFixture()
 
-        #expect(tasks.count == 7)
+        #expect(tasks.count == 8)
+        #expect(try #require(tasks["breakpoint"]).need == .waiting)
+        #expect(tasks["breakpoint"]?.selectionStates.contains(.breakpoint) == true)
         #expect(try #require(tasks["user_wait"]).need == .waiting)
         #expect(try #require(tasks["stale"]).need == .blocked)
         #expect(try #require(tasks["dirty"]).need == .blocked)

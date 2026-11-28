@@ -117,7 +117,7 @@ impl Observer {
                             events.push(SubscriptionEvent::GraphStepFinished {
                                 task_id: task.clone(),
                                 graph_process_id: graph.id().clone(),
-                                step: graph.step_detail(step),
+                                step: step.detail(&graph.compiled),
                             });
                         }
                     }

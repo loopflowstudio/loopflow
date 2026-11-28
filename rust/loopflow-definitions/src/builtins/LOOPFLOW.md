@@ -48,8 +48,8 @@ verdict like "accepted". The test: could a fresh run recover this?
 ## Tasks
 
 A **Task** is one outcome in one repository, with its checkout, conversations
-and PR. It takes up a **Graph** and stands at a step of it; `interactive:`
-steps are where a person takes part. A **Wave** is a lasting objective with
+and PR. It takes up a **Graph**. At a breakpoint its conversation presents
+the preceding step’s work for review. A **Wave** is a lasting objective with
 its memory and plan.
 
 A Task is how a change reaches a merged PR; it is never the goal. In a Task
@@ -61,7 +61,7 @@ give back `lf open --task <ID> --link --format markdown`.
 
 ```bash
 lf task create '<outcome>'      # file new work; --run starts it
-lf task run <ID>                # run its Graph to the next interactive step
+lf task run <ID>                # continue to the next breakpoint
 lf task status <ID> --json      # read this, not processes or worktrees
 lf steer <ID> '<direction>'     # redirect it
 lf task wait <ID>               # never a sleep loop

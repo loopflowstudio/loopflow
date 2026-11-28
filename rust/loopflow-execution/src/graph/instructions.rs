@@ -7,6 +7,8 @@ use crate::graph::ConcreteStep;
 use crate::graph::Skill;
 use loopflow_definitions::text::split_frontmatter;
 
+/// Export compiles the authored Graph first, so even a released
+/// `interactive:` item reaches the recipe as a worker followed by a breakpoint.
 pub fn render_graph_instructions(
     name: &str,
     steps: &[ConcreteStep],
@@ -75,14 +77,15 @@ fn render_steps(
                     } else {
                         output.push_str(&format!("{position}. {}\n   Use its criteria to decide in ordinary language: advance continues after step {position}; iterate repeats steps {prefix}{} through {prefix}{index}, including intervening commands and branches, then returns to this decision; blocked explains what needs resolving and stops here.\n", conversational_skill(skill), target + 1));
                     }
-                } else if occurrence.interactive {
-                    output.push_str(&format!("{position}. {}\n", conversational_skill(skill)));
                 } else {
                     let command = headless_command(skill, &capture(skill)?)?;
                     output.push_str(&format!("{position}. Run `{command}`.\n"));
                 }
-                if occurrence.interactive {
-                    output.push_str("   Wait for the participant's response here before continuing; never substitute another reviewer or assume approval.\n");
+            }
+            ConcreteStep::Breakpoint(stop) => {
+                output.push_str(&format!("{position}. At {}, present the completed work and its proposed continuation. Wait for a reply.\n", stop.name));
+                if let Some(target) = return_target(steps, index) {
+                    output.push_str(&format!("   To iterate, repeat from step {prefix}{}. To advance, continue after {position}.\n", target + 1));
                 }
             }
             ConcreteStep::Command(command) => {

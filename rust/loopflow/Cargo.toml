@@ -109,6 +109,7 @@ thiserror = "2.0"
 uuid = { version = "1", features = ["v4", "v5"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 regex = "1"
+ignore = "0.4"
 
 sha2 = "0.10"
 hex = "0.4"
@@ -144,7 +145,6 @@ tempfile = "3.27"
 sha2 = { version = "0.10", features = ["asm"] }
 
 [dev-dependencies]
-ignore = "0.4"
 gethostname = "1.1"
 loopflow-execution = { path = "../loopflow-execution", features = ["test-support"] }
 loopflow-storage = { path = "../loopflow-storage", features = ["test-support"] }

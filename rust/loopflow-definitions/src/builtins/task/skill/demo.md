@@ -33,8 +33,8 @@ where you expected it?". Never "does this look good?".
 A page helps when there's something to compare. Write `scratch/demo.page.html`
 following `lf help page` with `<lf-component name="before-after">` or variants
 side by side and numbered questions, compile with
-`lf page build scratch/demo.page.html`, and present with
-`lf page open scratch/demo.html`.
+`lf page build scratch/demo.page.html`, and open it with
+`lf page open scratch/demo.html` in conversation.
 
 ## Keep their words
 
@@ -52,5 +52,15 @@ identity and never by name, and keep anything that holds history.
 
 ## Headless
 
-With nobody there, nobody can feel it. Say the demo didn't happen and why, then
-finish. Don't act out a person's reactions or invent feedback.
+Prepare the built product so someone can open and feel it right away, without
+opening focus-stealing windows or leaving background processes behind when your
+turn ends. Verify it runs; write `scratch/demo.html` when a comparison page
+helps. Stop temporary servers or watchers you started while keeping built
+artifacts and history ready to reopen.
+
+Write `scratch/demo.md` with what changed, the exact launch command or app path
+ready to run, where to start, numbered questions to judge how it feels and your
+recommended next action if nobody intervenes. In your final answer, link
+`scratch/demo.md` (and `scratch/demo.html` when written), repeat the launch
+command, recommendation and numbered questions so someone can answer from the
+conversation. Don't act out a person's reactions or invent feedback.

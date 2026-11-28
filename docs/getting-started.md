@@ -95,7 +95,7 @@ PR. A Task remembers its Graph, so later `lf task run <ID>` calls continue from
 where it stopped.
 
 - Set `graph: code` in `.lf/config.yaml` to make it the repo default.
-- Run `lf -b task run <ID>` to run straight through interactive stops headless.
+- Run `lf -b task run <ID>` to follow the recommendations through breakpoints for this run.
 - Put `auto: on` beside `graph:` in `.lf/wave/<wave>/config.yaml` to take that
   Wave's Tasks from request to merged PR autonomously; `lf task auto off <ID>`
   takes one back.
@@ -109,30 +109,29 @@ lf session list                  # live conversations, OS-confirmed
 
 ## 4. Pick up the conversation
 
-When the PR is ready, the Task pauses at `ship-review` in its own conversation.
-It builds one comprehension page (`scratch/ship-review.html`) covering what was
-built, how it works on real diffs, the key data structures and APIs, the
-trade-offs going forward, and findings to fix here, file as a Task, or drop.
+At the breakpoint after `ship-review`, your Task conversation has the review
+ready, even if you closed its window while the build ran. Open
+`scratch/ship-review.html` from the conversation to see what ships, how to
+try it and what the worker recommends doing about anything left out.
 
 ```bash
 lf page open scratch/ship-review.html   # open in your browser or Desktop Files; highlight, choose, and press ⌘↩ to steer
 lf resume --task <ID>                   # open the conversation from any terminal, on whichever harness it ran
 ```
 
-Highlight text on the page to leave notes, pick choices on findings, and press
-`⌘↩` to steer the Task directly—or talk in the conversation. Close the terminal
-and come back next week: the conversation persists across window closes,
-`lf install` updates, crashes, and reboots.
+Highlight text and pick choices on the page, then press `⌘↩` to reply.
+Reply “Cover zero divided by zero before merging” to send the build
+through another pass with that direction. If the review recommends delivery
+and you agree, `lf task run <ID>` continues to delivery.
 
 ## 5. Land it
 
 ```bash
-lf task auto on <ID>             # runs remaining steps, then merges; repairs failing CI until it lands
-lf task auto off <ID>            # wait at the next interactive step and disarm auto-merge
+lf task auto on <ID>             # follow the recommendations through delivery
+lf task auto off <ID>            # wait at the next breakpoint and disarm auto-merge
 ```
 
-`lf task auto on` turns auto on and runs the Task: an agent stands in at each
-remaining interactive step, then `deliver` runs `reflect` (folds your feedback
+`lf task auto on` turns auto on and runs the Task: the Graph continues through the remaining breakpoints, then `deliver` runs `reflect` (folds your feedback
 into skill improvements) and `lf land --wait-and-fix` (syncs, clears `scratch/`
 notes, pushes once, and repairs failing CI until the PR merges). It returns once
 the run starts, like `lf task run` (`-b` waits until merge). The Task completes

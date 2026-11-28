@@ -86,8 +86,8 @@ pub struct Step {
     pub target: Target,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
-    /// An interactive step: a person takes part here, in the Task conversation. Written
-    /// `interactive: <skill>`.
+    /// LOO-1100: the released `interactive: <skill>` spelling, which compiles as
+    /// `<skill>` followed by a breakpoint.
     #[serde(default, alias = "human", skip_serializing_if = "std::ops::Not::not")]
     pub interactive: bool,
 }
@@ -230,10 +230,10 @@ pub struct GraphDefinition {
 pub struct ConcreteSkill {
     pub skill: Skill,
     pub id: Option<String>,
-    /// An interactive step, where a person takes part; its id is `id`, else the skill name.
+    /// LOO-1100: an unconverted released interactive occurrence; its id is `id`, else the skill name.
     #[serde(alias = "human")]
     pub interactive: bool,
-    /// Unique navigation name when composition repeats an interactive step.
+    /// Unique navigation name when composition repeats a released interactive occurrence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interactive_name: Option<String>,
     /// A deciding occurrence returns this many steps back in its own body.
@@ -242,7 +242,7 @@ pub struct ConcreteSkill {
 }
 
 impl ConcreteSkill {
-    /// The interactive step this occurrence is, when a person takes part at it.
+    /// LOO-1100: the released interactive step this occurrence is.
     pub fn interactive_step(&self) -> Option<&str> {
         self.interactive.then(|| {
             self.interactive_name
@@ -275,15 +275,44 @@ pub struct ConcreteCommand {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Breakpoint {
+    pub name: String,
+    pub sources: Vec<String>,
+    /// Distance back to the start of the loop reviewed here.
+    pub returns: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConcreteStep {
+    Breakpoint(Breakpoint),
     Skill(ConcreteSkill),
     Command(ConcreteCommand),
     Xor(ConcreteXor),
 }
 
+/// Preorder occurrences, including each XOR alternative in name order.
+pub(crate) fn occurrences(steps: &[ConcreteStep]) -> impl Iterator<Item = &ConcreteStep> {
+    let mut body = steps;
+    let mut remaining = Vec::new();
+    std::iter::from_fn(move || loop {
+        if let Some((step, tail)) = body.split_first() {
+            body = tail;
+            if let ConcreteStep::Xor(branch) = step {
+                for path in branch.paths.values().rev() {
+                    remaining.push(body);
+                    body = &path.steps;
+                }
+            }
+            return Some(step);
+        }
+        body = remaining.pop()?;
+    })
+}
+
 /// Resolved template composition. Flattening is the sole execution expansion.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) enum ResolvedGraphItem {
+    Breakpoint(Breakpoint),
     Skill(ConcreteSkill),
     Command(ConcreteCommand),
     Group {
@@ -307,6 +336,7 @@ pub(crate) fn flatten_resolved(items: &[ResolvedGraphItem]) -> Vec<ConcreteStep>
     items
         .iter()
         .flat_map(|item| match item {
+            ResolvedGraphItem::Breakpoint(stop) => vec![ConcreteStep::Breakpoint(stop.clone())],
             ResolvedGraphItem::Skill(skill) => vec![ConcreteStep::Skill(skill.clone())],
             ResolvedGraphItem::Command(op) => vec![ConcreteStep::Command(op.clone())],
             ResolvedGraphItem::Group { items, .. } => flatten_resolved(items),
@@ -562,92 +592,132 @@ fn resolve_graph_with_catalog(
     catalog: &SkillCatalog,
 ) -> Result<Vec<ResolvedGraphItem>, LoadError> {
     let mut resolved = compile_with_sources(graph, catalog, &[])?;
-    name_interactive_steps(&mut resolved);
-    let items = flatten_resolved(&resolved);
-    validate_interactive_steps(&items)?;
+    name_breakpoints(&mut resolved)?;
     Ok(resolved)
 }
 
-// Settings retain authored IDs; Task navigation names repeated interactive stops
-// distinctly in the captured graph so continuation never returns to the first copy.
-fn name_interactive_steps(items: &mut [ResolvedGraphItem]) {
-    fn visit(items: &mut [ResolvedGraphItem], f: &mut impl FnMut(&mut ConcreteSkill)) {
+// Assign addresses in execution order, including composed groups. Branch bodies
+// have their own predecessor; navigation names are unique across the capture.
+fn name_breakpoints(items: &mut [ResolvedGraphItem]) -> Result<(), LoadError> {
+    fn reserve(items: &[ResolvedGraphItem], used: &mut HashSet<String>, named: &mut Vec<String>) {
         for item in items {
             match item {
-                ResolvedGraphItem::Skill(skill) => f(skill),
-                ResolvedGraphItem::Group { items, .. } => visit(items, f),
-                ResolvedGraphItem::Xor { paths, .. } => {
-                    let mut names: Vec<_> = paths.keys().cloned().collect();
-                    names.sort();
-                    for name in names {
-                        visit(&mut paths.get_mut(&name).expect("path exists").items, f);
+                ResolvedGraphItem::Skill(skill) => {
+                    used.insert(skill.skill.name.clone());
+                    used.extend(skill.id.iter().cloned());
+                }
+                ResolvedGraphItem::Command(op) => {
+                    used.insert(op.item.command.clone());
+                    used.insert(op.item.display_name());
+                }
+                ResolvedGraphItem::Group { name, items } => {
+                    used.insert(name.clone());
+                    reserve(items, used, named);
+                }
+                ResolvedGraphItem::Xor { router, paths, .. } => {
+                    used.insert(router.name.clone());
+                    for path in paths.values() {
+                        reserve(&path.items, used, named);
                     }
                 }
-                _ => {}
+                ResolvedGraphItem::Breakpoint(stop) => {
+                    if !stop.name.is_empty() {
+                        named.push(stop.name.clone());
+                    }
+                }
             }
         }
     }
-    let mut counts = HashMap::<String, usize>::new();
-    visit(items, &mut |skill| {
-        if let Some(name) = skill.interactive_step() {
-            *counts.entry(name.into()).or_default() += 1;
+    fn assign(
+        items: &mut [ResolvedGraphItem],
+        previous: &mut Option<String>,
+        used: &mut HashSet<String>,
+    ) {
+        for item in items {
+            let label = match item {
+                ResolvedGraphItem::Group { items, .. } => {
+                    assign(items, previous, used);
+                    continue;
+                }
+                ResolvedGraphItem::Breakpoint(stop) => {
+                    if stop.name.is_empty() {
+                        stop.name = breakpoint_name(previous.as_deref(), used);
+                    }
+                    stop.name.clone()
+                }
+                ResolvedGraphItem::Skill(skill) => {
+                    skill.id.as_ref().unwrap_or(&skill.skill.name).clone()
+                }
+                ResolvedGraphItem::Command(op) => op.item.display_name(),
+                ResolvedGraphItem::Xor { paths, router, .. } => {
+                    for path in paths.values_mut() {
+                        assign(&mut path.items, &mut None, used);
+                    }
+                    router.name.clone()
+                }
+            };
+            *previous = Some(label);
         }
-    });
-    let mut used: HashSet<_> = counts.keys().cloned().collect();
-    visit(items, &mut |skill| {
-        let Some(name) = skill.interactive_step().map(str::to_owned) else {
-            return;
-        };
-        if counts[&name] > 1 {
-            let mut index = 1;
-            while !used.insert(format!("{name}#{index}")) {
-                index += 1;
-            }
-            skill.interactive_name = Some(format!("{name}#{index}"));
+    }
+    // Reserve all authored names before a generated name can take one.
+    let mut used = HashSet::from(["start".to_owned(), "end".to_owned()]);
+    let mut named = Vec::new();
+    reserve(items, &mut used, &mut named);
+    for name in named {
+        if used.contains(&name) {
+            return Err(LoadError::InvalidGraph(format!(
+                "ambiguous breakpoint name {name:?}"
+            )));
         }
-    });
+        used.insert(name);
+    }
+    assign(items, &mut None, &mut used);
+    Ok(())
 }
 
-/// Every interactive step has its own id, and no autonomous loop returns across one: a
-/// person decides there, so nothing automatic may run back over it.
-fn validate_interactive_steps(items: &[ConcreteStep]) -> Result<(), LoadError> {
-    for (index, item) in items.iter().enumerate() {
-        match item {
-            ConcreteStep::Skill(skill) => {
-                if let Some(target) = (!skill.interactive)
-                    .then(|| return_target(items, index))
-                    .flatten()
-                {
-                    if let Some(crossed) = items[target..index].iter().find_map(|step| match step {
-                        ConcreteStep::Skill(step) => step.interactive_step(),
-                        _ => None,
-                    }) {
-                        return Err(LoadError::InvalidGraph(format!(
-                            "loop at {} returns across interactive step {crossed:?}; a person decides there",
-                            skill.skill.name
-                        )));
-                    }
-                }
-            }
-            ConcreteStep::Xor(branch) => {
-                for path in branch.paths.values() {
-                    validate_interactive_steps(&path.steps)?;
-                }
-            }
-            ConcreteStep::Command(_) => {}
-        }
+pub(crate) fn breakpoint_name(previous: Option<&str>, used: &mut HashSet<String>) -> String {
+    // A command label ("land --wait-and-fix") becomes one shell word.
+    let base = previous.map_or_else(
+        || "break".into(),
+        |name| {
+            let words: Vec<&str> = name
+                .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+                .filter(|word| !word.is_empty())
+                .collect();
+            format!("after-{}", words.join("-"))
+        },
+    );
+    let mut candidate = base.clone();
+    let mut suffix = 2;
+    while !used.insert(candidate.clone()) {
+        candidate = format!("{base}#{suffix}");
+        suffix += 1;
     }
-    Ok(())
+    candidate
 }
 
 /// Index of the earlier step the deciding skill at `index` returns to.
 pub fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usize> {
+    let distance = match steps.get(index)? {
+        ConcreteStep::Skill(skill) => skill.returns?,
+        ConcreteStep::Breakpoint(stop) => stop.returns?,
+        _ => return None,
+    };
+    index.checked_sub(distance).filter(|target| *target < index)
+}
+
+/// The occurrence that applies this worker's decision. A trailing loop
+/// breakpoint retains the verdict until the review continues.
+pub fn decision_edge(steps: &[ConcreteStep], index: usize) -> Option<usize> {
     let ConcreteStep::Skill(skill) = steps.get(index)? else {
         return None;
     };
-    index
-        .checked_sub(skill.returns?)
-        .filter(|target| *target < index)
+    if skill.returns.is_some() {
+        Some(index)
+    } else {
+        matches!(steps.get(index + 1), Some(ConcreteStep::Breakpoint(stop)) if stop.returns.is_some())
+            .then_some(index + 1)
+    }
 }
 
 pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
@@ -833,6 +903,7 @@ fn parse_graph_items(
 
 fn parse_graph_item(value: &Value, loader: &mut DefinitionLoader<'_>) -> Result<Step, LoadError> {
     match value {
+        Value::String(name) if name == "break" => Ok(Step::new(Target::Breakpoint(None))),
         Value::String(name) => Ok(Step::new(loader.resolve(name, None)?)),
         Value::Mapping(map) => parse_graph_mapping(map, loader),
         _ => Err(LoadError::InvalidGraph(
@@ -845,6 +916,9 @@ fn parse_graph_mapping(
     map: &serde_yaml_ng::Mapping,
     loader: &mut DefinitionLoader<'_>,
 ) -> Result<Step, LoadError> {
+    if map.contains_key(key("break")) {
+        return parse_breakpoint(map);
+    }
     if let Some(body) = map.get(key("loop")) {
         loop_block(map, body)?;
         return Ok(Step::new(Target::Loop(parse_graph_items(body, loader)?)));
@@ -868,7 +942,7 @@ fn parse_graph_mapping(
     }
     if map.contains_key(key("human")) {
         return Err(LoadError::InvalidGraph(
-            "`human:` is retired; write `interactive: <skill>`".to_string(),
+            "`human:` is retired; put `- break` after the step".to_string(),
         ));
     }
     if map.contains_key(key("id")) {
@@ -886,8 +960,21 @@ fn parse_graph_mapping(
         return parse_xor_value(xor_value, loader);
     }
     Err(LoadError::InvalidGraph(
-        "graph item mapping must include step, interactive, loop, cmd, graph, or xor".to_string(),
+        "graph item mapping must include step, break, loop, cmd, graph, xor, or interactive"
+            .to_string(),
     ))
+}
+
+fn parse_breakpoint(map: &serde_yaml_ng::Mapping) -> Result<Step, LoadError> {
+    let name = map.get(key("break")).and_then(Value::as_str).map(str::trim);
+    match name {
+        Some(name) if !name.is_empty() && map.len() == 1 => {
+            Ok(Step::new(Target::Breakpoint(Some(name.into()))))
+        }
+        _ => Err(LoadError::InvalidGraph(
+            "write `break` or `break: <name>`".into(),
+        )),
+    }
 }
 
 fn parse_command_value(value: &Value) -> Result<Step, LoadError> {
@@ -945,13 +1032,12 @@ fn parse_skill_value(value: &Value, interactive: bool) -> Result<Step, LoadError
             }
             if map.contains_key(key("human")) {
                 return Err(LoadError::InvalidGraph(
-                    "`human:` is retired; write the item as `interactive: <skill>`".to_string(),
+                    "`human:` is retired; put `- break` after the step".to_string(),
                 ));
             }
             if map.contains_key(key("interactive")) {
                 return Err(LoadError::InvalidGraph(
-                    "a step is interactive by its item; write it as `interactive: <skill>`"
-                        .to_string(),
+                    "put `- break` after the step to review its result".to_string(),
                 ));
             }
             let mut step: SkillMapping =
@@ -1097,7 +1183,11 @@ fn parse_path_steps(value: &Value, path_name: &str) -> Result<Vec<Step>, LoadErr
     items
         .iter()
         .map(|item| match item {
+            Value::String(name) if name == "break" => Ok(Step::new(Target::Breakpoint(None))),
             Value::String(_) => parse_skill_value(item, false),
+            Value::Mapping(skill_map) if skill_map.contains_key(key("break")) => {
+                parse_breakpoint(skill_map)
+            }
             Value::Mapping(skill_map) => {
                 if let Some(body) = skill_map.get(key("loop")) {
                     loop_block(skill_map, body)?;
@@ -1209,6 +1299,11 @@ fn compile_steps(
             ));
         }
         match &step.target {
+            Target::Breakpoint(name) => items.push(ResolvedGraphItem::Breakpoint(Breakpoint {
+                name: name.clone().unwrap_or_default(),
+                sources: sources.to_vec(),
+                returns: None,
+            })),
             Target::Command(command) => items.push(ResolvedGraphItem::Command(ConcreteCommand {
                 item: command.clone(),
                 sources: sources.to_vec(),
@@ -1219,40 +1314,54 @@ fn compile_steps(
                     items: compile_with_sources(graph, catalog, sources)?,
                 });
             }
-            Target::Skill(skill) => items.push(ResolvedGraphItem::Skill(ConcreteSkill {
-                skill: {
-                    let mut resolved = resolve_skill_reference(skill, catalog)?;
-                    resolved.occurrence = Some(match &skill.occurrence {
-                        Some(occurrence) => occurrence.clone(),
-                        None => {
-                            let graph = sources.last().expect("compiling a defining graph");
-                            let source = catalog
-                                .repo
-                                .as_deref()
-                                .map(|repo| find_graph_source_path(graph, repo))
-                                .transpose()?
-                                .flatten();
-                            Box::new(crate::config::settings::OccurrenceSettings::capture(
-                                graph,
-                                step.id.as_deref(),
-                                crate::config::settings::definition_source(source.as_deref()),
-                                skill,
-                            )?)
-                        }
-                    });
-                    resolved
-                },
-                id: step.id.clone(),
-                interactive: step.interactive,
-                interactive_name: None,
-                returns: None,
-                sources: sources.to_vec(),
-            })),
+            Target::Skill(skill) => {
+                items.push(ResolvedGraphItem::Skill(ConcreteSkill {
+                    skill: {
+                        let mut resolved = resolve_skill_reference(skill, catalog)?;
+                        resolved.occurrence = Some(match &skill.occurrence {
+                            Some(occurrence) => occurrence.clone(),
+                            None => {
+                                let graph = sources.last().expect("compiling a defining graph");
+                                let source = catalog
+                                    .repo
+                                    .as_deref()
+                                    .map(|repo| find_graph_source_path(graph, repo))
+                                    .transpose()?
+                                    .flatten();
+                                Box::new(crate::config::settings::OccurrenceSettings::capture(
+                                    graph,
+                                    step.id.as_deref(),
+                                    crate::config::settings::definition_source(source.as_deref()),
+                                    skill,
+                                )?)
+                            }
+                        });
+                        resolved
+                    },
+                    id: step.id.clone(),
+                    interactive: false,
+                    interactive_name: None,
+                    returns: None,
+                    sources: sources.to_vec(),
+                }));
+                // LOO-1100: released interactive items spell a worker and its review together.
+                if step.interactive {
+                    items.push(ResolvedGraphItem::Breakpoint(Breakpoint {
+                        name: String::new(),
+                        sources: sources.to_vec(),
+                        returns: None,
+                    }));
+                }
+            }
             Target::Xor(branch) => items.push(compile_branch(branch, catalog, sources)?),
             Target::Loop(block) => {
                 let mut body = compile_steps(block, catalog, sources)?;
                 let back = flatten_resolved(&body).len().saturating_sub(1);
+                let reviews_skill = matches!(body.as_slice(), [.., ResolvedGraphItem::Skill(skill), ResolvedGraphItem::Breakpoint(_)] if skill.returns.is_none());
                 match body.last_mut() {
+                    Some(ResolvedGraphItem::Breakpoint(stop)) if reviews_skill => {
+                        stop.returns = Some(back);
+                    }
                     Some(ResolvedGraphItem::Skill(decider)) if back > 0 => {
                         decider.returns = Some(back);
                     }
@@ -1495,12 +1604,12 @@ mod tests {
         let steps: Vec<_> = items
             .iter()
             .filter_map(|item| match item {
-                ConcreteStep::Skill(skill) => skill.interactive_step().map(str::to_owned),
+                ConcreteStep::Breakpoint(stop) => Some(stop.name.clone()),
                 _ => None,
             })
             .collect();
-        assert_eq!(steps, ["explore", "final-demo"]);
-        let ConcreteStep::Skill(demo) = &items[1] else {
+        assert_eq!(steps, ["after-explore", "after-final-demo"]);
+        let ConcreteStep::Skill(demo) = &items[2] else {
             panic!("demo compiles to a skill step");
         };
         assert_eq!(
@@ -1517,10 +1626,7 @@ mod tests {
         assert!(error.to_string().contains("retired"), "{error}");
         fs::write(graphs.join("item.yaml"), "- human: explore\n").unwrap();
         let error = load_graph("item", tmp.path()).unwrap_err();
-        assert!(
-            error.to_string().contains("interactive: <skill>"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("- break"), "{error}");
     }
 
     #[test]
@@ -1641,8 +1747,40 @@ mod tests {
             panic!("nested review node must compile to a skill")
         };
         assert_eq!(step.id.as_deref(), Some("review_kickoff"));
-        assert!(step.interactive);
+        assert!(!step.interactive);
         assert_eq!(step.sources, vec!["outer", "inner"]);
+    }
+
+    #[test]
+    fn unnamed_breaks_leave_later_authored_names_available() {
+        let tmp = TempDir::new().unwrap();
+        let graphs = tmp.path().join(".lf/graphs");
+        fs::create_dir_all(&graphs).unwrap();
+        let compile = |body| {
+            fs::write(graphs.join("review.yaml"), body).unwrap();
+            let graph = load_graph("review", tmp.path())?;
+            compile_graph(&graph, tmp.path())
+        };
+        let steps = compile("- explore\n- break\n- break: after-explore\n").unwrap();
+        assert_eq!(
+            crate::task_graph::WorkflowOutline::of(&steps).breakpoints,
+            ["after-explore#2", "after-explore"]
+        );
+        // `--from` takes the name as one shell word.
+        let steps = compile("- cmd: land --wait-and-fix\n- break\n").unwrap();
+        assert_eq!(
+            crate::task_graph::WorkflowOutline::of(&steps).breakpoints,
+            ["after-land-wait-and-fix"]
+        );
+        for body in [
+            "- break: explore\n- explore\n",
+            "- break: ready\n- break: ready\n",
+        ] {
+            assert!(compile(body)
+                .unwrap_err()
+                .to_string()
+                .contains("ambiguous breakpoint name"));
+        }
     }
 
     #[test]
@@ -1666,15 +1804,28 @@ mod tests {
             name: "duplicate".into(),
             steps,
         };
-        let stops = captured.interactive_steps();
-        assert_eq!(stops[0].1.interactive_step(), Some("review_kickoff#1"));
-        assert_eq!(stops[1].1.interactive_step(), Some("review_kickoff#2"));
-        assert_eq!(captured.after(&stops[0].0), Some(stops[1].0.clone()));
         assert_eq!(
-            captured.interactive_step("review_kickoff#2"),
-            Some(stops[1].0.clone())
+            captured
+                .find("after-review_kickoff")
+                .unwrap()
+                .cursor()
+                .index,
+            1
         );
-        assert_eq!(stops[0].1.skill.occurrence, stops[1].1.skill.occurrence);
+        assert_eq!(
+            captured
+                .find("after-review_kickoff#2")
+                .unwrap()
+                .cursor()
+                .index,
+            3
+        );
+        let (ConcreteStep::Skill(first), ConcreteStep::Skill(second)) =
+            (&captured.steps[0], &captured.steps[2])
+        else {
+            panic!("two review workers")
+        };
+        assert_eq!(first.skill.occurrence, second.skill.occurrence);
         fs::write(
             graphs.join("duplicate.yaml"),
             "- step: {name: explore, id: same}\n- step: {name: demo, id: same}\n",
@@ -1942,6 +2093,7 @@ Design the feature.
                         "missing captured skill {}",
                         skill.skill.name,
                     ),
+                    ConcreteStep::Breakpoint(stop) => assert!(!stop.name.is_empty()),
                     ConcreteStep::Command(op) => assert!(!op.item.command.is_empty()),
                     ConcreteStep::Xor(branch) => {
                         assert!(branch.router.content.is_some());
@@ -1965,7 +2117,7 @@ Design the feature.
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let error = parse_graph_items(&value).expect_err("and steps are retired");
         assert!(error.to_string().contains(
-            "graph item mapping must include step, interactive, loop, cmd, graph, or xor"
+            "graph item mapping must include step, break, loop, cmd, graph, xor, or interactive"
         ));
     }
 
@@ -1981,7 +2133,7 @@ Design the feature.
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let error = parse_graph_items(&value).expect_err("or steps are not supported");
         assert!(error.to_string().contains(
-            "graph item mapping must include step, interactive, loop, cmd, graph, or xor"
+            "graph item mapping must include step, break, loop, cmd, graph, xor, or interactive"
         ));
     }
 
@@ -2231,10 +2383,13 @@ Design the feature.
         let ConcreteStep::Skill(review) = &branch.paths["proceed"].steps[0] else {
             panic!("review")
         };
-        assert_eq!(review.interactive_step(), Some("review"));
+        assert_eq!(review.id.as_deref(), Some("review"));
+        assert!(
+            matches!(&branch.paths["proceed"].steps[1], ConcreteStep::Breakpoint(stop) if stop.name == "after-review")
+        );
         assert_eq!(review.skill.content.as_deref(), Some("Captured work"));
         assert_eq!(review.sources, ["outer", "inner"]);
-        let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[1] else {
+        let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[2] else {
             panic!("command")
         };
         assert_eq!(command.item.argv(), ["lf", "pr", "land", "--local"]);

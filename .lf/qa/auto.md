@@ -12,10 +12,10 @@ If the private Machine registers a launchd job, use the label in
 `$LF_HOME/server.plist` to boot it out at cleanup. End the holders and providers
 belonging to that private home as described in [resume](resume.md).
 
-Graph: `.lf/graphs/qaship.yaml` with `- implement`, `- interactive:
-ship-review`, `- cmd: land`; commit, push, then
+Graph: `.lf/graphs/qaship.yaml` with `- implement`, `- ship-review`, `- break`,
+`- cmd: land`; commit, push, then
 `git merge origin/main` in each Task checkout (the graph is read from the
-checkout). For a run with no interactive step ahead, `- implement` then
+checkout). For a run with no breakpoint ahead, `- implement` then
 `- cmd: land`, on a fresh `lf task create '<words>' --json`.
 `lf task auto on <id> --graph qaship` takes it up; the served `task.auto.on`
 takes no graph, so for it set `graph: qaship` in `.lf/config.yaml` (committed,
@@ -52,10 +52,9 @@ carries it as `execution.auto`). Served: hello from
 "issue":…},"select":null,"sender":null,"request_id":"<uuid>"}`; `task.auto.on`
 takes nothing else (a never-run Task takes up the repository's graph), and
 `task.auto.off` takes `"reason":null` beside them and answers `{issue, was_on}`.
-Check `lf task auto on` on a Task waiting at `ship-review` (it stands in
-there) and on a never-run Task (one Graph run); `lf ship` names no command ("skill or graph not found: ship").
-With `--json` the run is the only thing on stdout; "standing in at …" goes to
-stderr. Two at the same moment on a never-run Task leave one run:
+Check `lf task auto on` on a Task parked at `after-ship-review` (it continues
+past the breakpoint) and on a never-run Task (one Graph run); `lf ship` names no command ("skill or graph not found: ship").
+With `--json` the run is the only thing on stdout. Two at the same moment on a never-run Task leave one run:
 both print it and exit 0, and `lf task status` shows one Graph run. The losing
 paths are rare, so repeat it: a dozen fresh `lf task create '<words>' --json`
 Tasks (`.task.identifier`), three `lf task auto on <id> &` each with the stand-in
@@ -64,10 +63,10 @@ Graph run, and `graph_processes` holds one row for the Task. Two bare
 `lf task run` at once leave one run and one "is running graph …" refusal.
 
 To check a blocked decision after a successful step, give the Graph a loop with
-`cmd: help commit` followed by an interactive decision skill. Ask the skill to
+`cmd: help commit`, a decision skill, and `- break`. Ask the skill to
 check for an ignored artifact in the Task checkout and block with a reason if
-it is missing. With a real provider, `lf task run <id>` waits at the interactive
-step. `lf -b task auto on <id>` then exits 3, and `lf task status <id>` shows the
+it is missing. With a real provider, `lf task run <id>` parks at the breakpoint
+with the blocked verdict. `lf -b task auto on <id>` then exits 3, and `lf task status <id>` shows the
 reason. Put the artifact in the checkout and repeat `lf -b task auto on <id>`.
 `lf graph show <run-id>` lists the decision alone in both auto runs.
 
@@ -80,8 +79,7 @@ them in its start hook. They are not in the step's stdin or `.lf/prompts`.
 With auto off at a landing step, `lf task status` reads `latest Graph: Waiting
 at land: auto is off (Demo). \`lf task auto on <id>\` lands it.` and `action: no_action`;
 `execution.state` is `waiting`. The run's own log (`$LF_HOME/logs/graph-<run>.log`) ends in that sentence
-alone; an interactive stop ends in "Stopped at <step>; the Task waits there for
-its conversation." What a Task conversation is handed: `lf --task <id> --context
+alone; a parked breakpoint logs its review summary and `--at-arrival` continuation command. What a Task conversation is handed: `lf --task <id> --context
 <skill>` prints its input (the Task brief, no Graph position), and each held
 conversation's `--append-system-prompt-file` is in `ps` under its `lf holder run`.
 An unknown ID answers `no Task exists for …`
@@ -98,7 +96,7 @@ branches adding the same file conflict in that squash; give each its own file.
 
 Before a first run: `lf task auto off <id>` on a fresh `lf task create`, then
 `lf config set auto on` and a bare `lf task run <id> <graph>` stops at the
-interactive step with no `merges:` line. `lf task complete` then `lf task
+breakpoint with no `merges:` line. `lf task complete` then `lf task
 reopen` clears the mark (`auto` null in `--json`; the row is in `task_auto`).
 Across Machines (the two homes of `.lf/qa/machine-moves.md`): the mark arrives
 with the Task, set or not, and replaces what the receiver held; the laptop
@@ -140,7 +138,8 @@ first read; copy the home first to repeat the check. The released lf has no
 A Task left waiting there ships after the upgrade (the captured Graph carries
 its skill). The same goes for a step the branch deleted: a 0.16.0 Task on
 `code` waiting at `verify` reads "Waiting for you at verify" under a build
-without that skill, and `lf task run` steps past it to `end` and `done`. To
+without that skill. On `lf task run` the captured worker runs and the Task
+parks at its breakpoint. Continue once more to reach `end`. To
 switch binaries on one home, kill the server by PID and start the other's
 `lf server run`; each binary's wrapper sets its own `LF_BIN`. A released `lf task hold` on a Task that never took a Graph comes through as
 `auto: off by <person>`; with no checkout, `lf task status` shows it on the

@@ -96,3 +96,65 @@ pub fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str
     )
     .unwrap();
 }
+
+/// A stopped Claude conversation with a saved thread, and a stand-in Claude
+/// on `bin` that appends each launch's first input to `first-input`.
+#[allow(dead_code)]
+pub fn stopped_claude_conversation(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> (String, String) {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    let (id, input, _) = prepare_conversation(home, cwd, "claude", "Remember the word mango");
+    let native = uuid::Uuid::new_v4().to_string();
+    record_native(home, &id, &input, &native);
+    let transcripts = home.join(".claude/projects/fixture");
+    fs::create_dir_all(&transcripts).unwrap();
+    fs::write(
+        transcripts.join(format!("{native}.jsonl")),
+        r#"{"type":"user","userType":"external","message":{"content":"remember the word mango"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        home.join(".claude.json"),
+        serde_json::json!({"projects": {"/": {"hasTrustDialogAccepted": true}}}).to_string(),
+    )
+    .unwrap();
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+if [ "$1 $2" = "auth status" ]; then echo '{"loggedIn":true}'; exit 0; fi
+previous=
+for arg in "$@"; do
+    if [ "$previous" = --resume ]; then echo "$arg" > "$LF_HOME/resumed-thread"; fi
+    previous="$arg"
+done
+{ cat; printf '\n--launch--\n'; } >> "$LF_HOME/first-input"
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
+    (id, native)
+}
+
+/// What the stand-in has been given once it has launched `launches` times.
+#[allow(dead_code)]
+pub fn first_inputs(home: &std::path::Path, launches: usize) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let text = std::fs::read_to_string(home.join("first-input")).unwrap_or_default();
+        if text.matches("--launch--").count() >= launches {
+            return text;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{launches} launches; saw {text:?}\n{}",
+            std::fs::read_to_string(home.join("logs/lf.log")).unwrap_or_default()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}

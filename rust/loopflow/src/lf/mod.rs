@@ -232,6 +232,15 @@ impl Cli {
         self.repo.is_some() || self.repository.is_some()
     }
 
+    pub fn task_run_mode(&self) -> loopflow_execution::ops::task::TaskRunMode {
+        use loopflow_execution::ops::task::TaskRunMode;
+        if self.batch {
+            TaskRunMode::Headless
+        } else {
+            TaskRunMode::Stop
+        }
+    }
+
     /// `lf task auto on`: the Task's run, asked for auto.
     pub fn turns_auto_on(&self) -> bool {
         matches!(
@@ -2069,12 +2078,12 @@ pub struct SyncArgs {
 /// `lf task auto on|off`.
 #[derive(Subcommand, Debug)]
 pub enum AutoCommand {
-    /// Run the Task with nobody waited for: stand in at each interactive step, and merge
+    /// Run the Task with nobody waited for: continue through breakpoints, and merge
     #[command(
         after_help = "Prints what `lf task run` prints and returns once the run registers (`-b` \
-waits for it). A Task waiting at an interactive step is stood in for there; a Task already running \
-carries on and stands in from its next one. With no ISSUE, the checkout's Task, or a new one for \
-its branch."
+waits for it). A Task parked at a breakpoint continues on its worker's proposed path; a Task already \
+running carries on through its next breakpoints. With no ISSUE, the checkout's Task, or a new one \
+for its branch."
     )]
     On {
         issue: Option<String>,
@@ -2088,9 +2097,9 @@ its branch."
         #[arg(long)]
         json: bool,
     },
-    /// Take the interactive steps and the merge back: the run waits at its next one
+    /// Take the breakpoints and the merge back: the run waits at its next one
     #[command(
-        after_help = "Nothing is killed: the run waits at its next interactive step, or before a \
+        after_help = "Nothing is killed: the run waits at its next breakpoint, or before a \
 step that merges, and auto-merge Loopflow armed is disarmed. With no ISSUE, the checkout's Task."
     )]
     Off {
@@ -2206,25 +2215,32 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run the Task's Graph in its worktree until the next interactive step;
+    /// Run the Task's Graph in its worktree until the next review;
     /// returns once it runs (`-b` runs every step headless to `end` and waits)
     #[command(
         after_help = "A Task runs the graph it took up: its Wave's default, its repository's \
-`graph:`, or `code`. A run stops before each interactive step, where the Task waits for its \
-conversation; the next `lf task run` continues after it. A run that fails starts again at the \
-step that failed; the steps before it stay done, and --from reruns them. `-i` runs every step \
-with you in this terminal instead. A run that reaches a merging step, as `-b` does, may merge the PR \
+`graph:`, or `code`. At a breakpoint the preceding step is finished. Continue to accept its \
+proposal or use --decision and --reason to choose another loop pass. A run that fails starts again at the \
+step that failed. Use --from to rerun an earlier step. `-i` keeps the run in this terminal. \
+Workers run headless and the Task conversation presents their results at breakpoints. \
+A run that reaches a merging step, as `-b` does, may merge the PR \
 unless someone turned auto off; then it waits at the landing step until `lf task auto on`. `-b` turns \
-no auto on: a run carried again after it dies stops at its next interactive step. Add --open to open its primary conversation locally when the launch returns, \
+no auto on: a run carried again after it dies stops at its next breakpoint. Add --open to open its primary conversation locally when the launch returns, \
 using lf open's ordinary host selection. Preview and --quote open nothing."
     )]
     Run {
         issue: Option<String>,
         /// A graph to take up in place of the Task's own
         graph: Option<String>,
-        /// Start at this step instead: to go back, skip ahead, or wait at an interactive step
+        /// Start at this step instead: to go back, skip ahead, or stop at a named breakpoint
         #[arg(long, value_name = "STEP")]
         from: Option<String>,
+        /// Continue only the breakpoint visit this conversation reviewed
+        #[arg(long)]
+        at_arrival: Option<loopflow_model::id::LfProcessId>,
+        /// Choose the loop's next move at this breakpoint
+        #[arg(long, value_enum, conflicts_with = "from")]
+        decision: Option<loopflow_execution::graph::transitions::GraphDecision>,
         #[arg(long)]
         name: Option<String>,
         /// Fork from another Task's branch; push if absent or an unpublished parent is ahead
@@ -2253,7 +2269,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Complete a Task without moving its Graph; open children need --children
     #[command(
-        after_help = "A Task with open children refuses to complete, writing nothing, and lists every open descendant. Pass --children rehome to move its direct open children up to the nearest open ancestor (or to the top level) where they stay open, or --children abandon to mark merged descendants done and abandon the rest, closing their PRs and deleting their branches. --children abandon refuses while a descendant it would abandon has a running Graph, headless run or active turn; a conversation idle at an interactive step is closed. `lf task reopen` reopens a done or abandoned Task."
+        after_help = "A Task with open children refuses to complete, writing nothing, and lists every open descendant. Pass --children rehome to move its direct open children up to the nearest open ancestor (or to the top level) where they stay open, or --children abandon to mark merged descendants done and abandon the rest, closing their PRs and deleting their branches. --children abandon refuses while a descendant it would abandon has a running Graph, headless run or active turn; a conversation idle at a breakpoint is closed. `lf task reopen` reopens a done or abandoned Task."
     )]
     Complete {
         issue: String,
@@ -2529,7 +2545,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Turn the Task's auto setting on or off: who takes its interactive steps
+    /// Turn the Task's auto setting on or off: whether runs continue through breakpoints
     Auto {
         #[command(subcommand)]
         cmd: AutoCommand,
@@ -2558,7 +2574,14 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     /// Wait without polling an LM
     Wait {
         issue: String,
-        #[arg(long, default_value = "terminal", value_parser = ["submitted", "terminal"])]
+        /// `breakpoint`: it waits at a breakpoint, its Graph reached `end`, or
+        /// it is done. `submitted`: its PR is open, or it is done. `terminal`:
+        /// it is done or abandoned.
+        #[arg(
+            long,
+            default_value = "terminal",
+            value_parser = ["breakpoint", "submitted", "terminal"]
+        )]
         until: String,
         #[arg(long)]
         timeout: Option<String>,

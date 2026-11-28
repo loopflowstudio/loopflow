@@ -84,7 +84,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case prChecks(directory: String, required: Bool)
     /// Requested reviews and review submissions, each with its commit.
     case prReviews(directory: String, pr: String?)
-    /// The Task now and whether it reached `until` (`submitted` or
+    /// The Task now and whether it reached `until` (`breakpoint`, `submitted` or
     /// `terminal`); subscribed, it ends after the reading that reached it.
     case taskWait(issue: String, until: String)
     /// A whole-tree revision of the Task's checkout after each change there,
@@ -329,9 +329,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskUpdate(directory: String, issue: String, notes: String?, rank: Int?)
     case taskClaim(directory: String, issue: String)
     case taskUnassign(directory: String, issue: String)
-    /// Start the Task's run detached; `approve` runs every step headless to
-    /// `end`, turning auto on, as `-b` does.
-    case taskRun(directory: String, issue: String, graph: String?, from: String?, agent: String?, approve: Bool)
+    /// Start the Task run. Batch accepts breakpoint defaults for this run.
+    case taskRun(directory: String, issue: String, graph: String?, from: String?, agent: String?, approve: Bool, atArrival: String?, decision: String?, reason: String?)
     case taskAutoOn(directory: String, issue: String)
     /// `lf task auto off <issue>`: turns the Task's auto setting off. `taskAutoOn` turns it on.
     case taskAutoOff(directory: String, issue: String)
@@ -434,9 +433,11 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + (rank.map { ["--rank=\($0)"] } ?? []) + ["--json"]
         case .taskClaim(_, let issue): return ["task", "claim", issue, "--json"]
         case .taskUnassign(_, let issue): return ["task", "unassign", issue, "--json"]
-        case .taskRun(_, let issue, let graph, let from, let agent, let approve):
-            return (approve ? ["--batch"] : []) + argument("--agent", agent) + ["task", "run", issue]
-                + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
+        case .taskRun(_, let issue, let graph, let from, let agent, let approve, let arrival, let decision, let reason):
+            var argv = (approve ? ["--batch"] : []) + argument("--agent", agent) + ["task", "run", issue]
+            if let graph { argv.append(graph) }
+            argv += argument("--from", from) + argument("--at-arrival", arrival)
+            return argv + argument("--decision", decision) + argument("--reason", reason) + ["--json"]
         case .taskAutoOn(_, let issue): return ["--task", issue, "task", "auto", "on", "--json"]
         case .taskAutoOff(_, let issue): return ["task", "auto", "off", issue, "--json"]
         case .repoTrackerAnswer(_, let action, let answer):
@@ -608,9 +609,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.claim", ["directory": directory, "issue": issue])
         case .taskUnassign(let directory, let issue):
             TaggedFields("task.unassign", ["directory": directory, "issue": issue])
-        case .taskRun(let directory, let issue, let graph, let from, let agent, let approve):
+        case .taskRun(let directory, let issue, let graph, let from, let agent, let approve, let arrival, let decision, let reason):
             TaggedFields("task.run", ["directory": directory, "issue": issue, "graph": graph, "from": from, "agent": agent,
-                                      "approve": approve])
+                                      "approve": approve, "at_arrival": arrival, "decision": decision, "reason": reason])
         case .taskAutoOn(let directory, let issue):
             TaggedFields("task.auto.on", ["directory": directory, "issue": issue])
         case .repoTrackerAnswer(let directory, let action, let answer):
@@ -1074,11 +1075,10 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(Launched.self, from: await write(.skillRun(directory: checkout, name: name, message: nil, agent: nil))).log
     }
 
-    /// Run the Task's graph until its next interactive step; returns once it
-    /// runs. `graph` takes up another graph; `from` starts at that step instead,
-    /// and an interactive `from` only puts the Task there.
+    /// Run the Task's graph until its next breakpoint; returns once it
+    /// runs. `graph` takes up another graph; `from` starts at that step instead.
     public func runTask(issue: String, graph: String?, from: String? = nil, cwd: String?) async throws {
-        _ = try await write(.taskRun(directory: cwd ?? "/", issue: issue, graph: graph, from: from, agent: nil, approve: false))
+        _ = try await write(.taskRun(directory: cwd ?? "/", issue: issue, graph: graph, from: from, agent: nil, approve: false, atArrival: nil, decision: nil, reason: nil))
     }
 
     /// New Task: Rust files the request in `wave` (nil files it in the

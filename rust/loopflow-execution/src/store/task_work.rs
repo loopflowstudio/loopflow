@@ -70,7 +70,17 @@ pub(crate) fn settled_task_position(
         return Ok(previous.cloned());
     }
     Ok(match row.run {
-        None => Some(TaskGraphPosition::At { step: row.step }),
+        None => Some(match row.breakpoint {
+            Some(record) => {
+                let arrival = serde_json::from_str::<BreakpointArrival>(&record)?;
+                TaskGraphPosition::Breakpoint {
+                    step: row.step,
+                    blocker: arrival.blocked_reason().map(str::to_owned),
+                    arrival: arrival.id,
+                }
+            }
+            None => TaskGraphPosition::At { step: row.step },
+        }),
         Some((_, carrier)) if carrier_may_run(&carrier) => previous.cloned(),
         Some((cursor, carrier)) => {
             let graph: CapturedGraph = serde_json::from_str(&row.graph)?;
@@ -93,7 +103,15 @@ fn read_task_graph(row: TaskGraphRow, merges: impl FnMut(&[String]) -> bool) -> 
         lf_process_id: process.id.to_string(),
         running: carrier_may_run(process),
     });
-    TaskGraph::read(&row.graph, row.step, run, row.auto, row.pause, merges)
+    TaskGraph::read(
+        &row.graph,
+        row.step,
+        row.breakpoint.as_ref(),
+        run,
+        row.auto,
+        row.pause,
+        merges,
+    )
 }
 
 #[cfg(test)]
@@ -105,6 +123,10 @@ mod tests {
     #[test]
     fn a_run_reads_running_while_its_carrier_lives() {
         let row = |pid: Option<u32>| TaskGraphRow {
+            stored_graph: String::new(),
+            converted: false,
+            released_wait: None,
+            breakpoint: None,
             graph: CapturedGraph {
                 name: "proof".into(),
                 steps: Vec::new(),
@@ -128,7 +150,9 @@ mod tests {
         };
         let running = |row| match read_task_graph(row, |_| false).position {
             TaskGraphPosition::Run { running, .. } => running,
-            TaskGraphPosition::At { .. } => panic!("the Task is on a run"),
+            TaskGraphPosition::Breakpoint { .. } | TaskGraphPosition::At { .. } => {
+                panic!("the Task is on a run")
+            }
         };
         assert!(running(row(Some(std::process::id()))));
 
@@ -143,6 +167,34 @@ mod tests {
         // Its end cleared the carrier's OS process: the run stopped.
         assert!(!running(row(None)));
     }
+    #[test]
+    fn a_released_wait_reads_as_the_worker_its_next_run_starts() {
+        let skill = |name, human| {
+            serde_json::json!({"Skill":{"skill":{"name":name}, "id":null, "human":human,
+                "returns":null, "sources":["legacy"]}})
+        };
+        let graph =
+            serde_json::json!({"name":"legacy","steps":[skill("note",true), skill("echo",false)]});
+        let row = super::decode_row(loopflow_storage::sqlite::task_work::SavedTaskGraphRow {
+            breakpoint: None,
+            graph: graph.to_string(),
+            step: "note".into(),
+            run: None,
+            auto: None,
+            pause: None,
+        })
+        .unwrap();
+        assert_eq!(
+            row.released_wait.as_ref().map(|cursor| cursor.index),
+            Some(0)
+        );
+        let read = read_task_graph(row, |_| false);
+        assert_eq!(read.sentence, "Waiting at note.");
+        assert_eq!(read.control.label, "Run: note");
+        let track: Vec<_> = read.steps.iter().map(|step| step.name.as_str()).collect();
+        assert_eq!(track, ["note", "after-note", "echo"]);
+    }
+
     #[test]
     fn moved_task_graph_json_keeps_nested_values_and_stored_bytes() {
         let home = tempfile::tempdir().unwrap();
@@ -164,6 +216,7 @@ mod tests {
             )
             .unwrap();
         let record = super::TaskGraphRecord {
+            breakpoint: None,
             graph: CapturedGraph {
                 name: "proof".into(),
                 steps: Vec::new(),
@@ -209,6 +262,11 @@ mod tests {
 /// it began, then the step after the last one it finished.
 #[derive(Debug)]
 pub struct TaskGraphRow {
+    stored_graph: String,
+    converted: bool,
+    /// LOO-1100: where a released interactive wait resumes, as its worker.
+    pub released_wait: Option<ExecutionCursor>,
+    pub breakpoint: Option<BreakpointArrival>,
     pub graph: CapturedGraph,
     pub step: String,
     pub run: Option<(ExecutionCursor, TaskCarrier)>,
@@ -216,19 +274,72 @@ pub struct TaskGraphRow {
     pub pause: Option<loopflow_storage::sqlite::task_work::PauseStage>,
 }
 
+impl TaskGraphRow {
+    /// LOO-1100: resolve a released wait in its original coordinates, then
+    /// expand the capture and every saved cursor together. Every reader sees
+    /// the worker and its breakpoint; only a run's claim writes the result.
+    fn expand_released(&mut self) {
+        let mut pending = if self.run.is_none() && self.breakpoint.is_none() {
+            self.graph
+                .interactive_step(&self.step)
+                .map(|place| place.cursor())
+        } else {
+            None
+        };
+        self.converted |= self.graph.expand_interactive(
+            self.run
+                .iter_mut()
+                .map(|(cursor, _)| cursor)
+                .chain(
+                    self.breakpoint
+                        .iter_mut()
+                        .map(|arrival| &mut arrival.cursor),
+                )
+                .chain(pending.iter_mut()),
+        );
+        self.released_wait = pending;
+    }
+}
+
+/// One visit to a breakpoint. A carrier can park only once. Its globally
+/// unique ID also identifies the arrival after a Graph replacement or move.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BreakpointArrival {
+    pub id: LfProcessId,
+    pub cursor: ExecutionCursor,
+}
+
+impl BreakpointArrival {
+    /// The blocker's summary when the worker's pending verdict at this breakpoint is `blocked`.
+    pub fn blocked_reason(&self) -> Option<&str> {
+        let verdict = self.cursor.leaf().progress.verdict.as_ref()?;
+        (verdict.decision == crate::graph::transitions::GraphDecision::Blocked)
+            .then_some(verdict.summary.as_str())
+    }
+}
+
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
 /// step it stands at and the cursor its run sets out from again, if it is on
 /// one. The run's Process stays behind.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskGraphRecord {
+    pub breakpoint: Option<BreakpointArrival>,
     pub graph: CapturedGraph,
     pub step: String,
     pub run_start: Option<ExecutionCursor>,
 }
 
 fn decode_row(row: SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
-    Ok(TaskGraphRow {
+    let mut row = TaskGraphRow {
+        breakpoint: row
+            .breakpoint
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()?,
         graph: serde_json::from_str(&row.graph)?,
+        stored_graph: row.graph,
+        converted: false,
+        released_wait: None,
         step: row.step,
         run: row
             .run
@@ -237,7 +348,9 @@ fn decode_row(row: SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
             .map_err(crate::store::StoreError::from)?,
         auto: row.auto,
         pause: row.pause,
-    })
+    };
+    row.expand_released();
+    Ok(row)
 }
 pub fn task_graph_row(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
     store.task_graph_row(task)?.map(decode_row).transpose()
@@ -250,6 +363,11 @@ pub(crate) fn task_graph_record(
         .task_graph_record(task)?
         .map(|row| {
             Ok(TaskGraphRecord {
+                breakpoint: row
+                    .breakpoint
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?,
                 graph: serde_json::from_str(&row.graph)?,
                 step: row.step,
                 run_start: row
@@ -270,6 +388,11 @@ pub(crate) fn place_moved_task_graph(
     store.place_moved_task_graph(
         task,
         &super::sqlite::task_work::SavedTaskGraphRecord {
+            breakpoint: record
+                .breakpoint
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
             graph: serde_json::to_string(&record.graph)?,
             step: record.step.clone(),
             run_start: record
@@ -297,9 +420,19 @@ pub fn start_task_graph_run(
 ) -> StoreResult<bool> {
     store.start_task_graph_run(
         task,
-        &row.step,
-        row.run.as_ref().map(|(_, carrier)| &carrier.id),
-        &serde_json::to_string(cursor)?,
+        loopflow_storage::sqlite::task_work::TaskGraphClaim {
+            graph: &row.stored_graph,
+            step: &row.step,
+            stopped: row.run.as_ref().map(|(_, carrier)| &carrier.id),
+            arrival: row.breakpoint.as_ref().map(|stop| &stop.id),
+        },
+        (
+            &serde_json::to_string(cursor)?,
+            row.converted
+                .then(|| serde_json::to_string(&row.graph))
+                .transpose()?
+                .as_deref(),
+        ),
         carrier,
     )
 }

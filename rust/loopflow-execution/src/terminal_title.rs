@@ -62,8 +62,8 @@ fn now_unix() -> i64 {
 }
 
 /// Where a Task stands, for terminal titles: `Available` when its
-/// conversation is, then the interactive step where its Graph waits, such as
-/// `Available · Design`. Both come from their shared readers; nothing new is judged.
+/// conversation is, then the breakpoint where its Graph waits, such as
+/// `Available · After-explore`. Both come from their shared readers.
 /// Also returns the earliest Unix timestamp when `Available` can turn true with no write.
 fn standing(
     store: &SqliteStore,
@@ -74,10 +74,7 @@ fn standing(
         session_projection::session_summary_with_deadline(store, conversation, now_unix())?;
     let available = summary.is_some_and(|summary| summary.available);
     let graph = crate::store::task_work::task_graph(store, task)?;
-    let node = graph
-        .as_ref()
-        .and_then(|graph| graph.waiting_step())
-        .map(|step| step.name.as_str());
+    let node = graph.as_ref().and_then(|graph| graph.waiting_step());
     let mut parts = Vec::new();
     if available {
         parts.push("Available".to_string());
@@ -1326,6 +1323,51 @@ mod tests {
             drop(self.output);
             self.handle.join().unwrap();
         }
+    }
+
+    #[test]
+    fn standing_names_the_breakpoint_where_a_task_is_parked() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let task = loopflow_model::durable::TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES(?1,'repo_11111111111111111111111111111111','LOO-1096',1)",
+                [task.as_str()],
+            )
+            .unwrap();
+        }
+        let repo = tempfile::tempdir().unwrap();
+        let graph = crate::task_graph::CapturedGraph::load("feature", repo.path())
+            .unwrap()
+            .unwrap();
+        crate::store::task_work::take_up_task_graph(&store, &task, &graph).unwrap();
+        let arrival = crate::store::task_work::BreakpointArrival {
+            id: loopflow_model::id::LfProcessId::new(),
+            cursor: graph.find("after-explore").unwrap().cursor(),
+        };
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_graphs SET step='after-explore',breakpoint=?2 WHERE task_id=?1",
+                rusqlite::params![task.as_str(), serde_json::to_string(&arrival).unwrap()],
+            )
+            .unwrap();
+        assert_eq!(
+            super::standing(&store, &task, "missing-session")
+                .unwrap()
+                .0
+                .as_deref(),
+            Some("After-explore")
+        );
     }
 
     #[test]

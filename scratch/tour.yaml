@@ -1,0 +1,55 @@
+at: 18870702e1a340ca4b91d28acda4a2a555d432e5
+first:
+  - path: docs/orchestration.md
+    why: Follow a worker through review and continuation.
+  - path: docs/work.md
+    why: See when a held Task receives its review.
+  - path: rust/loopflow-definitions/src/builtins/task/graph/feature.yaml
+    why: Find the reviews in a complete Graph.
+  - path: rust/loopflow-definitions/src/builtins/task/skill/task_session.md
+    why: Present the work and continue the reviewed visit.
+  - path: rust/loopflow-execution/src/graph/mod.rs
+    why: Compile breakpoints and traverse occurrences across XOR alternatives.
+  - path: rust/loopflow-execution/src/task_graph.rs
+    why: Read workflow stages, stops, and the current visit.
+  - path: rust/loopflow-execution/src/graph/instructions.rs
+    why: See how a chat runs workers and presents reviews.
+  - path: rust/loopflow-execution/src/graph/runner.rs
+    why: Carry the producing process and verdict to review.
+  - path: rust/loopflow-execution/src/graph/transitions.rs
+    why: Apply the decision and carry the reply forward.
+  - path: rust/loopflow-storage/src/graph_process.rs
+    why: Read one recorded step for history and review.
+  - path: rust/loopflow/src/lf/commands/graph.rs
+    why: Assemble the finished work and artifact links.
+  - path: rust/loopflow-storage/src/sqlite/task_work.rs
+    why: Park and queue the review together.
+  - path: rust/loopflow-storage/src/sqlite/steers.rs
+    why: Route the current visit to its primary conversation.
+  - path: rust/loopflow-storage/src/sqlite/task_pause.rs
+    why: Wake an unread review after unpause.
+  - path: rust/loopflow-execution/src/harness/task_updates.rs
+    why: Keep progress updates quiet during a held review.
+  - path: rust/loopflow-execution/src/ops/task.rs
+    why: Select a new Graph or continue its saved capture.
+  - path: rust/loopflow-execution/src/store/task_work.rs
+    why: Claim the saved position with its translated capture.
+  - path: rust/loopflow-execution/src/task_graph/legacy.rs
+    why: Translate released workers, return edges, and checkpoints together.
+  - path: rust/loopflow-execution/src/ops/task_actions.rs
+    why: Decide when a review owns the next action.
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: Carry the review and its arrival to Roadmap.
+  - path: swift/Loopflow/Design/TaskWorkflowControls.swift
+    why: Render stages, breakpoint markers, and the worker’s blocker.
+  - path: rust/loopflow/tests/work/graph_tests.rs
+    why: Follow a reply from the primary to the worker.
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Generated from the server schema.
+  - path: docs/dev/index.html
+    why: Rendered from the architecture guide.
+  - path: rust/loopflow-storage/SCHEMA.md
+    why: Generated inventory of the migrated schema.
+  - path: tests/goldens/
+    why: Rendered prompts reflect the headless instructions.

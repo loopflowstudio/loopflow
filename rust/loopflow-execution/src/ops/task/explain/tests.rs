@@ -28,12 +28,12 @@ use loopflow_storage::work::task::Task;
 
 const GRAPHS: [(&str, &str); 5] = [
     ("proof", "- cmd: task sync --plan\n"),
-    ("feature", "- graph: proof\n- interactive: {name: demo, id: review}\n"),
-    ("findings", "- graph: proof\n- interactive: {name: research, id: findings}\n"),
-    ("captured", "- implement\n- interactive: {name: demo, id: review}\n"),
+    ("feature", "- graph: proof\n- step: {name: demo, id: review}\n- break: after-review\n"),
+    ("findings", "- graph: proof\n- step: {name: research, id: findings}\n- break: after-findings\n"),
+    ("captured", "- implement\n- step: {name: demo, id: review}\n- break: after-review\n"),
     (
         "conditional",
-        "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n",
+        "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - demo\n          - break: after-demo\n      skip:\n        description: Nothing to review\n",
     ),
 ];
 
@@ -102,7 +102,27 @@ impl Table {
             .unwrap();
         let sqlite = &self.store.sqlite;
         crate::store::task_work::take_up_task_graph(sqlite, &self.task.id, &graph).unwrap();
-        assert!(sqlite.set_task_graph_step(&self.task.id, step).unwrap());
+        if step == "after-review" {
+            let arrival = crate::store::task_work::BreakpointArrival {
+                id: loopflow_model::id::LfProcessId::new(),
+                cursor: graph.find(step).unwrap().cursor(),
+            };
+            sqlite
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE task_graphs SET step=?2,breakpoint=?3 WHERE task_id=?1",
+                    rusqlite::params![
+                        self.task.id.as_str(),
+                        step,
+                        serde_json::to_string(&arrival).unwrap()
+                    ],
+                )
+                .unwrap();
+        } else {
+            assert!(sqlite.set_task_graph_step(&self.task.id, step).unwrap());
+        }
     }
 
     /// A Task with no checkout yet, as `lf task create` files it.
@@ -130,7 +150,11 @@ impl Table {
             self.repo.path(),
             WorkSelection { task, wave: None },
             options,
-            through,
+            if through {
+                crate::ops::task::TaskRunMode::Headless
+            } else {
+                crate::ops::task::TaskRunMode::Stop
+            },
             |_| false,
         ))
     }
@@ -207,10 +231,10 @@ fn run_takes_up_the_named_else_waves_else_repositorys_else_code_graph() {
     let none = none_options();
     let rows: [(&str, &TaskProcessOptions, bool, Expected); 4] = [
         (
-            "Wave default stops at its interactive step",
+            "Wave default stops at its breakpoint",
             &none,
             false,
-            Ok(run("feature", true, "sync --plan", Some("review"))),
+            Ok(run("feature", true, "sync --plan", Some("after-review"))),
         ),
         (
             "-b runs through to the end",
@@ -222,7 +246,7 @@ fn run_takes_up_the_named_else_waves_else_repositorys_else_code_graph() {
             "a named Graph stops inside its first xor",
             &graph("conditional"),
             false,
-            Ok(run("conditional", true, "xor-route", Some("demo"))),
+            Ok(run("conditional", true, "xor-route", Some("after-demo"))),
         ),
         (
             "an unknown Graph is an impediment",
@@ -251,8 +275,8 @@ fn run_on_a_captured_graph_waits_runs_or_ends_from_its_position() {
     let table = Table::new("explain-proof", true);
     let rows: [(&str, &str, TaskProcessOptions, bool, Expected); 6] = [
         (
-            "nothing after the interactive step it waits at",
-            "review",
+            "nothing after the final breakpoint",
+            "after-review",
             none_options(),
             false,
             Ok(TaskRunAction::End {
@@ -268,25 +292,21 @@ fn run_on_a_captured_graph_waits_runs_or_ends_from_its_position() {
             Err("--from <step>"),
         ),
         (
-            "--from an interactive step waits there",
+            "--from a worker before a breakpoint runs it then stops there",
             "end",
             from("review"),
             false,
-            Ok(TaskRunAction::Wait {
-                graph: "captured".into(),
-                take_up: false,
-                step: "review".into(),
-            }),
+            Ok(run("captured", false, "review", Some("after-review"))),
         ),
         (
-            "--from a step that runs stops before the next interactive one",
+            "--from a step that runs stops at the next breakpoint",
             "end",
             from("implement"),
             false,
-            Ok(run("captured", false, "implement", Some("review"))),
+            Ok(run("captured", false, "implement", Some("after-review"))),
         ),
         (
-            "-b --from an interactive step runs through it",
+            "-b --from a worker before a breakpoint runs through it",
             "end",
             from("review"),
             true,
@@ -311,10 +331,10 @@ fn run_on_a_captured_graph_waits_runs_or_ends_from_its_position() {
     table.capture("end");
     let text = table.run(Some("INF-123"), &from("review"), false).render();
     assert!(
-        text.contains("graph captured: wait at review; run nothing"),
+        text.contains("graph captured: run from review until after-review"),
         "{text}"
     );
-    table.capture("review");
+    table.capture("after-review");
     let text = table.run(None, &none_options(), false).render();
     assert!(
         text.contains("graph captured: nothing remains; reach end"),

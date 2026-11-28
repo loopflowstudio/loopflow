@@ -38,7 +38,7 @@ pub enum TaskRun {
         /// terminal (`-b`, `-i`) keeps it.
         log: Option<PathBuf>,
     },
-    /// Nothing runs: the Task now waits at this interactive step.
+    /// Auto is off and the Graph reached its landing step.
     Waiting { issue: String, step: String },
     /// Nothing remained: the Task is at `end`.
     Ended { issue: String },
@@ -96,34 +96,27 @@ pub struct Waited {
 /// `task.run`: start the Task's run detached, as `lf [-b] [-a <agent>] task
 /// run <issue> [--from <step>]` does, and return once it is known. `approve`
 /// runs every step headless to `end`, as `-b` does, and writes no auto;
-/// without it the run stops before the next interactive step. With no
+/// without it the run stops at the next breakpoint. With no
 /// `agent`, each step's harness is the repository's configured default.
 pub fn run(
     directory: &Path,
     issue: &str,
-    from: Option<&str>,
-    graph: Option<&str>,
-    agent: Option<&str>,
-    approve: bool,
+    request: &TaskRunRequest,
     environment: &[(String, String)],
 ) -> Result<TaskRun> {
-    launch::start_with(
-        directory,
-        &spell_run(issue, from, graph, agent, approve),
-        environment,
-    )
+    launch::start_with(directory, &request.argv(issue), environment)
 }
 
 /// `task.auto.on`: turn auto on and start the Task's run detached, as
 /// `lf task auto on <issue>` does: it returns what `task.run` returns, and the
-/// run stands in at each interactive step until the PR lands. It is the one
+/// run passes each breakpoint until the PR lands. It is the one
 /// way to turn auto on.
 pub fn auto_on(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskRun> {
     launch::start_with(directory, &spell_auto_on(issue), environment)
 }
 
 /// `task.auto.off`: turn the Task's auto setting off, as `lf task auto off
-/// <issue>` does. Nothing is killed: the run waits at its next interactive or
+/// <issue>` does. Nothing is killed: the run waits at its next breakpoint or
 /// merging step until `task.auto.on` turns auto on again.
 pub fn auto_off(issue: &str, reason: Option<&str>) -> Result<AutoOff> {
     let was_on = crate::ops::task::auto::off(issue, reason)
@@ -348,31 +341,48 @@ pub(super) fn missing(issue: &str) -> Error {
         .with(serde_json::json!({ "task": issue }))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskRunRequest {
+    pub graph: Option<String>,
+    pub from: Option<String>,
+    pub agent: Option<String>,
+    pub approve: bool,
+    pub at_arrival: Option<LfProcessId>,
+    pub decision: Option<crate::graph::transitions::GraphDecision>,
+    pub reason: Option<String>,
+}
+
+impl TaskRunRequest {
+    pub fn argv(&self, issue: &str) -> Vec<String> {
+        let mut args = run_flags(self.agent.as_deref(), self.approve);
+        args.extend(["task", "run", issue].map(str::to_owned));
+        args.extend(self.graph.iter().cloned());
+        for (flag, value) in [
+            ("--from", self.from.as_deref()),
+            (
+                "--at-arrival",
+                self.at_arrival.as_ref().map(LfProcessId::as_str),
+            ),
+            ("--decision", self.decision.map(|d| d.as_str())),
+            ("--reason", self.reason.as_deref()),
+        ] {
+            if let Some(value) = value {
+                args.extend([flag.into(), value.into()]);
+            }
+        }
+        args.push("--json".into());
+        args
+    }
+}
+
 fn run_flags(agent: Option<&str>, approve: bool) -> Vec<String> {
     let mut args = Vec::new();
     if approve {
-        args.push("--batch".to_owned());
+        args.push("--batch".into());
     }
     if let Some(agent) = agent {
-        args.extend(["--agent".to_owned(), agent.to_owned()]);
+        args.extend(["--agent".into(), agent.into()]);
     }
-    args
-}
-
-pub fn spell_run(
-    issue: &str,
-    from: Option<&str>,
-    graph: Option<&str>,
-    agent: Option<&str>,
-    approve: bool,
-) -> Vec<String> {
-    let mut args = run_flags(agent, approve);
-    args.extend(["task", "run", issue].map(str::to_owned));
-    args.extend(graph.map(str::to_owned));
-    if let Some(from) = from {
-        args.extend(["--from".to_owned(), from.to_owned()]);
-    }
-    args.push("--json".to_owned());
     args
 }
 
@@ -430,14 +440,16 @@ mod tests {
         assert_eq!(off.render(), "LOO-1: auto off");
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<TaskRun>(r#"{"state":"running","issue":"LOO-1"}"#).is_err());
-        let waiting = TaskRun::Waiting {
+        let ended = TaskRun::Ended {
             issue: "LOO-1".into(),
-            step: "demo".into(),
         };
         assert_eq!(
-            serde_json::to_value(&waiting).unwrap(),
-            serde_json::json!({"state": "waiting", "issue": "LOO-1", "step": "demo"})
+            serde_json::to_value(&ended).unwrap(),
+            serde_json::json!({"state": "ended", "issue": "LOO-1"})
         );
-        assert_eq!(waiting.render().unwrap(), "Task LOO-1 waits at demo");
+        assert_eq!(
+            ended.render().unwrap(),
+            "Task LOO-1 reached the end of its graph"
+        );
     }
 }

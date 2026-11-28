@@ -8,7 +8,7 @@ use super::{launch, Result};
 
 /// `graph.run`: start `lf -b [--agent <agent>] graph <name> [message]`
 /// detached and return the Process carrying it. Served runs are headless:
-/// every interactive step runs without a person. A Task checkout binds the
+/// every breakpoint is passed on the default path. A Task checkout binds the
 /// run to its Task as the terminal form does; nothing turns auto on.
 pub fn run(
     directory: &Path,

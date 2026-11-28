@@ -49,16 +49,24 @@ public struct WorkflowLine: View {
 
     private var stepViews: some View {
         ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-            HStack(spacing: Spacing.xxs) {
-                if step.interactive {
-                    Image(systemName: "person.fill").font(Typography.meta)
-                        .accessibilityLabel("you take part")
-                }
-                Text(step.name)
-            }
+            WorkflowStepLabel(step: step)
             .foregroundStyle(palette.textTertiary)
             .fixedSize()
             .accessibilityIdentifier("task-workflow-step-\(index)")
+        }
+    }
+}
+
+struct WorkflowStepLabel: View {
+    let step: TaskGraph.Step
+
+    var body: some View {
+        HStack(spacing: Spacing.xxs) {
+            if step.kind != .stage {
+                Image(systemName: "person.fill").font(Typography.meta)
+                    .accessibilityLabel(step.kind == .breakpoint ? "Breakpoint: \(step.name)" : "You take part")
+            }
+            if step.kind != .breakpoint { Text(step.name) }
         }
     }
 }

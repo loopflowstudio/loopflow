@@ -177,7 +177,8 @@
       "pr": null,
       "section": "working",
       "owned_by_you": true,
-      "runs_on": null
+      "runs_on": null,
+      "breakpoint_arrival": null
     },
     "parent": null
   },
@@ -308,7 +309,8 @@
       "pr": null,
       "section": "working",
       "owned_by_you": true,
-      "runs_on": null
+      "runs_on": null,
+      "breakpoint_arrival": null
     },
     "parent": null
   }

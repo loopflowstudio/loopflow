@@ -79,7 +79,7 @@ def _graph_steps(items: list[dict | str]) -> list[tuple[str, bool]]:
     steps = []
     for item in items:
         if isinstance(item, str):
-            steps.append((item, False))
+            steps.append((item, item == "break"))
             continue
         ((kind, value),) = item.items()
         if kind == "loop":

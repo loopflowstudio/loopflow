@@ -133,7 +133,8 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
   or at the end, ▶ lifts the hold and keeps the Task there. At **Waiting: land**,
   turn on Auto to land or choose a step from **Start from**.
   The chip beside ▶ shows **Pausing…** or **Unpausing…** while the Machine answers.
-  `lf task unpause` without `--run` lifts the hold and starts nothing.
+  `lf task unpause` without `--run` lifts the hold. At a breakpoint, unpause
+  brings any unread review to the Task conversation.
   The Auto switch can be turned off during a hold.
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (**Brief**, **Diff**, **Files**, Graph
@@ -327,8 +328,8 @@ What do you want?
 
 In Product ▾, running feature ▾, Product's default
 
-☺ explore   plan   build   ☺ ship-review   deliver
-You take part at explore and ship-review.
+explore   ☺   plan   build   ship-review   ☺   deliver
+You take part after explore and ship-review.
 
                                         Cancel   File   Start ⌘↩
 ```
@@ -339,10 +340,9 @@ to another Wave or to the repository; the second picks its workflow, from
 choice the workflow is: the default of the Wave or repository named before it,
 your own default, or "for this Task only" once you pick another. Pick the default again to go back.
 
-Under the sentence is the workflow as the Task will show it later: its steps,
-a person before each one where you take part, then the same thing in words. A
-workflow with no such step reads "Runs on its own." Change the menu and both
-lines change with it.
+The workflow shows its steps in order, with a marker where you can review
+the finished work. The sentence below names those stops. A workflow with no
+breakpoints reads “Runs on its own.” Change the menu and both lines update.
 
 - **Start** (⌘↩) files the Task and runs it.
 - **File** runs `lf task create` without `--run`: the Task lands in that
@@ -359,12 +359,12 @@ request stays on screen with "Not started.", the error, **Try again** and
 Open a filed Task and it says what Start will do, in the sheet's words:
 
 ```text
-[▶]   [Run: explore ▾]   plan   build   ☺ ship-review   deliver       Auto ◯   ✓
+[▶]   [Run: explore ▾]   ☺   plan   build   ship-review   ☺   deliver    Auto ◯   ✓
 
 Not started
 
 It will run feature, Product's default.
-You take part at explore and ship-review.
+You take part after explore and ship-review.
 
 [Start]   Start with… ▾
 ```

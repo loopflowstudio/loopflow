@@ -35,6 +35,29 @@ pub fn claim(
     thread: &str,
     boundary: NativeBoundary<'_>,
 ) -> crate::store::StoreResult<Option<ClaimedSteers>> {
+    claim_with(store, adapter, thread, boundary, |steers, remaining| {
+        render(repo, &adapter.session, steers, remaining)
+    })
+}
+
+/// Claim the complete text for a provider starting a turn of its own.
+pub fn claim_complete(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    adapter: &SteerAdapter,
+    thread: &str,
+) -> crate::store::StoreResult<Option<ClaimedSteers>> {
+    claim_with(store, adapter, thread, NativeBoundary::Turn, |steers, _| {
+        Ok(render_complete(steers))
+    })
+}
+
+fn claim_with(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    adapter: &SteerAdapter,
+    thread: &str,
+    boundary: NativeBoundary<'_>,
+    render: impl FnOnce(&[Steer], usize) -> anyhow::Result<String>,
+) -> crate::store::StoreResult<Option<ClaimedSteers>> {
     if !store.has_undelivered_steers(&adapter.session)? {
         return Ok(None);
     }
@@ -44,7 +67,7 @@ pub fn claim(
             return Ok(None);
         }
         // A render that fails leaves its claim to lapse, like a hook that died.
-        let text = render(repo, &adapter.session, &steers, remaining)
+        let text = render(&steers, remaining)
             .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
         let steers = steers.into_iter().map(|steer| steer.id).collect();
         Ok(Some(ClaimedSteers { steers, text }))
@@ -70,8 +93,36 @@ fn excerpt(text: &str, bytes: usize) -> &str {
     &text[..end]
 }
 
+#[derive(Clone, Copy)]
+enum SteerKind {
+    Direction,
+    Breakpoint,
+    Update,
+    Notice,
+}
+
+impl SteerKind {
+    fn of(steer: &Steer) -> Self {
+        match steer.source.split_once(':').map(|(kind, _)| kind) {
+            Some("breakpoint") => Self::Breakpoint,
+            Some("update") => Self::Update,
+            Some("notice") => Self::Notice,
+            _ => Self::Direction,
+        }
+    }
+
+    fn header(self, steer: &Steer) -> String {
+        match self {
+            Self::Breakpoint => format!("Breakpoint review {}. Present the completed work and discuss its proposed continuation.", steer.id),
+            Self::Notice => format!("Task notice {}. News about work this conversation conducts; following it up is yours. Read the Task's current status before acting.", steer.id),
+            Self::Update => format!("Task update {}. Report this recorded progress briefly. This is observation, not a request or permission to launch work, advance review, publish or merge. Read current Task status before acting.", steer.id),
+            Self::Direction => format!("Steer {}; author {}:", steer.id, steer.author),
+        }
+    }
+}
+
 /// Each steer's attribution, a pointer to its complete source saved under the
-/// checkout, and at most 400 bytes of its text.
+/// checkout, and a bounded excerpt of its text.
 fn render(
     repo: &Path,
     session: &str,
@@ -87,33 +138,29 @@ fn render(
             None,
         )?;
         let path = path.strip_prefix(repo).unwrap_or(&path);
-        // A Task update is a steer lf wrote about what it saw, not direction.
-        let update = steer.source.starts_with("update:");
-        // A notice is news about a Task this conversation conducts.
-        let notice = steer.source.starts_with("notice:");
-        let mut item = if notice {
-            format!(
-                "Task notice {}. News about work this conversation conducts; following it up is yours. Read the Task's current status before acting. Complete source: {}\n",
-                steer.id,
-                serde_json::to_string(path)?
-            )
-        } else if update {
-            format!(
-                "Task update {}. Report this recorded progress briefly. This is observation, not a request or permission to launch work, advance review, publish or merge. Read current Task status before acting. Complete source: {}\n",
-                steer.id,
-                serde_json::to_string(path)?
-            )
-        } else {
-            format!(
-                "Steer {}. Source {} revision {}; author {}. Complete source: {}\n",
+        let kind = SteerKind::of(steer);
+        let attribution = match kind {
+            SteerKind::Direction => format!(
+                "Steer {}. Source {} revision {}; author {}.",
                 steer.id,
                 serde_json::to_string(excerpt(&steer.source, 96))?,
                 serde_json::to_string(excerpt(&steer.revision, 64))?,
                 serde_json::to_string(excerpt(&steer.author.to_string(), 96))?,
-                serde_json::to_string(path)?
-            )
+            ),
+            _ => kind.header(steer),
         };
-        let mut body = excerpt(&steer.text, if update || notice { 600 } else { 400 });
+        let mut item = format!(
+            "{attribution} Complete source: {}\n",
+            serde_json::to_string(path)?
+        );
+        let mut body = excerpt(
+            &steer.text,
+            if matches!(kind, SteerKind::Direction) {
+                400
+            } else {
+                600
+            },
+        );
         while !body.is_empty()
             && item.len() + crate::prompt::render_reference(body).len() + 32 > 1024
         {
@@ -142,9 +189,8 @@ pub fn render_complete(steers: &[Steer]) -> String {
     let mut text = String::from("<lf:steers>\n");
     for steer in steers {
         text.push_str(&format!(
-            "Steer {}; author {}:\n{}\n",
-            steer.id,
-            steer.author,
+            "{}\n{}\n",
+            SteerKind::of(steer).header(steer),
             steer.text.trim_end()
         ));
     }

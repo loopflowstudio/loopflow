@@ -29,9 +29,16 @@ impl GraphOutput {
     }
 
     /// Append the step's output instructions and return the contract used to decode its answer.
-    pub fn append_step_instructions(step: &ConcreteStep, prompt: &mut String) -> Option<Self> {
+    pub fn append_step_instructions(
+        body: &[ConcreteStep],
+        index: usize,
+        prompt: &mut String,
+    ) -> Option<Self> {
+        let step = body.get(index)?;
         let output = match step {
-            ConcreteStep::Skill(skill) if skill.returns.is_some() => Self::Decision,
+            ConcreteStep::Skill(_) if crate::graph::decision_edge(body, index).is_some() => {
+                Self::Decision
+            }
             ConcreteStep::Xor(branch) => Self::Route(branch.paths.keys().cloned().collect()),
             _ => return None,
         };
@@ -135,19 +142,23 @@ mod tests {
     #[test]
     fn compiled_loops_defer_to_their_skills_rules() {
         let repo = tempfile::tempdir().unwrap();
-        for (graph, decider) in [("build", "realign"), ("optimize", "optimize-plan")] {
+        for (graph, decider) in [
+            ("build", "realign"),
+            ("optimize", "optimize-plan"),
+            ("research", "research"),
+        ] {
             let graph = load_graph(graph, repo.path()).unwrap();
             let steps = compile_graph(&graph, repo.path()).unwrap();
-            let step = steps
+            let index = steps
                 .iter()
-                .find(|step| {
-                    matches!(step, ConcreteStep::Skill(skill) if skill.skill.name == decider && skill.returns.is_some())
+                .rposition(|step| {
+                    matches!(step, ConcreteStep::Skill(skill) if skill.skill.name == decider)
                 })
                 .unwrap_or_else(|| panic!("{} includes {decider} as a loop decider", graph.name));
 
             let mut message = String::new();
             assert_eq!(
-                GraphOutput::append_step_instructions(step, &mut message),
+                GraphOutput::append_step_instructions(&steps, index, &mut message),
                 Some(GraphOutput::Decision)
             );
             let (_, defaults) = message

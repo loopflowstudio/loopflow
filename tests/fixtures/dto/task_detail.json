@@ -10,7 +10,7 @@
     "reason": "Review the demo in the Task's conversation",
     "graph": {
       "name": "feature",
-      "step": "demo"
+      "step": "after-demo"
     },
     "pr": {
       "number": 1719,
@@ -47,7 +47,7 @@
         "reason": null,
         "command": null
       },
-      "status_line": "died 12:01 (exit 137) \u00b7 starts again 12:02"
+      "status_line": "died 12:01 (exit 137) · starts again 12:02"
     },
     {
       "id": "manual",
@@ -67,49 +67,51 @@
   "conversation": "session_5e55105e000040008000000000000002",
   "graph": {
     "name": "feature",
-    "control": {
-      "action": "run",
-      "label": "demo · next: end"
-    },
-    "interactive_steps": [
-      {
-        "name": "explore",
-        "skill": "explore",
-        "description": "you choose a direction"
-      },
-      {
-        "name": "demo",
-        "skill": "demo",
-        "description": "you try the change"
-      }
+    "breakpoints": [
+      "after-explore",
+      "after-demo"
     ],
     "position": {
-      "kind": "at",
-      "step": "demo"
+      "kind": "breakpoint",
+      "step": "after-demo",
+      "arrival": "11111111-1111-4111-8111-111111111111",
+      "blocker": null
     },
     "steps": [
       {
         "name": "explore",
-        "interactive": true
+        "kind": "stage"
+      },
+      {
+        "name": "after-explore",
+        "kind": "breakpoint"
       },
       {
         "name": "build",
-        "interactive": false
+        "kind": "stage"
       },
       {
         "name": "demo",
-        "interactive": true
+        "kind": "stage"
+      },
+      {
+        "name": "after-demo",
+        "kind": "breakpoint"
       }
     ],
-    "current_step": 2,
-    "sentence": "Waiting for you at demo."
+    "current_step": 4,
+    "sentence": "At breakpoint after-demo.",
+    "control": {
+      "action": "continue",
+      "label": "Continue"
+    }
   },
   "graph_processes": [
     {
       "id": "00000005-0000-4000-8000-000000000000",
       "name": "feature",
       "state": "current",
-      "step": "implement \u00b7 pass 2",
+      "step": "implement · pass 2",
       "updated_at": "2026-09-23T08:05:00Z"
     }
   ],

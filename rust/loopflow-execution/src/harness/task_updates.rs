@@ -101,7 +101,7 @@ impl TaskObservation {
     }
 
     /// How the Task's standing moved since `old`, as a conductor hears it:
-    /// it stopped at an interactive step, a run ended without succeeding, its
+    /// it parked at a breakpoint, a run ended without succeeding, its
     /// PR merged, it closed. Steps passing inside a run are not news.
     fn news(&self, old: &Self) -> Vec<String> {
         // A relaunch that fails where a run in `old` did says nothing new
@@ -120,7 +120,9 @@ impl TaskObservation {
             .map(|(_, failure)| failure)
             .collect::<BTreeSet<_>>();
         let mut news = failures.into_iter().collect::<Vec<_>>();
-        if let Some(TaskGraphPosition::At { step }) = &self.position {
+        if let Some(TaskGraphPosition::At { step } | TaskGraphPosition::Breakpoint { step, .. }) =
+            &self.position
+        {
             if old.position != self.position && step != "start" && step != "end" {
                 news.push(format!("stopped at {step}"));
             }
@@ -225,6 +227,9 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
     };
     let (stored, old) = reading(store, task)?;
     let (graph_row, graphs) = store.task_progress_records(task)?;
+    let held_breakpoint = graph_row
+        .as_ref()
+        .is_some_and(|row| row.pause.is_some() && row.breakpoint.is_some());
     let mut runs = HashMap::new();
     let mut run_in_progress = false;
     let mut changes = Vec::new();
@@ -234,7 +239,7 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
             run_in_progress = true;
             continue;
         };
-        let step = graph.latest().map(|step| graph.step_detail(step));
+        let step = graph.latest().map(|step| step.detail(&graph.compiled));
         let id = graph.run.id;
         let run = RunObservation {
             name: graph.name,
@@ -244,7 +249,10 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         };
         // Older readings included running steps with no outcome.
         let previous = old.as_ref().and_then(|old| old.runs.get(&id));
-        if old.is_some() && previous.and_then(|run| run.outcome.as_deref()) != Some(outcome) {
+        if !held_breakpoint
+            && old.is_some()
+            && previous.and_then(|run| run.outcome.as_deref()) != Some(outcome)
+        {
             changes.push(run.report(&id, graph.run.error.as_deref()));
         }
         runs.insert(id, run);
@@ -296,7 +304,11 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         }
         let took_up_graph = old.position.is_none()
             && matches!(&observation.position, Some(TaskGraphPosition::At { step }) if step == "start");
-        if (old.position != observation.position && !took_up_graph) || !changes.is_empty() {
+        // A parked review has its own steer. While held, a generic Graph
+        // update would wake the same conversation ahead of the review.
+        if (!held_breakpoint && old.position != observation.position && !took_up_graph)
+            || !changes.is_empty()
+        {
             let mut text = format!(
                 "Task {identifier}: {}.",
                 position_text(observation.position.as_ref())
@@ -340,6 +352,7 @@ fn position_text(position: Option<&TaskGraphPosition>) -> String {
             "At end (Task completion is separate)".into()
         }
         Some(TaskGraphPosition::At { step }) if step == "start" => "At start".into(),
+        Some(TaskGraphPosition::Breakpoint { step, .. }) => format!("At breakpoint {step}"),
         Some(TaskGraphPosition::At { step }) => format!("At {step} · available for review"),
         Some(TaskGraphPosition::Run { at, running, .. }) => {
             format!("{} at {at}", if *running { "Running" } else { "Stopped" })
@@ -488,7 +501,17 @@ mod tests {
             ..loopflow_storage::graph_process::ExecutionStart::reserved(1)
         };
         store
-            .start_task_graph_run(&task, "start", None, r#"{"index":0}"#, (&run, &start))
+            .start_task_graph_run(
+                &task,
+                loopflow_storage::sqlite::task_work::TaskGraphClaim {
+                    graph: &serde_json::to_string(&graph).unwrap(),
+                    step: "start",
+                    stopped: None,
+                    arrival: None,
+                },
+                (r#"{"index":0}"#, None),
+                (&run, &start),
+            )
             .unwrap();
         let saved = serde_json::json!({
             "position": {"kind":"run","step":"start","at":"earlier step","lf_process_id":run,"running":true},
@@ -511,7 +534,7 @@ mod tests {
         assert!(deliver(&store).contains("new comment from jack: PR:"));
         assert!(quiet(&store));
         // A run arrives at its last step before it records its outcome.
-        store.arrive_task_graph(&task, &run, "end").unwrap();
+        store.arrive_task_graph(&task, &run, "end", None).unwrap();
         assert!(quiet(&store), "arrived but unsettled");
         finish_run(&store, &run, "succeeded");
         let updates = pending(&store, "reader");
@@ -967,6 +990,18 @@ mod tests {
             quiet(&store),
             "the steer saved for this comment is its only delivery"
         );
+        comment(
+            &store,
+            &task,
+            "1b, the warm palette\n\n<!-- loopflow-requester:\"jack\" -->\n\n<!-- loopflow-breakpoint:arrival -->",
+            TaskCommentAuthor::Person {
+                name: Some("jack".into()),
+            },
+        );
+        assert!(
+            quiet(&store),
+            "a breakpoint reply reaches the next step as its handoff"
+        );
     }
 
     #[test]
@@ -997,5 +1032,64 @@ mod tests {
         );
         assert_eq!(pending(&store, "reader").len(), 1);
         assert!(pending(&store, "worker").is_empty());
+    }
+
+    #[test]
+    fn a_parents_conversation_hears_when_a_child_parks_at_a_breakpoint() {
+        let (_home, store, parent) = task_session();
+        let child = task(
+            &store,
+            "Compare layouts",
+            "/task-updates-child",
+            Some(&parent),
+        );
+        let identifier = store.task(&child).unwrap().unwrap().identifier;
+        conversation(&store, "child-reader", &child);
+        assert_eq!(unread(&store, "reader"), (vec![], vec![]));
+        assert_eq!(unread(&store, "child-reader"), (vec![], vec![]));
+
+        crate::store::task_work::take_up_task_graph(
+            &store,
+            &child,
+            &crate::task_graph::CapturedGraph {
+                name: "feature".into(),
+                steps: Vec::new(),
+            },
+        )
+        .unwrap();
+        let carrier = LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&carrier],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE task_graphs SET lf_process_id=?2,run_start='{\"index\":0}' WHERE task_id=?1",
+                rusqlite::params![child.as_str(), carrier.as_str()],
+            )
+            .unwrap();
+        }
+        let record =
+            serde_json::json!({"id": carrier.as_str(), "cursor": {"index": 1}}).to_string();
+        store
+            .arrive_task_graph(
+                &child,
+                &carrier,
+                "after-explore",
+                Some((&record, "Compare layouts")),
+            )
+            .unwrap();
+        let (notices, updates) = unread(&store, "reader");
+        assert_eq!(
+            notices,
+            [format!(
+                "{identifier} \"Compare layouts\", which this conversation conducts, stopped at after-explore. lf task status {identifier}"
+            )]
+        );
+        assert!(updates.is_empty());
+        let (child_notices, _) = unread(&store, "child-reader");
+        assert!(child_notices.is_empty());
     }
 }

@@ -56,7 +56,7 @@ managed by the local server vs. bare:
 
 | Kind | Started by | Terminal & lifetime | Server involvement |
 |---|---|---|---|
-| **Work session** | `lf resume --task`, interactive Graph steps, Wave/repo sessions, Desktop panes | Runs in a **holder** process; outlives windows and `lf install` | Records turns, wakes idle conversations on steers/updates |
+| **Work session** | `lf resume --task`, Wave/repo sessions, Desktop panes | Runs in a **holder** process; outlives windows and `lf install` | Records turns, wakes idle conversations on steers/updates |
 | **Worker** | Headless steps of `lf task run` / `lf task auto on` | Headless; runs in its own process | Records turns; keeps running if server stops |
 | **Chat** | `lf`, `lf <skill>`, `lf -i`, interactive `lf graph` | Runs directly in your terminal (`Ctrl+C`/`Ctrl+Z` go straight to the agent); ends with the terminal | None; reads transcript at exit |
 | **Batch** | `lf -b <skill>` | Headless child of its caller; prints output and exits | None; reads transcript at exit |
@@ -109,10 +109,14 @@ lf task status LOO-12
   thread on the same provider and login. Cut-off turns are never replayed;
   pending steers arrive at the first boundary.
 - **Task runs** (`lf task run`, `lf task auto on`, and their workers) are carried
-  again as `lf task run` from the step they reached. Interactive stops stay
-  stops, and recovery never turns auto on.
+  again as `lf task run` from the step they reached. A Task parked at a
+  breakpoint keeps its place through recovery.
 - **Work sessions you quit** (`/exit`, `Ctrl+D`, `Ctrl+C` at the prompt) stay
-  quit until you resume them or steer the Session or its Task.
+  quit until you resume them, steer the Session or its Task, or the Task
+  reaches a new breakpoint. On arrival, Loopflow opens the primary Task
+  conversation in a held terminal with the finished step's result. Attach
+  with `lf resume --task <ID>`. Quitting after the result arrives leaves
+  the Task at that breakpoint.
 - **Paused Tasks** (`lf task pause`) keep their primary conversation open.
   Conversation recovery and steers work as usual. Graph runs and worker
   retries wait for [`lf task unpause`](work.md#pause-a-task).
@@ -216,7 +220,7 @@ lf session steers <session>                          # pending vs. delivered
   they were closed as soon as the provider is ready for input, before you type.
 - **A Task's conversation** also hears about the
   [follow-ups filed from it](work.md#file-follow-ups-from-a-task) when one
-  stops at an interactive step, fails, merges or closes, not at each step. A
+  reaches a breakpoint, fails, merges or closes. A
   steer for a child stays with the child.
 - **Chats** are never woken while idle; in a Task checkout they receive updates
   on their next turn.

@@ -116,6 +116,30 @@ pub struct GraphStep {
     pub iterations: Vec<Vec<u32>>,
 }
 
+impl GraphStep {
+    /// The graph label of a recorded step.
+    pub fn label(&self, graph: &CompiledGraph) -> String {
+        graph
+            .node_at(self.key)
+            .map(|node| node.label.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn detail(&self, graph: &CompiledGraph) -> crate::execution::GraphStepProcess {
+        crate::execution::GraphStepProcess {
+            lf_process_id: self.run.id.clone(),
+            label: self.label(graph),
+            key: self.key,
+            iterations: self.iterations.clone(),
+            started_at: self.run.started_at,
+            completed_at: self.run.ended_at,
+            outcome: self.run.result().outcome().map(str::to_owned),
+            exit_code: self.run.exit_code,
+            error: self.run.error.clone(),
+        }
+    }
+}
+
 /// One Graph run as it recorded itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphExecution {
@@ -139,28 +163,6 @@ impl GraphExecution {
 
     pub fn latest(&self) -> Option<&GraphStep> {
         self.steps.last()
-    }
-
-    /// The graph label of a recorded step.
-    pub fn label(&self, step: &GraphStep) -> String {
-        self.compiled
-            .node_at(step.key)
-            .map(|node| node.label.clone())
-            .unwrap_or_default()
-    }
-
-    pub fn step_detail(&self, step: &GraphStep) -> crate::execution::GraphStepProcess {
-        crate::execution::GraphStepProcess {
-            lf_process_id: step.run.id.clone(),
-            label: self.label(step),
-            key: step.key,
-            iterations: step.iterations.clone(),
-            started_at: step.run.started_at,
-            completed_at: step.run.ended_at,
-            outcome: step.run.result().outcome().map(str::to_owned),
-            exit_code: step.run.exit_code,
-            error: step.run.error.clone(),
-        }
     }
 
     /// How far the Graph got on the graph it launched with.
@@ -189,7 +191,7 @@ impl GraphExecution {
             steps: self
                 .steps
                 .iter()
-                .map(|step| self.step_detail(step))
+                .map(|step| step.detail(&self.compiled))
                 .collect(),
         }
     }

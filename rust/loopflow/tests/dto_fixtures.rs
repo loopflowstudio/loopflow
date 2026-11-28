@@ -287,16 +287,16 @@ fn task_detail_says_each_fact_once() {
     );
     assert_eq!(
         detail.task.graph.as_ref().unwrap().step.as_deref(),
-        Some("demo")
+        Some("after-demo")
     );
     let graph = detail.graph.as_ref().unwrap();
-    assert_eq!(graph.current_step, Some(2));
-    assert_eq!(graph.control.label, "demo · next: end");
+    assert_eq!(graph.current_step, Some(4));
+    assert_eq!(graph.control.label, "Continue");
     assert_eq!(
         graph.control.action,
-        loopflow_execution::task_graph::WorkflowAction::Run
+        loopflow_execution::task_graph::WorkflowAction::Continue
     );
-    assert_eq!(graph.sentence, "Waiting for you at demo.");
+    assert_eq!(graph.sentence, "At breakpoint after-demo.");
     let conversation = detail
         .sessions
         .iter()
@@ -509,6 +509,20 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
 }
 
 #[test]
+fn a_parked_task_names_the_arrival_its_conversation_can_continue() {
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_graph_breakpoint.json"
+    ))
+    .unwrap();
+    let graph: loopflow_execution::task_graph::TaskGraph =
+        serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(graph.step(), "after-research");
+    assert_eq!(graph.breakpoints, ["after-research"]);
+    assert_eq!(graph.waiting_step(), Some("after-research"));
+    assert_eq!(serde_json::to_value(graph).unwrap(), wire);
+}
+
+#[test]
 fn task_work_preserves_sessions_graph_runs_and_graph() {
     let input = include_str!("../../../tests/fixtures/dto/task_work.json");
     let work: loopflow_execution::task_work::TaskWork = serde_json::from_str(input).unwrap();
@@ -525,19 +539,21 @@ fn task_work_preserves_sessions_graph_runs_and_graph() {
         }
     );
     assert_eq!(graph.step(), "review-design");
+    assert_eq!(graph.breakpoints, ["review-design", "demo"]);
     assert!(graph.waiting_step().is_none());
     let line: Vec<_> = graph
         .steps
         .iter()
-        .map(|step| (step.name.as_str(), step.interactive))
+        .map(|step| (step.name.as_str(), step.kind))
         .collect();
+    use loopflow_execution::task_graph::WorkflowStepKind;
     assert_eq!(
         line,
         [
-            ("plan", false),
-            ("review-design", true),
-            ("build", false),
-            ("demo", true)
+            ("plan", WorkflowStepKind::Stage),
+            ("review-design", WorkflowStepKind::StageWithBreakpoint),
+            ("build", WorkflowStepKind::Stage),
+            ("demo", WorkflowStepKind::Breakpoint)
         ]
     );
     assert_eq!(graph.current_step, Some(2));
@@ -554,6 +570,24 @@ fn task_work_preserves_sessions_graph_runs_and_graph() {
         serde_json::to_value(work).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()
     );
+}
+
+#[test]
+fn a_breakpoint_position_requires_the_nullable_blocker() {
+    use loopflow_execution::task_graph::{TaskGraph, TaskGraphPosition};
+
+    let mut wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_graph_breakpoint.json"
+    ))
+    .unwrap();
+    let graph: TaskGraph = serde_json::from_value(wire.clone()).unwrap();
+    assert!(matches!(
+        graph.position,
+        TaskGraphPosition::Breakpoint { blocker: None, .. }
+    ));
+    assert_eq!(serde_json::to_value(graph).unwrap(), wire);
+    wire["position"].as_object_mut().unwrap().remove("blocker");
+    assert!(serde_json::from_value::<TaskGraph>(wire).is_err());
 }
 
 #[test]
@@ -931,11 +965,11 @@ fn task_run_explanations_preserve_actions_and_missing_evidence() {
     let reports: Vec<TaskRunExplanation> = serde_json::from_str(json).unwrap();
     assert!(matches!(
         &reports[0].action,
-        Some(TaskRunAction::Run { take_up: true, stops_at: Some(step), .. }) if step == "explore"
+        Some(TaskRunAction::Run { take_up: true, stops_at: Some(step), .. }) if step == "after-explore"
     ));
     assert!(matches!(
         &reports[1].action,
-        Some(TaskRunAction::Wait { take_up: false, step, .. }) if step == "demo"
+        Some(TaskRunAction::Run { take_up: false, from, stops_at: Some(step), .. }) if from == "demo" && step == "after-demo"
     ));
     assert!(matches!(
         &reports[2].action,

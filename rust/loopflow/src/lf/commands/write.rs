@@ -198,29 +198,12 @@ writes! {
     TaskRun {
         directory: PathBuf,
         issue: String,
-        graph: Option<String>,
-        from: Option<String>,
-        agent: Option<String>,
-        approve: bool,
+        #[serde(flatten)]
+        request: task::TaskRunRequest,
     } => task::TaskRun;
-    {
-        issue,
-        from,
-        graph,
-        agent,
-        approve,
-        ..
-    } => match remote {
+    { issue, request, .. } => match remote {
         Some(remote) => remote.call()?,
-        None => task::run(
-            directory,
-            issue,
-            from.as_deref(),
-            graph.as_deref(),
-            agent.as_deref(),
-            *approve,
-            environment,
-        )?,
+        None => task::run(directory, issue, request, environment)?,
     },
 
     /// `lf task auto on <issue> --json`, started detached: turns auto on and returns the run, as
@@ -1587,10 +1570,15 @@ pub(super) fn run_task(
     let write = Write::TaskRun {
         directory: directory.to_path_buf(),
         issue: issue.to_owned(),
-        graph: None,
-        from: from.map(str::to_owned),
-        agent: None,
-        approve: false,
+        request: task::TaskRunRequest {
+            graph: None,
+            from: from.map(str::to_owned),
+            agent: None,
+            approve: false,
+            at_arrival: None,
+            decision: None,
+            reason: None,
+        },
     };
     let WriteResult::TaskRun(run) = write.run()? else {
         unreachable!("task.run answers with a run")
@@ -1699,7 +1687,7 @@ mod tests {
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
             r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","task":"FIX-1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
-            r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","graph":null,"from":"implement","agent":"claude","approve":false}"#,
+            r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","graph":null,"from":"implement","agent":"claude","approve":false,"at_arrival":null,"decision":null,"reason":null}"#,
             r#"{"kind":"task.auto.on","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"task.steer","directory":"/r","issue":"FIX-1","message":"keep the API"}"#,
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,

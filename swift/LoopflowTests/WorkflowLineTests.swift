@@ -9,12 +9,13 @@ import ViewInspector
 @Suite("Workflow line")
 struct WorkflowLineTests {
     private static let code: [TaskGraph.Step] = [
-        .init(name: "plan", interactive: false), .init(name: "build", interactive: false),
-        .init(name: "ship-review", interactive: true), .init(name: "deliver", interactive: false),
+        .init(name: "plan", kind: .stage), .init(name: "build", kind: .stage),
+        .init(name: "after-ship-review", kind: .breakpoint), .init(name: "deliver", kind: .stage),
+        .init(name: "after-verify", kind: .breakpoint),
     ]
 
     private func graph(_ position: TaskGraph.Position, current: Int?, sentence: String) -> TaskGraph {
-        TaskGraph(name: "code", control: .init(action: .run, label: "Run: implement"), interactiveSteps: [], position: position,
+        TaskGraph(name: "code", control: .init(action: .run, label: "Run: plan"), breakpoints: ["after-ship-review", "after-verify"], position: position,
                   steps: Self.code, currentStep: current, sentence: sentence)
     }
 
@@ -32,14 +33,19 @@ struct WorkflowLineTests {
         #expect(throws: (any Error).self) { try line.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-step-0") }
     }
 
-    @Test("An outline wraps its steps with where you take part underneath")
+    @Test("Standalone breakpoints show a person icon and composed stages retain their names")
     func outline() throws {
-        let outline = WorkflowOutline(start: .init(action: .run, label: "Run: plan"), steps: Self.code, interactiveSteps: [],
-                                      sentence: "You take part at ship-review.")
-        let sheet = WorkflowLine(outline: outline)
-        _ = try sheet.inspect().find(text: "ship-review")
-        _ = try sheet.inspect().find(text: "You take part at ship-review.")
-        _ = try sheet.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-step-0")
+        let outline = WorkflowOutline(start: .init(action: .run, label: "Run: plan"),
+                                      steps: Self.code + [.init(name: "nested", kind: .stageWithBreakpoint)],
+                                      breakpoints: ["after-ship-review", "after-verify", "nested"],
+                                      sentence: "You take part after ship-review.")
+        let sheet = try WorkflowLine(outline: outline).inspect()
+        let stop = try sheet.find(viewWithAccessibilityIdentifier: "task-workflow-step-2")
+        #expect(try stop.find(ViewType.Image.self).actualImage().name() == "person.fill")
+        #expect(throws: (any Error).self) { try stop.find(text: "after-ship-review") }
+        let nested = try sheet.find(viewWithAccessibilityIdentifier: "task-workflow-step-5")
+        _ = try nested.find(text: "nested")
+        #expect(try nested.find(ViewType.Image.self).actualImage().name() == "person.fill")
     }
 
     @Test("The sentence sets no line limit, so narrow surfaces wrap it")

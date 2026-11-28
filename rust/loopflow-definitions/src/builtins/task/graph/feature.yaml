@@ -1,8 +1,10 @@
 description: Explore, build and deliver. You choose what to build and review the change before it merges.
 steps:
-- interactive: explore
+- step: explore
+- break
 - graph: plan
 - loop:
     - graph: build
-    - interactive: ship-review     # you read the page; iterate goes back to build
+    - step: ship-review
+    - break
 - graph: deliver

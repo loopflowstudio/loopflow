@@ -101,6 +101,7 @@
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   }
 }

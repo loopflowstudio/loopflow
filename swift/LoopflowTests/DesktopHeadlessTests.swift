@@ -113,7 +113,7 @@ struct DesktopHeadlessTests {
         #expect(answers.map(\.2) == [.keepTheirs, .useMine])
     }
 
-    @Test("A builtin Workflow offers Customize beside its interactive steps")
+    @Test("A builtin Workflow offers Customize beside its breakpoints")
     func customizedWorkflow() async throws {
         var entries = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             fixtures.appendingPathComponent("graph_catalog.json"))) as? [[String: Any]])
@@ -397,7 +397,7 @@ struct DesktopHeadlessTests {
         _ = try invalid.inspect().find(button: "Edit")
     }
 
-    @Test("A Task's Workflow shows its running run, offers a stopped one again, continues after an interactive step, and starts from any step")
+    @Test("A Task's Workflow shows its running run, offers a stopped one again, continues from a breakpoint, and starts from any runnable step")
     func taskWorkflow() async throws {
         let planning = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: planning)
@@ -423,8 +423,9 @@ struct DesktopHeadlessTests {
                     workflow["control"] = ["action": "run", "label": "Run: implement"]
                 } else if position["step"] as? String == "end" {
                     workflow["control"] = ["action": "done", "label": "Done"]
-                } else {
-                    workflow["control"] = ["action": "run", "label": "Run: end"]
+                } else if position["kind"] as? String == "breakpoint" {
+                    workflow["current_step"] = 3
+                    workflow["control"] = ["action": "continue", "label": "Continue"]
                 }
             }
             wire["graph"] = workflow
@@ -451,12 +452,12 @@ struct DesktopHeadlessTests {
         let stopped = try view(position: ["kind": "run", "step": "review-design", "at": "implement", "lf_process_id": process, "running": false])
         _ = try stopped.inspect().find(text: "Run: implement")
 
-        // At `demo` the one action continues after it; going into `end` is auto's too.
-        let waiting = try view(position: ["kind": "at", "step": "demo"])
+        // A continued review is scoped to the visit the bar displayed.
+        let waiting = try view(position: ["kind": "breakpoint", "step": "demo", "arrival": process, "blocker": NSNull()])
         let next = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-primary").button()
-        _ = try waiting.inspect().find(text: "Run: end")
+        #expect(throws: (any Error).self) { try waiting.inspect().find(text: "demo") }
         try next.tap()
-        #expect(try await tapped(1) == ["task", "run", task.task.identifier, "--json"])
+        #expect(try await tapped(1) == ["task", "run", task.task.identifier, "--at-arrival", process, "--json"])
         // The chip says the run is starting until the Machine answers.
         for _ in 0..<200 where model.pendingChanges.controlRequest(for: task.task.identifier) != nil { try await Task.sleep(for: .milliseconds(5)) }
         // Auto-Ship sits in the Workflow bar, not in the detail page's Workflow header.
@@ -481,13 +482,16 @@ struct DesktopHeadlessTests {
         #expect(try await tapped(3) == ["task", "run", task.task.identifier, "--json"])
         for _ in 0..<200 where model.pendingChanges.controlRequest(for: task.task.identifier) != nil { try await Task.sleep(for: .milliseconds(5)) }
 
-        // A direct step pick restarts the Graph at the chosen place.
-        for step in ["start", "review-design", "demo"] {
+        // Going back is the same command a person would type; Start from… in "…"
+        // lists `start` and each top-level runnable work step, omitting standalone breakpoints.
+        for step in ["start", "plan", "review-design", "build"] {
             _ = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-\(step)")
         }
-        try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-review-design").button().tap()
-        #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "review-design", "--json"])
-        for _ in 0..<200 where model.pendingChanges.controlRequest(for: task.task.identifier) != nil { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(throws: (any Error).self) {
+            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-demo")
+        }
+        try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move-plan").button().tap()
+        #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "plan", "--json"])
 
         // Completion has its own operation and does not move the Workflow.
         model.select(.task(id: task.id))
@@ -564,7 +568,9 @@ struct DesktopHeadlessTests {
         _ = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-0")
         #expect(throws: (any Error).self) { try bar.find(viewWithAccessibilityIdentifier: "task-workflow-step-2") }
         let steps = try bar.find(viewWithAccessibilityIdentifier: "task-workflow-move")
-        for action in ["build", "demo", "Interrupt step", "Abandon…"] { _ = try steps.find(button: action) }
+        for action in ["plan", "review-design", "build", "Interrupt step", "Abandon…"] { _ = try steps.find(button: action) }
+        // demo is a breakpoint in this fixture, so Start from leaves it out.
+        #expect(throws: (any Error).self) { try steps.find(button: "demo") }
         #expect(throws: (any Error).self) { try steps.find(button: "Copy Task ID") }
         _ = try bar.find(viewWithAccessibilityIdentifier: "task-complete")
     }

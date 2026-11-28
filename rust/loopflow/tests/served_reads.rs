@@ -1721,8 +1721,8 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskUnassign { .. }
         | Write::TaskAutoOff { .. }
         | Write::TaskMove { .. }
-        // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
-        // compares the run, and comments differ by their saved IDs.
+        // Starting a run or a ship starts Processes; the Task Graph launch tests
+        // cover parking at a breakpoint, and comments differ by their saved IDs.
         | Write::TaskRun { .. }
         | Write::TaskAutoOn { .. }
         | Write::TaskSteer { .. }
@@ -2331,12 +2331,17 @@ fn server_operations_match_their_lf_commands() {
     // This fixture's Task has no launchable planning, so the run it started
     // reports the refusal `lf task run` prints, and nothing ran.
     let run = Write::TaskRun {
-        graph: None,
         directory: directory.clone(),
         issue: "INF-123".into(),
-        from: Some("demo".into()),
-        agent: None,
-        approve: false,
+        request: loopflow_execution::engine::task::TaskRunRequest {
+            graph: None,
+            from: Some("demo".into()),
+            agent: None,
+            approve: false,
+            at_arrival: None,
+            decision: None,
+            reason: None,
+        },
     };
     let refused = loopflow_execution::machine::client::Connection::open()
         .unwrap()
@@ -2650,26 +2655,8 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
         Write::TaskRun {
             directory,
             issue,
-            from,
-            agent,
-            approve,
-            graph,
-        } => {
-            let mut spelled = Vec::new();
-            if *approve {
-                spelled.push("--batch".to_owned());
-            }
-            if let Some(agent) = agent {
-                spelled.extend(words(&["--agent", agent]));
-            }
-            spelled.extend(words(&["task", "run", issue]));
-            spelled.extend(graph.iter().cloned());
-            if let Some(from) = from {
-                spelled.extend(words(&["--from", from]));
-            }
-            spelled.push("--json".into());
-            (path(directory), spelled)
-        }
+            request,
+        } => (path(directory), request.argv(issue)),
         Write::TaskAutoOn { directory, issue } => (
             path(directory),
             words(&["--task", issue, "task", "auto", "on", "--json"]),

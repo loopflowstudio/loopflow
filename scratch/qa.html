@@ -1,0 +1,81 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-1096 QA · breakpoints after Pass 6</title>
+<style>
+body{font:15px/1.5 -apple-system,sans-serif;max-width:56em;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f4f4f2;padding:.8em;overflow-x:auto;font-size:12.5px;white-space:pre-wrap}
+h2{margin-top:2em;border-top:1px solid #ddd;padding-top:1em}
+.ok{color:#176b2c;font-weight:600}.bad{color:#a12;font-weight:600}.fix{color:#7a4b00;font-weight:600}
+td,th{padding:.3em .6em;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+</style>
+<h1>Breakpoints after Pass 6 and compress</h1>
+<p>Branch <code>lf</code> at <code>47473ba2a6</code> plus the fixes below. I used a private <code>LF_HOME</code> at <code>/tmp/lf-qa-bp6/home</code> and a disposable repository with a bare origin. Every primary ran on real Claude (default model) and the <code>note</code>/<code>echo</code> workers ran on <code>claude:haiku</code>. The run was on 2026-11-27. It covers what changed since the Pass 5 QA: the feature and code review loop, generated break names around authored ones, a reply that crosses a loop exit, pause at a breakpoint, the retired <code>human:</code> and the Start from list from Rust.</p>
+<pre>loopecho:   - loop: [ step: note, break ] / - step: echo
+cmdreview:  - cmd: help graph / - break: review / - cmd: help task
+cmdnames:   - cmd: help graph / - break / - cmd: help task / - break: review / - break
+names:      - step: note / - break / - step: echo / - break: after-note</pre>
+
+<h2>1 · Builtin Graphs and authoring</h2>
+<p><b>Did:</b> <code>lf graph show</code> for feature, code, names, plus the <code>human:</code> item and a break next to an authored name.</p>
+<pre>feature: explore · break: after-explore · kickoff … ship-review · break: after-ship-review (returns to sync) · reflect · cmd: land --wait-and-fix
+names:   note · break: after-note#2 · echo · break: after-note
+human:   Error: invalid graph: human: invalid graph: `human:` is retired; put `- break` after the step</pre>
+<p><span class="ok">Works.</span> The authored <code>after-note</code> keeps its name and the unnamed break steps aside to <code>#2</code>. The review loop sits before delivery. The doubled "invalid graph:" prefix shows up for every Graph parse error (a <code>repeat:</code> item prints it too), so it predates this change.</p>
+
+<h2>2 · A primary that died at the folder dialog is started again and presents the review</h2>
+<p><b>Did:</b> <code>lf task create … --run --graph loopecho</code>. <code>--until breakpoint</code> returned after 15 s. I attached with <code>lf resume --task e8969c</code> and pressed Enter on Claude's "Adding a new directory" dialog. Enter selects "No, exit", so the primary exited with code 1.</p>
+<p><b>Saw:</b> status read <code>Conversation: died 19:13 (exit 1) · starting again</code>. On reattach (down-arrow, Enter) the new primary presented:</p>
+<pre>What the note step produced: scratch/note.md, committed as 397aef7. …
+1. Which name?
+- a) recipe: matches the repo and the README title "recipe tool", so nothing gets renamed.
+- b) cook: shorter to type, but generic and less tied to the project.
+Recommendation: 1a, recipe.
+Next: continuing runs the echo step. A plain "continue" accepts recipe; otherwise reply with your choice …</pre>
+<p><span class="ok">Works.</span></p>
+
+<h2>3 · Iterate, then a reply that crosses the loop exit</h2>
+<table>
+<tr><th>Typed</th><th>Saw</th></tr>
+<tr><td>Neither. Go around again and try names that start with k.</td><td>The primary ran <code>lf task run e8969c --at-arrival fdbef06a-… --decision iterate --reason 'Neither. Go around again …'</code>. Pass 2 proposed kitchen and kettle and recorded recipe and cook as rejected, then parked again.</td></tr>
+<tr><td>1b, kettle. Shorter wins; ship it.</td><td>The Task advanced out of the loop into <code>echo</code>. <code>scratch/received.md</code>: <code>1b, kettle. Shorter wins; ship it. (Selects option 1b: name the tool `kettle`.)</code> The Graph reached its end and the Task completed.</td></tr>
+</table>
+<p><span class="ok">Works.</span> The reply reached the first step past the XOR exit word for word. The iterate direction ("try names that start with k") did not leak into <code>echo</code>, and the primary told the person which part was its own gloss. "Ship it" did not merge or publish anything, because this Graph has no delivery step, and the primary said so.</p>
+<p><span class="bad">Wrong, and older than this change:</span> lf's progress steer read <code>Run loopecho … · echo · pass 2: succeeded</code>, although <code>echo</code> runs once, outside the loop. <code>graph_iterations</code> keeps every return count after the cursor leaves the loop, by design (<code>compiled.rs</code> test "Moving beyond one span does not collapse its independent count"). Any step after a loop is labelled "pass N", so with the new review loop feature will show <code>reflect · pass 2</code>. I left it: changing the label means changing what <code>iterations</code> records for each step, which is outside this Task.</p>
+
+<h2>4 · Pause while parked, a stale arrival, Continue</h2>
+<pre>lf task pause 1abec4    → control {unpause, "Paused: review"}, sentence "Paused at review. `lf task unpause` lifts the hold.", arrival c7b0d879…
+lf task run 1abec4      → Error: Task is paused; run `lf task unpause 1abec4` to lift the hold
+lf task unpause 1abec4  → control {continue, "Continue"}, same arrival c7b0d879…
+lf task run --at-arrival 00000000-…  → Error: Task 1abec4 is now at review in cmdreview; that review has ended
+lf task run --at-arrival c7b0d879-…  → help task ran; Graph at its end; Task done</pre>
+<p><span class="ok">Works.</span> The visit keeps the same arrival through pause and unpause. One rough edge in the stale-arrival message: when the Task is still standing at the same-named breakpoint, "is now at review … that review has ended" reads as a contradiction. It is accurate for a loop's earlier visit, which is the real case.</p>
+
+<h2>5 · Generated names for command steps <span class="fix">fixed</span></h2>
+<p><b>Did:</b> <code>lf graph show cmdnames</code>, then a Task on it.</p>
+<pre>break: after-help graph
+lf task run 0ded56 --from after-help graph
+Error: graph "graph" is unavailable: add .lf/graphs/graph.yaml …</pre>
+<p><span class="bad">Broken:</span> a break after a <code>cmd:</code> step took the command's label, spaces and flags included, so the name status printed couldn't be pasted into <code>--from</code>. Feature's last step would have given <code>after-land --wait-and-fix</code>.</p>
+<p><span class="fix">Fixed</span> in <code>breakpoint_name</code> (<code>graph/mod.rs</code>): the base is joined into one word, <code>after-help-graph</code> and <code>after-land-wait-and-fix</code>. Skill names, ids and authored names are unchanged. <code>unnamed_breaks_leave_later_authored_names_available</code> now covers it and fails without the fix. <b>Live recheck</b> on the rebuilt binary and a restarted server: the Task parked at <code>after-help-graph</code>, <code>--from after-help-graph</code> parked there again, and three continues went through <code>review</code> and <code>after-review</code> to the end. A Task that took up the Graph before the fix keeps its captured name.</p>
+
+<h2>6 · Desktop: Start from comes from the Rust track <span class="fix">fixed test</span></h2>
+<p><code>scripts/test_desktop.sh --filter 'TaskActionsTests|RoadmapViewTests|WorkflowLineTests|DesktopHeadlessTests|NowProjectionTests|WorkNavigationTests|DTOFixtureTests'</code> ran 150 tests in 7 suites with 1 failure: "The chip's menu holds steps and lifecycle actions" expected a <code>demo</code> button. The <code>task_work.json</code> fixture lists <code>demo</code> as a breakpoint, and the Swift helper before compress also left breakpoints out of Start from, so the expectation went stale in the merge from main rather than through a product regression. The test now looks for <code>plan</code> and <code>build</code> and checks that <code>demo</code> is absent. <code>DesktopHeadlessTests</code> passed 16/16.</p>
+
+<h2>Checks</h2>
+<table>
+<tr><td><code>cargo test -p loopflow-execution --lib graph::</code></td><td>101 passed</td></tr>
+<tr><td><code>scripts/test_desktop.sh --filter DesktopHeadlessTests</code></td><td>16 passed</td></tr>
+<tr><td>Other six Desktop suites above</td><td>passed (only the stale test failed in the first run)</td></tr>
+<tr><td>Clippy, full suites</td><td>CI</td></tr>
+</table>
+
+<h2>Where it stands</h2>
+<p><b>Works now:</b> the feature and code review loop before delivery. Authored break names win over generated ones, and generated names are one shell word. A dead primary is started again at the breakpoint and presents the artifact, numbered options and a recommendation. Iterating with direction works. A reply that crosses a loop exit reaches the next worker word for word, and the iterate direction stays behind. Pause and unpause keep the visit's arrival, a stale arrival is refused, and Continue with the shown arrival reaches the end.</p>
+<p><b>Not reached:</b> the live Mac app (Roadmap Continue carrying the arrival, the blocked reason in the workflow bar, the person icon). This unattended run did not launch a Dev bundle beside the person's app, so those rely on the headless suites and the demo. Codex and other harnesses did not run as workers here. No real worker produced a blocked verdict.</p>
+<p><b>Still wrong, worst first:</b></p>
+<ol>
+<li>Steps after a loop are labelled "pass N" in progress steers and status (scenario 3). This predates the change, and the new review loop makes it more visible.</li>
+<li>Enter on Claude's "Adding a new directory" dialog for the main checkout chooses "No, exit" and kills the primary. lf restarts it, but the first attach is a trap. This predates the change and is already in <code>.lf/qa/task-pause.md</code>.</li>
+<li>Graph parse errors repeat "invalid graph:" (<code>Error: invalid graph: human: invalid graph: …</code>). This predates the change.</li>
+<li>A stale arrival at a breakpoint with the same name reads "is now at review … that review has ended".</li>
+</ol>

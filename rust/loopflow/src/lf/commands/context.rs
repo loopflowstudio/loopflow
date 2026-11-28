@@ -133,7 +133,7 @@ pub fn explain_in(
 pub fn explain_task_run(
     task: Option<&str>,
     options: &loopflow_execution::ops::task::TaskProcessOptions,
-    through: bool,
+    mode: loopflow_execution::ops::task::TaskRunMode,
 ) -> Result<loopflow_execution::ops::task::TaskRunExplanation> {
     let cwd = std::env::current_dir()?;
     Ok(loopflow_execution::runtime::block_on(async {
@@ -147,7 +147,7 @@ pub fn explain_task_run(
                         wave: options.wave.as_deref(),
                     },
                     options,
-                    through,
+                    mode,
                     crate::lf::navigation::command_merges,
                 )
                 .await

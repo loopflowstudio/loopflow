@@ -111,13 +111,13 @@ resume per harness:
 The rest of `session_launch_contract` covers native authentication, provider switches,
 OpenCode diagnostics and Machine dispatch.
 
-Task Graph run and its previews (`task_graph_launch_tests` in the library,
-`global_commands`), one Graph run to an interactive step and one with auto on:
+The `task_graph_launch_tests` and `global_commands` fixtures cover Task Graph
+launch, review, and preview.
 
 | Test | Wiring it proves |
 |---|---|
-| `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named` | `task run` captures the Wave's Graph and stops the Task at its interactive step; a later bare run keeps the Graph a Task named |
-| `auto_on_runs_every_remaining_step_standing_in_at_each_interactive_step` | `-b --task … task auto on --reason` stands in at each interactive step, reaches `end` and completes the Task |
+| `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named` | `task run` captures the Wave's Graph and parks the Task at its breakpoint; a later bare run keeps the Graph a Task named |
+| `auto_on_runs_workers_through_their_breakpoints` | `-b --task … task auto on --reason` runs the workers through each breakpoint, reaches `end` and completes the Task |
 | `task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state` | `task run --explain` flags reach the preview; named, checkout and `--task` selections agree, conflicting ones refuse; the store's bytes don't change; launch refuses with the preview's reason |
 | `task_run_explain_reads_unstarted_work_without_preparing_it` | `LF_AS` reaches context resolution; previewing an unstarted Task leaves it without a checkout |
 | `task_checkout_explain_reuses_explicit_and_inferred_work_without_effects` | `task checkout --explain` flags reach the preview; selections agree; Git and store stay unchanged; `task checkout` acts on the same inferred Task |
@@ -667,8 +667,9 @@ Agent-selection and Task launch-mode changes also require the container-only
 `declared_agent_can_start_another_tasks_graph` proof: saved Task defaults remain
 local, while explicit `-a` overrides child Tasks too. Ordinary Rust suites skip
 this installation-boundary proof.
-Fixtures that stop at an interactive step use bare `task run` and wait for the
-recorded Graph outcome; `-b` executes that step headlessly and needs a provider.
+To assert on a parked Task, use bare `task run` and wait for the recorded Graph
+outcome. A command followed by `- break` exercises parking without a provider.
+Use `-b` to cross the breakpoint on the recommended path.
 Every ordinary installation run first upgrades populated released planning and
 Task/PR fixtures through every later migration. Those checks retain zero/one/multiple
 historical PRs, pending completion delivery, a running Process and its Workflow,

@@ -203,6 +203,7 @@ pub enum TaskConditionState {
 }
 
 use loopflow_execution::durable::GraphProcessDetail;
+use loopflow_execution::ops::task_actions::BreakpointActionEvidence;
 pub use loopflow_execution::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
@@ -492,6 +493,8 @@ pub struct RoadmapTask {
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub breakpoint_arrival: Option<loopflow_model::id::LfProcessId>,
     pub pr: Option<PrSnapshot>,
     pub section: TaskSection,
     #[serde(deserialize_with = "Option::deserialize")]
@@ -2346,16 +2349,39 @@ async fn snapshot_task_detail(
         .steps
         .get(&task.id)
         .is_some_and(|step| step == loopflow_execution::task_graph::END);
-    let finished = loopflow_execution::ops::task_actions::Finished::of(
-        status,
-        pr.as_ref().map(TaskPr::phase),
-        at_end,
-    );
     // An open Task another Machine runs moves there; this Machine's execution
     // records are what it left behind.
     let lifecycle = status.lifecycle(task.state.as_deref());
     let observed = lifecycle.observed_here(runs_on.is_some());
     let elsewhere = runs_on.as_ref().filter(|_| observed.is_none());
+    let sentence;
+    let breakpoint = match facts.breakpoints.get(&task.id) {
+        Some((step, raw))
+            if observed == Some(TaskState::Active)
+                && matches!(
+                    execution.state,
+                    TaskExecutionState::Idle | TaskExecutionState::Blocked
+                ) =>
+        {
+            let arrival: loopflow_execution::store::task_work::BreakpointArrival =
+                serde_json::from_str(raw)?;
+            sentence = loopflow_execution::task_graph::breakpoint_sentence(step, &arrival);
+            let review = BreakpointActionEvidence {
+                blocked: arrival.blocked_reason().is_some(),
+                sentence: &sentence,
+            };
+            review
+                .owns_execution(execution.state)
+                .then_some((arrival.id, review))
+        }
+        _ => None,
+    };
+    let finished = loopflow_execution::ops::task_actions::Finished::of(
+        status,
+        pr.as_ref().map(TaskPr::phase),
+        at_end,
+        breakpoint.is_some(),
+    );
     let conducting = finished
         .filter(|_| {
             status != TaskState::Paused
@@ -2399,15 +2425,15 @@ async fn snapshot_task_detail(
             owner: NextMoveOwner::User,
             reason: reason.clone(),
         }
-    } else if let Some(reason) = conducting.clone() {
-        NextMove {
-            owner: NextMoveOwner::Task,
-            reason,
-        }
     } else if unassigned(&runtime) {
         NextMove {
             owner: NextMoveOwner::User,
             reason: "Unassigned; nothing moves it until `lf task claim` or `lf task run`".into(),
+        }
+    } else if let Some((_, review)) = &breakpoint {
+        NextMove {
+            owner: NextMoveOwner::User,
+            reason: review.sentence.to_owned(),
         }
     } else if execution.state != TaskExecutionState::Idle && !runtime.status.is_terminal() {
         NextMove {
@@ -2416,6 +2442,11 @@ async fn snapshot_task_detail(
                 _ => NextMoveOwner::Task,
             },
             reason: execution.reason.clone(),
+        }
+    } else if let Some(reason) = conducting.clone() {
+        NextMove {
+            owner: NextMoveOwner::Task,
+            reason,
         }
     } else if let Some(finished) = finished {
         NextMove {
@@ -2463,6 +2494,7 @@ async fn snapshot_task_detail(
             .filter(|pr| pr.phase() == PrPhase::Open)
             .map(|pr| pr.presentation().is_some()),
         at_end,
+        breakpoint: breakpoint.as_ref().map(|(_, review)| *review),
         open_children,
         completion_refusal: completion_refusal.as_deref(),
         run_refusal: run_refusal.as_deref(),
@@ -2515,12 +2547,19 @@ async fn snapshot_task_detail(
         ),
         reference,
         lifecycle,
-        working_group: facts.working_groups.get(&task.id).copied(),
+        working_group: facts.working_groups.get(&task.id).map(|group| {
+            if breakpoint.is_some() {
+                loopflow_storage::execution::WorkingGroup::Active
+            } else {
+                *group
+            }
+        }),
         selection_states: task_selection_states(
             observed,
             section,
             runtime.owner.is_some() || pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
             facts.auto.get(&task.id).copied(),
+            breakpoint.is_some(),
             reads.selection_readings[&task.repository_id]
                 .activity
                 .get(&task.id),
@@ -2539,6 +2578,7 @@ async fn snapshot_task_detail(
         }),
         execution: Some(execution),
         run_control,
+        breakpoint_arrival: breakpoint.map(|(arrival, _)| arrival),
         pr: pr.as_ref().map(|pr| {
             let empty = (probe_pr_empty && pr.is_active())
                 .then(|| task_pr_empty(task, pr))
@@ -2695,7 +2735,7 @@ fn derive_task_condition(
         && local_progress.recovery_required == Some(false)
         && local_progress.authored_commits == Some(true)
         && matches!(active_pr_phase, Some(PrPhase::Open | PrPhase::Publishing));
-    let execution = action_evidence.and_then(|evidence| evidence.execution);
+    let breakpoint = action_evidence.and_then(|evidence| evidence.breakpoint);
     // Settled work keeps its retained history without asking anyone to act.
     let settled = runtime
         .map(|runtime| runtime.status)
@@ -2708,8 +2748,7 @@ fn derive_task_condition(
             _ => "Task is complete",
         };
         (TaskConditionState::Clear, reason.to_string())
-    } else if let Some(execution) =
-        execution.filter(|execution| execution.state != TaskExecutionState::Idle)
+    } else if let Some(execution) = action_evidence.and_then(TaskActionEvidence::pending_execution)
     {
         let state = match execution.state {
             TaskExecutionState::Starting
@@ -2724,6 +2763,15 @@ fn derive_task_condition(
         (state, execution.reason.clone())
     } else if launch_blocked {
         (TaskConditionState::Blocked, next_move.reason.clone())
+    } else if let Some(breakpoint) = breakpoint {
+        (
+            if breakpoint.blocked {
+                TaskConditionState::Blocked
+            } else {
+                TaskConditionState::Waiting
+            },
+            breakpoint.sentence.to_owned(),
+        )
     } else if local_progress.state == LocalProgressEvidenceState::Missing
         && local_progress.recovery_required == Some(false)
     {
@@ -4335,6 +4383,62 @@ mod tests {
             OffsetDateTime::now_utc(),
         );
         assert_eq!(user_handoff.state, TaskConditionState::Waiting);
+
+        let breakpoint_evidence = |blocked, sentence| TaskActionEvidence {
+            status: TaskState::Active,
+            execution: None,
+            latest_pr_phase: None,
+            latest_pr_merge_request: None,
+            latest_pr_presentation_current: None,
+            at_end: false,
+            breakpoint: Some(
+                loopflow_execution::ops::task_actions::BreakpointActionEvidence {
+                    blocked,
+                    sentence,
+                },
+            ),
+            open_children: 0,
+            completion_refusal: None,
+            run_refusal: None,
+            ci: None,
+            predecessor_phase: None,
+            launch_refusal: None,
+        };
+        let clear_actions = breakpoint_evidence(false, "At breakpoint after-explore.");
+        let clear_at_breakpoint = derive_task_condition(
+            Some(&TaskRuntimeSnapshot {
+                status: TaskState::Active,
+                ..runtime.clone()
+            }),
+            &next_move,
+            evidence(),
+            Some(&clear_actions),
+            None,
+            OffsetDateTime::now_utc(),
+        );
+        assert_eq!(clear_at_breakpoint.state, TaskConditionState::Waiting);
+        assert_eq!(clear_at_breakpoint.reason, "At breakpoint after-explore.");
+
+        let blocked_actions = breakpoint_evidence(
+            true,
+            "At breakpoint after-ship-review. Blocked: needs a decision",
+        );
+        let blocked_at_breakpoint = derive_task_condition(
+            Some(&TaskRuntimeSnapshot {
+                status: TaskState::Active,
+                ..runtime
+            }),
+            &next_move,
+            evidence(),
+            Some(&blocked_actions),
+            None,
+            OffsetDateTime::now_utc(),
+        );
+        assert_eq!(blocked_at_breakpoint.state, TaskConditionState::Blocked);
+        assert_eq!(
+            blocked_at_breakpoint.reason,
+            "At breakpoint after-ship-review. Blocked: needs a decision"
+        );
     }
 
     #[test]
@@ -4411,6 +4515,7 @@ mod tests {
                         latest_pr_merge_request: None,
                         latest_pr_presentation_current: None,
                         at_end: false,
+                        breakpoint: None,
                         open_children: 0,
                         completion_refusal: None,
                         run_refusal: None,
@@ -4451,6 +4556,7 @@ mod tests {
                 latest_pr_merge_request: None,
                 latest_pr_presentation_current: None,
                 at_end: false,
+                breakpoint: None,
                 open_children: 0,
                 completion_refusal: None,
                 run_refusal: None,
@@ -4575,6 +4681,7 @@ mod tests {
                     latest_pr_merge_request: None,
                     latest_pr_presentation_current: None,
                     at_end: false,
+                    breakpoint: None,
                     open_children: 0,
                     completion_refusal: None,
                     run_refusal: None,
@@ -4607,6 +4714,7 @@ mod tests {
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
             at_end: false,
+            breakpoint: None,
             open_children: 0,
             completion_refusal: None,
             run_refusal: None,
@@ -4782,5 +4890,170 @@ mod tests {
             loopflow_execution::store::migrations::latest_applied_version_sqlite(&conn).unwrap(),
             frontier
         );
+    }
+
+    #[test]
+    fn blocked_auto_breakpoint_agrees_between_waves_and_selections() {
+        let _ledger = loopflow_execution::journal::TestLedgerGuard::new();
+        let repo = loopflow_test_support::TestRepo::new();
+        let checkout = repo.path().canonicalize().unwrap();
+        let database = tempfile::tempdir().unwrap();
+        let store: loopflow_execution::store::SharedStore =
+            Arc::new(loopflow_execution::store::Store {
+                sqlite: loopflow_execution::store::opening::open_ephemeral(
+                    &database.path().join("store.db"),
+                )
+                .unwrap(),
+            });
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let repo_id = loopflow_execution::repository::location::ensure_repository(
+            &store.sqlite,
+            checkout.to_str().unwrap(),
+        )
+        .unwrap();
+        let wave = Wave::new(
+            loopflow_model::id::WaveId::new(),
+            "product".into(),
+            checkout.display().to_string(),
+        );
+        runtime.block_on(store.create_wave(&wave)).unwrap();
+        let task = store
+            .sqlite
+            .create_task(&loopflow_execution::work::task::NewTask {
+                parent_task_id: None,
+                repository_id: repo_id.clone(),
+                id: loopflow_model::durable::TaskId::new(),
+                project_id: None,
+                title: "Blocked breakpoint".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        loopflow_execution::store::ownership::claim_task(&store.sqlite, &task.id).unwrap();
+        let graph = loopflow_execution::task_graph::CapturedGraph::load("feature", &checkout)
+            .unwrap()
+            .unwrap();
+        store
+            .sqlite
+            .take_up_task_graph(&task.id, &serde_json::to_string(&graph).unwrap())
+            .unwrap();
+        let mut cursor = graph.find("after-ship-review").unwrap().cursor();
+        cursor.leaf_mut().progress.verdict =
+            Some(loopflow_execution::graph::transitions::GraphVerdict {
+                decision: loopflow_execution::graph::transitions::GraphDecision::Blocked,
+                summary: "Two incompatible schema migrations".into(),
+            });
+        let carrier = loopflow_model::id::LfProcessId::new();
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
+                rusqlite::params![
+                    carrier.as_str(),
+                    loopflow_model::id::TraceId::new().as_str()
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE task_graphs SET lf_process_id=?2, run_start='{}', breakpoint=NULL WHERE task_id=?1",
+                rusqlite::params![task.id.as_str(), carrier.as_str()],
+            )
+            .unwrap();
+        }
+        let arrival = loopflow_execution::store::task_work::BreakpointArrival {
+            id: carrier.clone(),
+            cursor,
+        };
+        store
+            .sqlite
+            .arrive_task_graph(
+                &task.id,
+                &carrier,
+                "after-ship-review",
+                Some((&serde_json::to_string(&arrival).unwrap(), "Review ready")),
+            )
+            .unwrap();
+        // Record the non-zero blocked GraphHeld exit that auto:on / -b leaves behind.
+        let graph_proc = loopflow_model::id::LfProcessId::new();
+        let compiled = loopflow_execution::graph::compiled::compile("feature", &graph.steps);
+        store
+            .sqlite
+            .record_graph(
+                &graph_proc,
+                &compiled,
+                Some(&task.id),
+                &loopflow_storage::graph_process::ExecutionStart::reserved(1),
+                Some(&checkout.display().to_string()),
+                Some(&checkout.display().to_string()),
+                None,
+            )
+            .unwrap();
+        store
+            .sqlite
+            .finish_run(
+                loopflow_storage::graph_process::RunOwner::GraphRun,
+                &graph_proc,
+                2,
+                Some(i32::from(loopflow_execution::process::GraphHeld::EXIT)),
+                Some("blocked: Two incompatible schema migrations"),
+            )
+            .unwrap();
+
+        let roadmap = runtime
+            .block_on(super::show_roadmap(
+                Some(&store),
+                &checkout,
+                None,
+                None,
+                false,
+                false,
+            ))
+            .unwrap();
+        let super::Evidence::Ok { items, .. } = roadmap.tasks else {
+            panic!("expected available tasks");
+        };
+        let row = items
+            .iter()
+            .find(|item| item.task.identifier == task.identifier)
+            .unwrap();
+        assert!(row
+            .selection_states
+            .contains(&loopflow_execution::work::selection::SelectionState::Breakpoint));
+        assert_eq!(row.breakpoint_arrival.as_ref(), Some(&carrier));
+        assert_eq!(row.next_move.owner, NextMoveOwner::User);
+        assert_eq!(
+            row.next_move.reason,
+            "At breakpoint after-ship-review. Blocked: Two incompatible schema migrations"
+        );
+        assert_eq!(row.condition.state, TaskConditionState::Blocked);
+        assert_eq!(
+            row.condition.reason,
+            "At breakpoint after-ship-review. Blocked: Two incompatible schema migrations"
+        );
+        assert_eq!(
+            row.actions.recommended,
+            Some(loopflow_execution::ops::task_actions::TaskAction::NoAction)
+        );
+        assert_eq!(
+            row.actions.reason,
+            "At breakpoint after-ship-review. Blocked: Two incompatible schema migrations"
+        );
+
+        // Verify sqlite::selections also reports SelectionState::Breakpoint for the same Task.
+        let plan = loopflow_execution::store::selections::plan_selection(
+            &store.sqlite,
+            &repo_id,
+            loopflow_execution::store::sqlite::selections::repository_default(),
+            |_| false,
+        )
+        .unwrap();
+        let tile = plan
+            .contents
+            .iter()
+            .find(|c| c.work.id == task.id.as_str())
+            .unwrap();
+        assert!(tile
+            .states
+            .contains(&loopflow_execution::work::selection::SelectionState::Breakpoint));
     }
 }

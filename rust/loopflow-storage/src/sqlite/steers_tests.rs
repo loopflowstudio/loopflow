@@ -1004,3 +1004,175 @@ fn reading_steers_for_starts_scans_nothing_growing() {
         Vec::<String>::new()
     );
 }
+
+/// Breakpoint steers arrive only for the Task's open primary conversation,
+/// survive arrival before primary creation, stay delivered after quit, wake
+/// once per visit, and never scan growing tables in either candidate or
+/// eligibility queries.
+#[test]
+fn breakpoint_arrival_scoping_lifecycle_and_query_plans() {
+    let (_home, store, _adapter) = fixture();
+    let task = loopflow_model::durable::TaskId::new();
+    {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks(repository_id,id,issue_identifier,created_at)
+             VALUES('repo_00000000000040008000000000000001',?1,'BRK-1',1)",
+            [task.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/brk')",
+            [task.as_str()],
+        )
+        .unwrap();
+    }
+    store
+        .take_up_task_graph(&task, r#"{"name":"feature","steps":[]}"#)
+        .unwrap();
+
+    // Helper to park a carrier at a breakpoint arrival.
+    let park = |step: &str, text: &str| -> LfProcessId {
+        let carrier = LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&carrier],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE task_graphs SET breakpoint=NULL,lf_process_id=?2,run_start='{\"index\":0}' WHERE task_id=?1",
+                params![task.as_str(), carrier.as_str()],
+            )
+            .unwrap();
+        }
+        let record =
+            serde_json::json!({"id": carrier.as_str(), "cursor": {"index": 1}}).to_string();
+        store
+            .arrive_task_graph(&task, &carrier, step, Some((&record, text)))
+            .unwrap();
+        carrier
+    };
+
+    // 1. Arrival before primary creation.
+    let first = park("after-explore", "First visit: scratch/explore.html");
+    assert!(woken(&store).is_empty(), "no primary exists yet");
+
+    // Create primary, sibling interactive conversation, and non-interactive worker.
+    for (id, interactive) in [("primary", 1), ("sibling", 1), ("worker", 0)] {
+        store.test_session(id, &crate::session_record::new_artifact_key());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET cwd='/brk',task_id=?2,interactive=?3,
+                 created_at=unixepoch()+10 WHERE id=?1",
+                params![id, task.as_str(), interactive],
+            )
+            .unwrap();
+    }
+    store.choose_task_primary(&task, "primary").unwrap();
+
+    // Sibling and worker never see the breakpoint steer; they still see their own.
+    store
+        .save_session_steer("sibling", "Author", "Sibling only")
+        .unwrap();
+    store
+        .save_session_steer("worker", "Author", "Worker only")
+        .unwrap();
+    assert_eq!(store.session_steers("sibling", 0, 32).unwrap().pending, 1);
+    assert_eq!(store.session_steers("worker", 0, 32).unwrap().pending, 1);
+    assert_eq!(
+        store.session_steers("sibling", 0, 32).unwrap().items[0]
+            .steer
+            .text,
+        "Sibling only"
+    );
+    assert_eq!(
+        store.session_steers("worker", 0, 32).unwrap().items[0]
+            .steer
+            .text,
+        "Worker only"
+    );
+    // Only interactive sibling's own direct steer wakes it; neither worker nor primary wakes.
+    assert_eq!(woken(&store), [("sibling".to_string(), false)]);
+
+    // Simultaneous manual reopen: first starter takes the pre-primary arrival, second gets none.
+    let taken = store.take_steers_to_start("primary").unwrap();
+    assert_eq!(taken.len(), 1);
+    assert_eq!(taken[0].revision, first.as_str());
+    assert!(store.take_steers_to_start("primary").unwrap().is_empty());
+
+    // Delivered arrival stays delivered after primary quits.
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET agent_ended_at=unixepoch(),agent_pid=NULL,agent_os_started_at=NULL WHERE id='primary'",
+            [],
+        )
+        .unwrap();
+    assert!(woken(&store).is_empty());
+    assert!(store.take_steers_to_start("primary").unwrap().is_empty());
+
+    // A command finishing during a pause can park a new review. The hold keeps
+    // it from either the next turn or a wake of the stopped primary.
+    let pause = || {
+        store
+            .begin_task_pause(
+                &task,
+                &crate::process::Starter::Person { name: None },
+                vec![],
+            )
+            .unwrap();
+        store.settle_task_pause(&task, true).unwrap();
+    };
+    pause();
+    let second = park("after-explore", "Second visit: updated explore");
+    assert!(!store.has_undelivered_steers("primary").unwrap());
+    assert!(store.take_steers_to_start("primary").unwrap().is_empty());
+    assert!(woken(&store).is_empty());
+
+    // Lifting the hold wakes the primary even though the wake reader already
+    // passed the review while the Task was paused.
+    let mut wakes = Vec::new();
+    let traced = crate::query_plans::statements(&store, || {
+        store.release_task_pause(&task, None).unwrap();
+        wakes = store.read_steer_wakes().unwrap();
+        assert!(store.has_undelivered_steers("primary").unwrap());
+        assert!(store.has_undelivered_steers("sibling").unwrap());
+        assert!(!store
+            .session_steers("sibling", 0, 32)
+            .unwrap()
+            .items
+            .iter()
+            .any(|row| row.steer.source.starts_with("breakpoint:")));
+    });
+    assert_eq!(wakes.len(), 1);
+    assert_eq!(wakes[0].session, "primary");
+    assert_eq!(
+        crate::query_plans::growing_scans(&store, &traced),
+        Vec::<String>::new()
+    );
+    let second_taken = store.take_steers_to_start("primary").unwrap();
+    assert_eq!(second_taken.len(), 1);
+    assert_eq!(second_taken[0].revision, second.as_str());
+    assert_eq!(second_taken[0].text, "Second visit: updated explore");
+    assert!(
+        woken(&store).is_empty(),
+        "the unpaused review wakes only once"
+    );
+
+    pause();
+    store.release_task_pause(&task, None).unwrap();
+    assert!(woken(&store).is_empty(), "the review was already delivered");
+    assert!(store.take_steers_to_start("primary").unwrap().is_empty());
+}

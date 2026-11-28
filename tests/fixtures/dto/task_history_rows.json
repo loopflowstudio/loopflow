@@ -68,7 +68,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -139,7 +140,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -210,7 +212,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -281,7 +284,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -352,7 +356,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -423,7 +428,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -494,7 +500,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -566,7 +573,8 @@
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -638,7 +646,8 @@
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -710,7 +719,8 @@
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -782,7 +792,8 @@
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -853,7 +864,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -924,7 +936,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -995,7 +1008,8 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -1067,7 +1081,8 @@
     "selection_states": [
       "unstarted",
       "backlog"
-    ]
+    ],
+    "breakpoint_arrival": null
   },
   {
     "task": {
@@ -1138,6 +1153,7 @@
     "working_group": null,
     "selection_states": [
       "done"
-    ]
+    ],
+    "breakpoint_arrival": null
   }
 ]

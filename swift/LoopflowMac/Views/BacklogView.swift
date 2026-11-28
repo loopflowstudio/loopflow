@@ -121,10 +121,10 @@ struct StartFlow: Equatable, Identifiable {
         guard entry.runs == .task, let compiled = entry.compiled, let workflow = entry.workflow else { return nil }
         func nodes(_ steps: [GraphNode]) -> [GraphNode] { steps.flatMap { [$0] + $0.paths.flatMap { nodes($0.steps) } } }
         let all = nodes(compiled.steps)
-        let firstStop = all.firstIndex(where: \.interactive) ?? all.count
+        let firstStop = all.firstIndex(where: { $0.kind == .breakpoint }) ?? all.count
         name = entry.name
         description = entry.description
-        stops = workflow.interactiveSteps.count
+        stops = workflow.breakpoints.count
         merges = all[..<firstStop].contains { node in
             node.kind == .op && (node.label.hasPrefix("land") || node.label.hasPrefix("pr land"))
         }

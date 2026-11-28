@@ -457,6 +457,43 @@ pub(super) fn save_in(
     Ok(result)
 }
 
+/// Put the parked review back in the Machine's wake queue if nobody read it.
+pub(super) fn republish_parked_breakpoint_in(
+    conn: &Connection,
+    task: &loopflow_model::durable::TaskId,
+) -> StoreResult<()> {
+    let review = conn
+        .query_row(
+            &format!(
+                "SELECT {COLUMNS} FROM task_graphs g JOIN steers p
+                 ON p.source=?2 AND p.revision=json_extract(g.breakpoint,'$.id') AND p.task_id=g.task_id
+                 WHERE g.task_id=?1 AND g.run_start IS NULL AND g.breakpoint IS NOT NULL
+                 AND NOT EXISTS(SELECT 1 FROM steer_delivered d WHERE d.steer_id=p.id AND d.delivered_at IS NOT NULL)"
+            ),
+            params![task.as_str(), format!("breakpoint:{task}")],
+            read_steer,
+        )
+        .optional()?;
+    if let Some(review) = review {
+        // A hook may have claimed it before the hold. Start the new wake
+        // without that unstamped claim so the primary can take the review.
+        conn.execute(
+            "DELETE FROM steer_delivered WHERE steer_id=?1",
+            [&review.id],
+        )?;
+        conn.execute("DELETE FROM steers WHERE id=?1", [&review.id])?;
+        save_in(
+            conn,
+            ("task", task.as_str()),
+            &review.source,
+            &review.revision,
+            &review.author,
+            &review.text,
+        )?;
+    }
+    Ok(())
+}
+
 /// The steers that apply to Session `?1`, as CTE `applicable`.
 fn scopes() -> String {
     // Membership is derived here; receipts alone retain delivery state.
@@ -484,6 +521,14 @@ fn scopes() -> String {
         AND (p.source NOT LIKE 'update:%' AND p.source NOT LIKE 'notice:%'
          OR ((SELECT interactive FROM agent_sessions WHERE id=?1)
              AND p.source NOT LIKE 'update:'||?1||':%'))
+        AND (p.source NOT LIKE 'breakpoint:%' OR p.revision=(
+            SELECT json_extract(g.breakpoint,'$.id') FROM task_primary_sessions tp
+            JOIN task_graphs g ON g.task_id=tp.task_id
+            JOIN tasks t ON t.id=tp.task_id
+            JOIN agent_sessions s ON s.id=tp.session_id
+            WHERE tp.task_id=p.task_id AND tp.session_id=?1 AND s.interactive=1
+            AND NOT EXISTS(SELECT 1 FROM task_pauses hold WHERE hold.task_id=tp.task_id)
+            AND s.completed_at IS NULL AND s.moved_to_machine_id IS NULL AND {open}))
         -- A shared steer saved before this Session started and already read
         -- by another Session of its kind was read there; a later Session
         -- starts past it. A Task conversation's reading leaves the next
@@ -493,7 +538,7 @@ fn scopes() -> String {
             WHERE d.steer_id=p.id AND d.session_id!=?1 AND d.delivered_at IS NOT NULL
             AND o.interactive=(SELECT interactive FROM agent_sessions WHERE id=?1)))
         )",
-        super::task_work::counts_for_task("s"))
+        super::task_work::counts_for_task("s"), open=super::durable::task_open_sql("t"))
 }
 
 /// A claim whose hook never stamped it lapses after this long, and the steer

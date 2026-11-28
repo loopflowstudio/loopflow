@@ -7,10 +7,10 @@ enum RoadmapTaskAction: Equatable {
     case run
     case openPr
 
-    /// "Start" for a Task's first run and "Run" after, as its page says.
+    /// "Continue" at a breakpoint, "Start" for a Task's first run, and "Run" after.
     func label(_ task: RoadmapTask) -> String {
         switch self {
-        case .run: task.graphHasRun ? "Run" : "Start"
+        case .run: task.selectionStates.contains(.breakpoint) ? "Continue" : (task.graphHasRun ? "Run" : "Start")
         case .openPr: "Open PR"
         }
     }
@@ -229,7 +229,7 @@ extension WorkModel {
                 NSWorkspace.shared.open(github.url)
             }
         case .run:
-            startTask(nil, task: task)
+            startTask(nil, arrival: task.breakpointArrival, task: task)
         }
     }
 }

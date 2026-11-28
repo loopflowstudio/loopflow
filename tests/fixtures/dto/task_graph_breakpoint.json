@@ -1,0 +1,28 @@
+{
+  "name": "research",
+  "breakpoints": [
+    "after-research"
+  ],
+  "position": {
+    "kind": "breakpoint",
+    "step": "after-research",
+    "arrival": "11111111-1111-4111-8111-111111111111",
+    "blocker": null
+  },
+  "steps": [
+    {
+      "name": "research",
+      "kind": "stage"
+    },
+    {
+      "name": "after-research",
+      "kind": "breakpoint"
+    }
+  ],
+  "current_step": 1,
+  "sentence": "At breakpoint after-research.",
+  "control": {
+    "action": "continue",
+    "label": "Continue"
+  }
+}

@@ -247,6 +247,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let latestGraphProcess: GraphProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
+    public let breakpointArrival: String?
     public let pr: PrSnapshot?
     public internal(set) var section: TaskSection
     /// Whether its owner is you, decided in Rust; false when nobody owns it.
@@ -261,6 +262,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         case graphSource = "graph_source"
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
+        case breakpointArrival = "breakpoint_arrival"
         case nextMove = "next_move"
     }
 
@@ -280,6 +282,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         latestGraphProcess = try c.decodeIfPresent(GraphProcessDetail.self, forKey: .latestGraphProcess)
         execution = try c.decodeIfPresent(TaskExecutionSnapshot.self, forKey: .execution)
         runControl = try c.decode(TaskRunControl.self, forKey: .runControl)
+        breakpointArrival = try c.decode(String?.self, forKey: .breakpointArrival)
         pr = try c.decodeIfPresent(PrSnapshot.self, forKey: .pr)
         section = try c.decode(TaskSection.self, forKey: .section)
         ownedByYou = try c.decode(Bool.self, forKey: .ownedByYou)
@@ -322,7 +325,9 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         guard lifecycle != .paused else { return nil }
         return switch condition.state {
         case .clear: nil
-        case .waiting: isCompleted || (!graphHasRun && actions.recommended == .run) ? nil : .waiting
+        case .waiting:
+            isCompleted || (!selectionStates.contains(.breakpoint) && !graphHasRun && actions.recommended == .run)
+                ? nil : .waiting
         case .blocked: .blocked
         case .unknown: .unknown
         }

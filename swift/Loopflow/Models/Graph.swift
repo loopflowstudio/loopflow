@@ -34,11 +34,9 @@ public struct GraphNode: Decodable, Sendable, Hashable {
     public let key: UInt32
     /// Authored occurrence name; never used as graph identity.
     public let id: String?
-    /// Literal skill name, operation, or XOR router.
+    /// Literal skill name, operation, breakpoint, or XOR router.
     public let label: String
     public let kind: GraphNodeKind
-    /// An interactive step: a person takes part here.
-    public let interactive: Bool
     public let returnsTo: UInt32?
     /// Composed Graphs this occurrence came from, outermost first.
     public let sources: [String]
@@ -50,12 +48,13 @@ public struct GraphNode: Decodable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case key, id, label, kind, interactive, sources, paths
+        case key, id, label, kind, sources, paths
         case returnsTo = "returns_to"
     }
 }
 
 public enum GraphNodeKind: String, Decodable, Sendable, Hashable {
+    case breakpoint
     case skill
     case op
     case xor
@@ -260,15 +259,10 @@ public struct WorkflowOutline: Decodable, Sendable, Hashable {
     public let start: WorkflowControl
     /// The Graph's top-level steps in order, as `TaskGraph.steps` carries them.
     public let steps: [TaskGraph.Step]
-    /// Every step where a person takes part, XOR paths included.
-    public let interactiveSteps: [TaskGraph.InteractiveStep]
-    /// "You take part at explore and ship-review." or "Runs on its own."
+    /// Every breakpoint in order, composed Graphs and XOR paths included.
+    public let breakpoints: [String]
+    /// "You take part at after-explore and after-ship-review." or "Runs on its own."
     public let sentence: String
-
-    enum CodingKeys: String, CodingKey {
-        case start, steps, sentence
-        case interactiveSteps = "interactive_steps"
-    }
 }
 
 /// Formatting only: order and nesting are supplied by Rust's captured definition.
@@ -349,12 +343,12 @@ public struct GraphCompositionProjection {
                     let keys = item.nodeKeys
                     for key in keys { visible[key] = groupKey }
                     return [GraphNode(key: groupKey, id: nil, label: "▸ \(name) · \(keys.count)",
-                                     kind: .op, interactive: false, returnsTo: nil, sources: [], paths: [])]
+                                     kind: .op, returnsTo: nil, sources: [], paths: [])]
                 case .node(let key, let paths):
                     guard let node = sourceNodes[key] else { return [] }
                     visible[key] = key
                     return [GraphNode(key: key, id: node.id, label: node.label, kind: node.kind,
-                                     interactive: node.interactive, returnsTo: node.returnsTo, sources: node.sources,
+                                     returnsTo: node.returnsTo, sources: node.sources,
                                      paths: node.paths.map { path in
                         CompiledGraphPath(name: path.name, description: path.description,
                                       steps: nodes(paths[path.name] ?? []))

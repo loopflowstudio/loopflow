@@ -60,8 +60,8 @@ struct TaskGraphTests {
         #expect(catalog.map(\.id) == ["feature", "broken"])
         let outline = try #require(catalog[0].workflow)
         #expect(outline.steps.map(\.name) == ["design", "pursue", "xor-route", "queue"])
-        #expect(outline.steps.map(\.interactive) == [false, true, false, false])
-        #expect(outline.interactiveSteps.map(\.name) == ["demo"] && outline.sentence == "You take part at demo.")
+        #expect(outline.steps.map(\.kind) == [.stage, .stageWithBreakpoint, .stage, .stage])
+        #expect(outline.breakpoints == ["demo"] && outline.sentence == "You take part at demo.")
         #expect(catalog[1].source == ".lf/graphs/broken.yaml" && catalog[1].unavailable != nil && catalog[1].workflow == nil)
         #expect(catalog[0].compiled?.steps.count == 8 && catalog[1].unavailable != nil)
         let compiled = try #require(catalog[0].compiled)
@@ -134,7 +134,7 @@ struct TaskGraphTests {
         #expect(held.died == nil && held.outlook == nil)
         // A preview only marks stages.
         let preview = graphNodeStates(review.compiled, latest: nil)
-        #expect(preview[4] == .pendingHuman && preview[1] == .pending)
+        #expect(preview[4] == .pendingBreakpoint && preview[1] == .pending)
     }
 
     @Test("A stopped Graph preserves the last Process outcome", arguments: ["succeeded", "failed", "interrupted"])
@@ -474,7 +474,7 @@ struct TaskGraphProofTests {
         #expect((try? find("compiled-node-4")) == nil, "composition starts folded")
         try find("composition-group-group-0").disclosureGroup().expand()
         try await settle(window)
-        #expect(try find("compiled-node-4").accessibilityLabel().string() == "demo, interactive step, pending")
+        #expect(try find("compiled-node-4").accessibilityLabel().string() == "demo, breakpoint, pending")
 
         let oldRevision = try #require(model.graphCatalog.value?.first?.composition?.revision)
         try await source.reviseTemplate()

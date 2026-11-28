@@ -1,8 +1,8 @@
 //! A Task's auto setting. `lf task auto on` is an `lf task run` whose request asks
 //! for auto, and `auto: on` in configuration turns it on as a Task takes up
 //! its Graph. Auto is a setting on the Task, one `task_auto` row, held before
-//! and after it takes up a Graph. The run reads it at each interactive step,
-//! standing in for the person while it is on, and at each step that merges,
+//! and after it takes up a Graph. The run reads it at each breakpoint,
+//! passing on the default path while it is on, and at each step that merges,
 //! waiting there while it is off. `lf task auto off` turns
 //! it off; `lf task auto on` turns it on again.
 
@@ -138,7 +138,7 @@ pub(super) async fn running_graph(
 
 /// `lf task auto off`: turn auto off and take back any merge request
 /// Loopflow armed on GitHub. Nothing is killed: the run carries on to its next
-/// interactive step or merging step and waits there, until auto is on again.
+/// breakpoint or merging step and waits there, until auto is on again.
 /// `reason` is saved as a comment on the Task. Returns whether auto was on, or
 /// `None` when no Task has that issue.
 pub fn off(issue: &str, reason: Option<&str>) -> OpsResult<Option<bool>> {
@@ -156,7 +156,7 @@ pub fn off(issue: &str, reason: Option<&str>) -> OpsResult<Option<bool>> {
     let Some((task, was_on)) = turned else {
         return Ok(None);
     };
-    // A run with no interactive step ahead arms a merge without a mark, so
+    // A run with no breakpoint ahead arms a merge without a mark, so
     // the request is taken back whether or not auto was on.
     if let Ok(worktree) = task.worktree() {
         super::clear_task_pr_merge_before_head_mutation(worktree, true, &|_| {})?;

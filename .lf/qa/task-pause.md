@@ -14,7 +14,7 @@ exec env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') \
 ```
 
 Make a repository with a bare origin, `planning: {provider: git, personal: true}`,
-`agent: claude` and `graph: qa` (`- compile` then `- interactive: demo`). Don't
+`agent: claude` and `graph: qa` (`- compile`, `- step: demo`, then `- break`). Don't
 call the skill `build`: a builtin Graph has that name and the run fails with
 "graph cycle detected". Make the skill run
 `cargo build --manifest-path slow/Cargo.toml` in the foreground. Give the crate a
@@ -41,12 +41,10 @@ while the CLI waits and prints `paused`. Read `lf task status` a moment later.
 
 # Working groups and the open conversation
 
-Don't name a repository Graph `qa`: the builtin `build` Graph's `- qa` step
-resolves to it, and `lf graph show code` fails with "loop at concept-review
-returns across interactive step …". Call it `hold` (`- interactive: demo`,
-then `- compile`). Then one Task run to `demo` reads Active, one run on to
-`compile` and paused reads Paused, and one with `lf task auto on` reads
-Shipping in `lf task list`.
+Call the Graph `hold` so the builtin `build` Graph continues using its `qa`
+skill. Define `hold` as `- step: demo`, `- break`, then `- compile`. A Task
+parked at `after-demo` reads Active, a pause during `compile` reads Paused,
+and a Task running with auto on reads Shipping in `lf task list`.
 
 Each primary `claude --name <id>` first stops on Claude's "Adding a new
 directory" dialog for the main checkout, so a steer stays undelivered. Answer
@@ -94,7 +92,7 @@ The Mac and iPhone bar read `task.get`: `result.overview.graph.control`
 `task.run` needs `approve`. A Task with no Graph has `overview.graph: null`,
 and the apps show `Paused: start`, which sends `run: true`. Put the first step
 in a sub-Graph (`- inner`, with `inner.yaml` holding `- compile`,
-`- interactive: demo`) to see the grouped name: `graph.list` gives
+`- step: demo`, `- break`) to see the grouped name: `graph.list` gives
 `workflow.start` `Run: inner`. A refusal should come back `conflict`;
 `outcome_unknown` makes the apps add "It may have happened".
 
@@ -104,13 +102,13 @@ Make a new home rather than reusing it.
 
 # Smart unpause by position
 
-A `runfirst` Graph (`- compile`, `- interactive: demo`) started with
+A `runfirst` Graph (`- compile`, `- step: demo`, `- break`) started with
 `lf task create '<words>' --run --graph runfirst` shows a resumable pause:
 served `task.unpause {run:true}` answers a run receipt and a new
 `build-script-build` appears in the same checkout. A `hold` Task parks at
-`demo` within seconds, so that's the quick way to see a parked pause:
-`{run:true}` answers `null`, the control goes back to `run · Run: <next>`, and
-no `claude -p` worker starts. For a landing stop, run `lf task auto off <id>`
+`after-demo` after its first worker finishes. Pause it, then send
+`{run:true}` to unpause. It answers `null`, the control offers Continue, and
+the same breakpoint arrival is available. For a landing stop, run `lf task auto off <id>`
 right after `create --run --graph landing`. `lf task auto on` at the landing
 stop starts the run at once, and a pause then reads `resume · Paused: land`.
 Without a GitHub PR, `land` fails three times and the Task reads `Run: land`.
@@ -123,7 +121,7 @@ A scalar `P="1 2"` is one word in zsh and `kill` answers "illegal pid".
 Use the hook route in [desktop](desktop.md) ("Driving the app with the screen
 locked") with a Graph of sub-Graphs whose single step is `cmd: help graph`.
 Have the `LF_BIN` wrapper hold that step until `<dir>/<checkout basename>` exists.
-`- graph: forge`, `- interactive: demo`, `- graph: finish`, `- graph: settle`
+`- graph: forge`, `- break: review`, `- graph: finish`, `- graph: settle`
 gives a chip reading `forge · help graph` and three step buttons. At 1500 pt the
 bar sits at y = 56 pt: ▶/⏸ at x = 268, Auto at 1440, ✓ at 1474. Step buttons and
 the chip move with the chip's text, so read their x from a fresh `snap` first.
@@ -152,8 +150,8 @@ snapshot, use a small Swift `CGImage.cropping(to:)` tool.
 # Natural stops from the CLI
 
 To reach every natural stop without an app, use three command-only Graphs
-behind the hold wrapper: `- cmd: help graph`, `- interactive: demo`,
-`- cmd: help task` for an interactive stop; `- cmd: help task`,
+behind the hold wrapper: `- cmd: help graph`, `- break: review`,
+`- cmd: help task` for a breakpoint; `- cmd: help task`,
 `- cmd: help graph` for `end`; and `- cmd: help graph`, `- cmd: land`,
 `- cmd: help task` with `lf task auto off <id>` right after `create --run`
 for a landing stop. Start the pause in the background (`( lf task pause <id> & )`):

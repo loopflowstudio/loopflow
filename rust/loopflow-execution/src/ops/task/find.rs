@@ -34,6 +34,7 @@ pub fn task_find(
 impl TaskFileInventory {
     pub(crate) fn scan(worktree: &Path) -> io::Result<Self> {
         let root = worktree.canonicalize()?;
+        crate::observe::record_spawn();
         let output = Command::new("git")
             .args([
                 "ls-files",
@@ -153,11 +154,19 @@ impl TaskFileInventory {
 }
 
 pub(super) fn is_scratch_page(path: &Path) -> bool {
-    path.starts_with("scratch")
-        && path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("html"))
+    if !path.starts_with("scratch") {
+        return false;
+    }
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.to_ascii_lowercase().ends_with(".page.html"))
+    {
+        return false;
+    }
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("html"))
 }
 
 fn match_span(path: &str, query: &str) -> Option<usize> {
@@ -169,4 +178,19 @@ fn match_span(path: &str, query: &str) -> Option<usize> {
         first.get_or_insert(last);
     }
     Some(last - first.unwrap_or(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_scratch_page;
+    use std::path::Path;
+
+    #[test]
+    fn scratch_pages_include_compiled_html_and_exclude_page_sources() {
+        assert!(is_scratch_page(Path::new("scratch/ship-review.html")));
+        assert!(is_scratch_page(Path::new("scratch/notes.md")));
+        assert!(!is_scratch_page(Path::new("scratch/ship-review.page.html")));
+        assert!(!is_scratch_page(Path::new("scratch/EXPLORE.PAGE.HTML")));
+        assert!(!is_scratch_page(Path::new("docs/index.html")));
+    }
 }

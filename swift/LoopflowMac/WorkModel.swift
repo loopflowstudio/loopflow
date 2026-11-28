@@ -128,7 +128,7 @@ final class WorkModel {
         set { selectionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
 
-    /// The sidebar's started Tasks for the Wave it was read for: the list the phone shows.
+    /// The Working list for the repository or Wave the sidebar shows.
     private var taskListReadings: [RepositoryReadingKey: (wave: String?, reading: Reading<WorkViewPlan>)] = [:] {
         didSet {
             reported(WorkPart.taskList.rawValue, "Tasks", from: oldValue.mapValues(\.reading),
@@ -156,7 +156,7 @@ final class WorkModel {
         if case .wave(let id) = navigation.sidebarScope { id } else { nil }
     }
 
-    /// The started list, once it answers for the sidebar's current scope.
+    /// The list once it answers for the sidebar's current scope.
     var taskListReading: Reading<WorkViewPlan> {
         guard let entry = taskListReadings[repositoryReadingKey(repoPath ?? "")], entry.wave == taskListWave else { return .loading }
         return entry.reading
@@ -1419,7 +1419,7 @@ final class WorkModel {
         "task_list-\(repo.normalizedFilePath)-\(wave ?? "")"
     }
 
-    /// The sidebar's first frame: the started list saved for `repo` under the
+    /// The sidebar's first frame: the Working list saved for `repo` under the
     /// scope its navigation opens with.
     private func restoreTaskList(repo: String, saved: SavedReadings) {
         let wave: String? = if case .wave(let id) = navigationByRepo[repo]?.sidebarScope { id } else { nil }
@@ -1623,7 +1623,7 @@ final class WorkModel {
                     workUnavailable(error.localizedDescription)
                 }
             }
-            for part in [WorkPart.planning, .taskList, .selections, .sessions] { pendingChanges.ended(readingKey(part.rawValue)) }
+            for part in [WorkPart.planning, .taskList, .selections, .sessions, .task] { pendingChanges.ended(readingKey(part.rawValue)) }
             let delay = retry.failed(at: .now)
             workObservation = nil
             await observation?.cancel()
@@ -1646,9 +1646,15 @@ final class WorkModel {
     /// Tell the reader what this window shows now. Frames for the previous
     /// scope are ignored from here on.
     func syncWorkScope() {
-        guard workObservation != nil else { return }
+        guard workObservation != nil else {
+            if !query.streamsWork && taskListReading.isLoading { Task { await refreshTaskList() } }
+            return
+        }
         let scope = workScope
         guard scope != sentScope else { return }
+        if scope.task != sentScope?.task {
+            pendingChanges.ended(readingKey(WorkPart.task.rawValue))
+        }
         sentScope = scope
         scopeFloor = send { .scope(id: $0, scope) }
     }
@@ -1761,7 +1767,8 @@ final class WorkModel {
             if body != nil { await refreshSelectedView() }
         case .taskList(let body):
             guard answers >= max(planningFloor, scopeFloor) else { return }
-            let wave = sentScope?.taskListWave
+            guard let sentScope else { return }
+            let wave = sentScope.taskListWave
             applyTaskList(body, wave: wave, reason: reason, readAt: frame.readAt)
             if let line = frame.wire?.taskList, let repoPath {
                 savedReadings(observingMachineId)?.save(line, Self.taskListSubscription(repo: repoPath, wave: wave))
@@ -1821,7 +1828,7 @@ final class WorkModel {
             }
             guard body.task == task.task.identifier else { return }
             if comments[task.id] != .available(body.comments) { comments.values[task.id] = .available(body.comments) }
-            let next = Reading.available(body.work)
+            let next = Reading.available(body.work, readAt: frame.readAt)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
             let runs = Dictionary(body.graphProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
             if graphProcesses != runs { graphProcesses = runs }
@@ -1846,6 +1853,10 @@ final class WorkModel {
         case .taskList: pendingChanges.read(readingKey(part), taskListReading)
         case .selections: pendingChanges.read(readingKey(part), selectionPlans)
         case .sessions: pendingChanges.read(readingKey(part), sessionsRead)
+        case .task:
+            if let shown = selection, shown.kind == .task, let task = task(id: shown.id)?.task {
+                pendingChanges.read(readingKey(part), taskWork[task.id])
+            }
         default: break
         }
         appliedSequence[part] = frame.sequence
@@ -1936,16 +1947,16 @@ final class WorkModel {
         let wave = taskListWave
         taskListGeneration &+= 1
         let generation = taskListGeneration
-        do {
-            let plan = try await query.viewPlan(expression: TaskList.started.expression(wave: wave), repoPath: repo)
-            guard generation == taskListGeneration, repoPath == repo,
-                  repositoryReadingKey(repo) == key, taskListWave == wave else { return }
-            applyTaskList(plan, wave: wave, reason: "")
-        } catch {
-            guard generation == taskListGeneration, repoPath == repo,
-                  repositoryReadingKey(repo) == key, taskListWave == wave else { return }
-            applyTaskList(nil, wave: wave, reason: error.localizedDescription)
+        let plan: WorkViewPlan?
+        var reason = ""
+        do { plan = try await query.viewPlan(expression: TaskList.started.expression(wave: wave), repoPath: repo) }
+        catch {
+            plan = nil
+            reason = error.localizedDescription
         }
+        guard generation == taskListGeneration, repoPath == repo, repositoryReadingKey(repo) == key,
+              taskListWave == wave else { return }
+        applyTaskList(plan, wave: wave, reason: reason)
     }
 
     private func refreshRepositoryPlan() async {
@@ -2157,6 +2168,7 @@ final class WorkModel {
         let id: String
         let work: WorkWorkspaceKey
         let states: [WorkSelectionState]
+        let workingGroup: WorkingGroup?
         let graphStep: String?
     }
 
@@ -2187,13 +2199,19 @@ final class WorkModel {
             let content = contents[member.work]
             let states = content?.states ?? []
             guard requiredStates.allSatisfy(states.contains) else { return nil }
-            return SidebarTaskRow(id: id, work: member.work, states: states, graphStep: content?.graphStep)
+            return SidebarTaskRow(id: id, work: member.work, states: states, workingGroup: content?.workingGroup, graphStep: content?.graphStep)
         }
     }
 
     var sidebarRows: [SidebarTaskRow] {
         let rows = filteredSidebarRows
-        guard navigation.sidebarScope.isWorkingList, navigation.sidebarSortByStatus else { return rows }
+        guard navigation.sidebarScope.isWorkingList else { return rows }
+        let groups = Dictionary(grouping: rows, by: \.workingGroup)
+        return WorkingGroup.allCases.flatMap { orderedWithinGroup(groups[$0] ?? []) }
+    }
+
+    private func orderedWithinGroup(_ rows: [SidebarTaskRow]) -> [SidebarTaskRow] {
+        guard navigation.sidebarSortByStatus else { return rows }
         let held = navigation.heldStatusGroup
         // Grouping retains the shared Task order within each status.
         let groups = Dictionary(grouping: rows) { row in
@@ -2220,8 +2238,9 @@ final class WorkModel {
     }
 
     /// A Wave or repository row's count: its Working Tasks.
-    func startedTaskCount(_ board: WorkNavigation.Board) -> Int {
-        (viewTasks(board)?.items ?? []).count { $0.section == .working }
+    func startedTaskCount(_ board: WorkNavigation.Board) -> Int? {
+        guard case .available(let rows, false) = viewTasks(board) else { return nil }
+        return rows.count { $0.section == .working }
     }
 
     /// Display identity comes from the same scoped readings as membership, never from IDs.
@@ -2587,8 +2606,9 @@ final class WorkModel {
     }
 
     func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask, refused: @escaping @MainActor () -> Void = {}) {
-        request(task, "Start", .taskRun(directory: directory(task), issue: task.task.identifier, graph: graph,
-                                        from: from, agent: nil, approve: false), refused: refused)
+        let issue = task.task.identifier
+        change(task, .run(task: issue), .taskRun(directory: directory(task), issue: issue, graph: graph,
+                                                 from: from, agent: nil, approve: false), "started", refused: refused)
     }
 
     /// The graph a new Task in each scope would take up, keyed by repository and
@@ -2708,18 +2728,28 @@ final class WorkModel {
         }
     }
 
-    /// Turn auto on and run the Task, as `lf task auto on` does: the Notice says Auto-Ship
-    /// was requested and its Undo turns auto off. The Task moves when the
-    /// Machine's reading says so.
+    /// Turn auto on and run the Task, as `lf task auto on` does. The switch
+    /// turns in the click; a refusal turns it back and the Notice says why.
     func turnAutoOn(_ task: RoadmapTask) {
-        request(task, TaskActions.Auto.off.offer, .taskAutoOn(directory: directory(task), issue: task.task.identifier),
-                      undo: Notice.Action("Undo", help: TaskActions.Auto.on.offer) { [weak self] in
-                          self?.turnAutoOff(task)
-                      })
+        let issue = task.task.identifier
+        change(task, .auto(task: issue, on: true), .taskAutoOn(directory: directory(task), issue: issue), "put on auto")
+    }
+
+    func interruptStep(_ task: RoadmapTask) {
+        let issue = task.task.identifier
+        change(task, .interrupt(task: issue), .taskInterrupt(directory: directory(task), issue: issue), "interrupted")
+    }
+
+    func setPause(_ action: TaskActions.Pause, task: RoadmapTask) {
+        pendingChanges.setPause(action, issue: task.task.identifier, directory: directory(task), notices: navigation.notices,
+                                show: Notice.Action("Show") { [weak self] in self?.select(.task(id: task.id)) }) { [weak self] in
+            try? await self?.confirmWorkUpdate()
+        }
     }
 
     func turnAutoOff(_ task: RoadmapTask) {
-        request(task, TaskActions.Auto.on.offer, .taskAutoOff(directory: directory(task), issue: task.task.identifier))
+        let issue = task.task.identifier
+        change(task, .auto(task: issue, on: false), .taskAutoOff(directory: directory(task), issue: issue), "taken off auto")
     }
 
     /// The Work the Machine control describes: the current started Task, else the
@@ -2865,12 +2895,17 @@ final class WorkModel {
         try? await confirmWorkUpdate(after: home)
     }
 
-    /// The row is gone and the next Task selected in the click; a refusal
-    /// brings the row back and the Notice says why.
+    /// The row is gone and the next Task selected in the click, and the Notice
+    /// says "LOO-4 completed · Undo"; a refusal brings the row back and says why.
     func completeTask(_ task: RoadmapTask, children: TaskChildPolicy?) {
         let owner = navigation.performanceOwner
         let issue = task.task.identifier
         moveSelection(past: task)
+        navigation.notices.post(Notice("\(issue) completed", key: "complete-\(issue)",
+                                       action: Notice.Action("Undo") { [weak self] in
+                                           self?.reopenTask(task)
+                                           self?.select(.task(id: task.id))
+                                       }))
         change(task, .complete(task: issue),
                .taskComplete(directory: directory(task), issue: issue, children: children), "completed") {
             Perf.completionAccepted(id: task.id, owner: owner)
@@ -2891,7 +2926,7 @@ final class WorkModel {
 
     /// Why no run of `task` can be started now; nil when one can.
     func runRefusal(_ task: RoadmapTask) -> String? {
-        changeRefusal ?? task.runControl.unavailable
+        changeRefusal ?? pendingChanges.controlRequest(for: task.task.identifier) ?? task.runControl.unavailable
     }
 
     /// Abandon… asks first: the window confirms before `abandonTask`.
@@ -2963,21 +2998,13 @@ final class WorkModel {
 
     /// Show `command` on every list now; the Machine's answer or refusal arrives through the Notice.
     private func change(_ task: RoadmapTask, _ command: PendingCommand, _ write: ServedWrite, _ verb: String,
-                        accepted: (() -> Void)? = nil) {
+                        refused: @escaping @MainActor () -> Void = {}, accepted: (() -> Void)? = nil) {
         let show = Notice.Action("Show") { [weak self] in self?.select(.task(id: task.id)) }
         pendingChanges.make(command, subject: task.task.identifier, verb: verb, write: write,
-                            notices: navigation.notices, show: show) { [weak self] in
+                            notices: navigation.notices, show: show, answered: { [weak self] in
             accepted?()
             try? await self?.confirmWorkUpdate()
-        }
-    }
-
-    /// Start, Auto-Ship and Stop Auto-Ship say "requested" in the click.
-    private func request(_ task: RoadmapTask, _ name: String, _ write: ServedWrite, undo: Notice.Action? = nil,
-                         refused: @escaping @MainActor () -> Void = {}) {
-        pendingChanges.request(name, subject: task.task.identifier, write: write, notices: navigation.notices,
-                               undo: undo, answered: { [weak self] in try? await self?.confirmWorkUpdate() },
-                               refused: refused)
+        }, refused: refused)
     }
 
     func beginSessionRename(_ record: SessionRecord) {

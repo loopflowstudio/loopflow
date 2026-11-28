@@ -27,6 +27,12 @@ struct TaskRowTests {
         // The line says what a blocked program asked; otherwise why the waiting Task needs someone.
         let ask = try? view.inspect().find(viewWithAccessibilityIdentifier: "work-task-ask-\(task.id)").text().string()
         #expect(ask == (state == .blocked ? "**literal**" : task.condition.reason))
+        var paused = task
+        paused.lifecycle = .paused
+        let held = TaskRowStatus(task: paused, program: status.row)
+        #expect(held.word == label)
+        #expect(held.line == (state == .blocked ? "**literal**" : nil))
+        #expect(TaskRowStatus(task: paused) == .lifecycle(.paused))
         let programStatus = try #require(reporting.programStatus)
         let pane = try #require(StatusMark(status: programStatus))
         let paneLabel = "\(state.label) · **literal**"

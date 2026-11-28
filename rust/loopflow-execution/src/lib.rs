@@ -42,6 +42,7 @@ pub mod read_stream;
 pub mod rental;
 pub mod repo;
 pub mod repository;
+pub mod runtime;
 pub mod security;
 pub mod session;
 pub mod session_record;

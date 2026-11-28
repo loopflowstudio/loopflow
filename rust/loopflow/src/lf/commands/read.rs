@@ -1199,9 +1199,11 @@ impl Read {
                 directory,
                 pr.as_deref(),
             )?),
-            Self::TaskWait { issue, until } => {
-                value(&loopflow_execution::engine::task::waited(issue, *until)?)
-            }
+            Self::TaskWait { issue, until } => value(&loopflow_execution::engine::task::waited(
+                issue,
+                *until,
+                crate::lf::navigation::command_merges,
+            )?),
         }
     }
 
@@ -1330,9 +1332,12 @@ impl Read {
                 &super::tracker::status_repository(&directory)?,
                 transport,
             ),
-            Self::TaskWait { issue, until } => {
-                loopflow_execution::engine::task::subscribe_wait(issue, until, transport)
-            }
+            Self::TaskWait { issue, until } => loopflow_execution::engine::task::subscribe_wait(
+                issue,
+                until,
+                crate::lf::navigation::command_merges,
+                transport,
+            ),
             other => {
                 return Err(loopflow_execution::engine::Error::new(
                     loopflow_execution::engine::ErrorCode::Invalid,
@@ -1379,7 +1384,7 @@ fn session_flags(headless: bool) -> &'static [&'static str] {
 
 /// `future` run to completion on a runtime of its own, as its command does.
 fn block_on<F: std::future::Future>(future: F) -> anyhow::Result<F::Output> {
-    Ok(tokio::runtime::Runtime::new()?.block_on(future))
+    Ok(loopflow_execution::runtime::block_on(future))
 }
 
 fn invalid(message: &str) -> loopflow_execution::engine::Error {

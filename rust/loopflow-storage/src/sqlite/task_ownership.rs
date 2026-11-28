@@ -41,7 +41,7 @@ fn logs_in(
     // Entries the tracker has not stamped yet share whole-second `at` values;
     // insertion order keeps a claim and the move after it in the order they happened.
     // Two Machines that gave their entries one order settle it by machine id.
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         "SELECT o.id,o.kind,coalesce(p.name,o.person),o.person_key,o.machine_id,o.machine_label,
              o.at,o.writer_machine_id,o.task_id,o.person_id,o.seen,
              CASE WHEN o.seen IS NOT NULL THEN o.ordered_at END
@@ -1007,6 +1007,7 @@ impl SqliteStore {
         if !me.matches_task_in(&tx, task)? {
             return Ok(None);
         }
+        super::task_pause::require_settled_in(&tx, task)?;
         let entry = move_in(&tx, task, target, me)?;
         tx.execute(
             "DELETE FROM task_moves WHERE task_id=?1 AND state IN ('leaving','sent')",
@@ -1100,7 +1101,10 @@ impl SqliteStore {
         if !me.matches_task_in(&tx, task)? {
             return Ok(None);
         }
-        let Some((local, holder)) = my_claim_in(&tx, task, me)? else {
+        let claim = my_claim_in(&tx, task, me)?;
+        super::task_pause::clear_in(&tx, task)?;
+        let Some((local, holder)) = claim else {
+            tx.commit()?;
             return Ok(Some(None));
         };
         let person = Person {

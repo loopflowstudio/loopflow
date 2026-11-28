@@ -202,7 +202,7 @@ final class DiffReviewState {
         reading = []
         fileNotes = fileNotes.filter { paths.contains($0.key) }
         for path in reviewReading.openedGaps.keys where !paths.contains(path) { reviewReading.openedGaps[path] = nil }
-        for path in Set(comments.items.map(\.selection.path)).subtracting(paths) {
+        for path in Set(comments.items.compactMap(\.selection?.path)).subtracting(paths) {
             comments.reconcile(path: path, revision: revision, file: nil)
         }
         if let focusedPath, !paths.contains(focusedPath) { self.focusedPath = nil }

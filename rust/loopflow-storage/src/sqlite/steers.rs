@@ -296,7 +296,7 @@ impl SqliteStore {
         session: Option<&str>,
     ) -> StoreResult<Vec<IdleCandidate>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
                 s.provider,s.agent_endpoint,s.agent_inbox,s.agent_socket,s.held_terminal_id,
                 s.agent_pid,s.agent_os_started_at
@@ -862,7 +862,7 @@ impl SqliteStore {
         // Candidates: the one Session each new steer could name. `naming`
         // decides, so a start never finds nothing to take.
         let candidates = tx
-            .prepare(
+            .prepare_cached(
                 "SELECT p.id,s.id,s.agent_pid,s.agent_os_started_at FROM steers p
                  LEFT JOIN task_primary_sessions t ON t.task_id=p.task_id
                  JOIN agent_sessions s ON s.id=COALESCE(p.session_id,t.session_id)

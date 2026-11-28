@@ -45,7 +45,6 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     crate::agent::remove_caller_session_env(command.as_std_mut());
     command
         .envs(&config.env)
-        .env_remove(crate::os_process::DISCORD_TOKEN_ENV)
         .env_remove("LOOPFLOW_DIRECTIVE_FILE");
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
@@ -86,8 +85,7 @@ fn set_vendor_std_env(
 ) -> Result<()> {
     command
         .env("LF_BIN", control_bin)
-        .env("LF_HOME", control_home)
-        .env_remove(crate::os_process::DISCORD_TOKEN_ENV);
+        .env("LF_HOME", control_home);
     let mut paths = vec![control_bin
         .parent()
         .expect("absolute lf has a parent")
@@ -109,12 +107,7 @@ mod environment_tests {
     #[test]
     fn conversation_tools_observe_sanitized_overrides_and_removals() {
         let mut config = crate::agent::AgentConfig::default();
-        for key in [
-            "LF_DISCORD_TOKEN",
-            "LOOPFLOW_DIRECTIVE_FILE",
-            "LF_BIN",
-            "LF_HOME",
-        ] {
+        for key in ["LOOPFLOW_DIRECTIVE_FILE", "LF_BIN", "LF_HOME"] {
             config.env.insert(key.into(), "stale-fixture".into());
         }
         config
@@ -131,7 +124,7 @@ mod environment_tests {
         // Provider account environment is not conversation tool authority.
         provider.env("PROVIDER_ACCOUNT_FIXTURE", "not-for-tools");
         let tools = super::conversation_environment(provider.as_std(), &config);
-        let script = "test -z \"${LF_DISCORD_TOKEN+x}${LOOPFLOW_DIRECTIVE_FILE+x}${PROVIDER_ACCOUNT_FIXTURE+x}\" && test \"$LF_AGENT_CALLER\" = current-fixture && test \"$LF_HOME\" = /private && test \"$LF_BIN\" = /control/lf";
+        let script = "test -z \"${LOOPFLOW_DIRECTIVE_FILE+x}${PROVIDER_ACCOUNT_FIXTURE+x}\" && test \"$LF_AGENT_CALLER\" = current-fixture && test \"$LF_HOME\" = /private && test \"$LF_BIN\" = /control/lf";
         assert!(std::process::Command::new("/bin/sh")
             .env_clear()
             .envs(tools)
@@ -168,20 +161,6 @@ mod environment_tests {
             .env("ANTIGRAVITY_CONVERSATION_ID", "parent")
             .args(["-c", r#"test -z "${ANTIGRAVITY_LS_ADDRESS+x}${ANTIGRAVITY_CSRF_TOKEN+x}${ANTIGRAVITY_CONVERSATION_ID+x}""#]);
         configure_agent_env(&mut command, &crate::agent::AgentConfig::default());
-        assert!(command.status().await.unwrap().success());
-    }
-
-    #[tokio::test]
-    async fn provider_child_cannot_read_the_bridge_token() {
-        let mut command = tokio::process::Command::new("/bin/sh");
-        command.args(["-c", "test -z \"${LF_DISCORD_TOKEN+x}\""]);
-        command.env(crate::os_process::DISCORD_TOKEN_ENV, "fixture-token");
-        let mut config = crate::agent::AgentConfig::default();
-        config.env.insert(
-            crate::os_process::DISCORD_TOKEN_ENV.into(),
-            "fixture-override".into(),
-        );
-        configure_agent_env(&mut command, &config);
         assert!(command.status().await.unwrap().success());
     }
 
@@ -260,10 +239,23 @@ pub trait Driver: Send + Sync {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Whether someone is in the conversation a launch opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum Mode {
     Interactive,
+    #[default]
     Headless,
+}
+
+impl Mode {
+    /// What the prompt says about who is in the conversation, so a skill
+    /// knows where a real dependency should route.
+    pub fn instructions(self) -> &'static str {
+        match self {
+            Self::Interactive => loopflow_definitions::builtins::MODE_INTERACTIVE,
+            Self::Headless => loopflow_definitions::builtins::MODE_HEADLESS,
+        }
+    }
 }
 
 /// Launch kind, independently of Task attribution.

@@ -3,18 +3,16 @@
 //! One protocol message per WebSocket text frame; a bridged terminal carries
 //! the owner protocol's bytes in binary frames.
 use std::net::IpAddr;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{ready, Poll};
 use std::time::{Duration, SystemTime};
 
 use super::mobile::{Configuration, Status, Tailscale};
-use super::service::{self, Carrier, Clients, Greeting};
+use super::service::{self, Clients, Greeting, Messages};
 use super::subscriptions::Subscriptions;
 use super::ticket::{Admission, Tickets};
 use super::wire::MAX_BULK;
 use anyhow::{Context, Result};
-use futures_util::{Sink, SinkExt, Stream, StreamExt};
+use futures_util::{SinkExt, StreamExt};
 use loopflow_execution::transport::registry::Registry;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -407,7 +405,6 @@ where
                 admission,
                 tickets,
                 terminals,
-                super::wake::Waker::default(),
                 subscriptions,
                 queue,
             )
@@ -417,58 +414,6 @@ where
     // The control connection ends with a close frame, not a reset.
     let _ = messages.0.close(None).await;
     ended
-}
-
-/// Protocol messages as WebSocket text frames. Binary frames belong to a
-/// bridged terminal and are refused here; the carrier answers pings itself.
-struct Messages<S>(WebSocketStream<S>);
-
-impl<S: AsyncRead + AsyncWrite + Unpin + Send> Stream for Messages<S> {
-    type Item = Result<String>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        loop {
-            let Some(message) = ready!(self.0.poll_next_unpin(cx)) else {
-                return Poll::Ready(None);
-            };
-            return Poll::Ready(match message {
-                Ok(Message::Text(text)) => Some(Ok(text.to_string())),
-                Ok(Message::Close(_)) => None,
-                Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => continue,
-                Ok(Message::Binary(_)) => Some(Err(anyhow::anyhow!(
-                    "the control connection carries text messages"
-                ))),
-                Err(error) => Some(Err(error.into())),
-            });
-        }
-    }
-}
-
-impl<S: AsyncRead + AsyncWrite + Unpin + Send> Sink<String> for Messages<S> {
-    type Error = anyhow::Error;
-
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
-        self.0.poll_ready_unpin(cx).map_err(Into::into)
-    }
-
-    fn start_send(mut self: Pin<&mut Self>, item: String) -> Result<()> {
-        Ok(self.0.start_send_unpin(Message::Text(item.into()))?)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
-        self.0.poll_flush_unpin(cx).map_err(Into::into)
-    }
-
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Result<()>> {
-        self.0.poll_close_unpin(cx).map_err(Into::into)
-    }
-}
-
-impl<S: AsyncRead + AsyncWrite + Unpin + Send> Carrier for Messages<S> {
-    type Failure = anyhow::Error;
 }
 
 /// A plain byte copy between the held terminal and the WebSocket's binary frames.
@@ -880,6 +825,12 @@ mod tests {
                     "configure",
                     ServerOperation::MobileConfigure {
                         configuration: None,
+                    },
+                ),
+                (
+                    "page-url",
+                    ServerOperation::PageUrl {
+                        path: "/tmp/review.html".into(),
                     },
                 ),
             ] {

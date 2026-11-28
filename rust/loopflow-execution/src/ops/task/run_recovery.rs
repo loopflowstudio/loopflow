@@ -170,6 +170,8 @@ pub(crate) fn restart_runs() -> OpsResult<Option<i64>> {
                 soonest = Some(soonest.map_or(due, |at: i64| at.min(due)));
                 continue;
             }
+            // Pause and recovery share admission through the restart count and spawn.
+            let _admission = super::pause::admission(&id)?;
             let Some((task, worktree)) = continuable(&store, &id, now).await? else {
                 continue;
             };
@@ -198,12 +200,11 @@ async fn continuable(
     id: &loopflow_storage::work::task::TaskId,
     now: i64,
 ) -> OpsResult<Option<(Task, std::path::PathBuf)>> {
-    if store
-        .sqlite
-        .task_state(id)
-        .map_err(task_error)?
-        .is_terminal()
-        || !store.sqlite.task_claimed_here(id).map_err(task_error)?
+    use loopflow_storage::execution::TaskState;
+    if !matches!(
+        store.sqlite.task_state(id).map_err(task_error)?,
+        TaskState::Idle | TaskState::Active | TaskState::Moving
+    ) || !store.sqlite.task_claimed_here(id).map_err(task_error)?
     {
         return Ok(None);
     }

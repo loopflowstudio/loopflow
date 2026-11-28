@@ -18,11 +18,11 @@ use std::time::Instant;
 
 use crate::error::CoreError;
 use crate::graph::{load_skill, Skill};
+use crate::harness::Mode;
 use crate::prompt::change::{Change, ChangeRange};
 use crate::repository::RepoId;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
 use tiktoken_rs::CoreBPE;
 use tracing::{debug, warn};
 
@@ -98,7 +98,7 @@ pub struct GatherContextOpts {
     pub message: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
-    pub surface: Surface,
+    pub mode: Mode,
     /// Explicit docs paths, globs, or directories to include in context.
     pub docs: Vec<String>,
     /// Specific files to include in context.
@@ -125,55 +125,10 @@ impl GatherContextOpts {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[non_exhaustive]
-#[serde(rename_all = "snake_case")]
-pub enum Surface {
-    Cli,
-    /// Retained for recorded app-launch context; no launcher emits this surface.
-    Ide,
-    Mac,
-    Iphone,
-    /// A live chat channel (e.g. Discord) where a person is reading. The reply
-    /// is the message they see, so the agent speaks plainly and deliberately.
-    Chat,
-    #[default]
-    #[serde(other)]
-    Headless,
-}
-
-impl Surface {
-    /// State whether someone is participating in this conversation before the skill can decide
-    /// where a real dependency should route.
-    pub fn instructions(self) -> &'static str {
-        match self {
-            Self::Headless => loopflow_definitions::builtins::SURFACE_HEADLESS,
-            Self::Chat => loopflow_definitions::builtins::SURFACE_CHAT,
-            _ => loopflow_definitions::builtins::SURFACE_HUMAN_PRESENT,
-        }
-    }
-}
-
-impl std::str::FromStr for Surface {
-    type Err = std::convert::Infallible;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let surface = match value {
-            "cli" => Self::Cli,
-            "ide" => Self::Ide,
-            "mac" => Self::Mac,
-            "iphone" => Self::Iphone,
-            "chat" => Self::Chat,
-            _ => Self::Headless,
-        };
-        Ok(surface)
-    }
-}
-
 /// All components of a prompt before assembly.
 #[derive(Debug, Clone, Default)]
 pub struct PromptComponents {
-    pub surface: Surface,
+    pub mode: Mode,
     pub user_name: Option<String>,
     pub docs: Vec<Document>,
     /// What the branch changed, when `context.diff` asks for it.
@@ -380,7 +335,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
-        surface: opts.surface,
+        mode: opts.mode,
         user_name: crate::config::participant_name()?,
         docs,
         change,
@@ -1387,7 +1342,7 @@ fn read_text_file(path: &Path) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// Render Loopflow's operating and surface instructions.
+/// Render Loopflow's operating and run mode instructions.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
@@ -1400,10 +1355,7 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
         parts.push(user);
     }
 
-    let instructions = components.surface.instructions();
-    if !instructions.is_empty() {
-        parts.push(instructions.to_string());
-    }
+    parts.push(components.mode.instructions().to_string());
 
     parts
 }
@@ -1772,7 +1724,7 @@ mod tests {
     #[test]
     fn format_prompt_basic() {
         let components = PromptComponents {
-            surface: Surface::Headless,
+            mode: Mode::Headless,
             ..Default::default()
         };
 
@@ -1876,23 +1828,13 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_interactive_surfaces_keep_questions_with_present_human() {
-        for surface in [Surface::Cli, Surface::Ide, Surface::Mac, Surface::Iphone] {
-            let components = PromptComponents {
-                surface,
-                ..Default::default()
-            };
-
-            let prompt = render_full_prompt(components);
-            assert!(
-                prompt.contains("Someone is in this conversation"),
-                "surface {surface:?}"
-            );
-            assert!(
-                prompt.contains("never\nstart another Session to reach them"),
-                "surface {surface:?}"
-            );
-        }
+    fn format_prompt_interactive_keeps_questions_in_the_conversation() {
+        let prompt = render_full_prompt(PromptComponents {
+            mode: Mode::Interactive,
+            ..Default::default()
+        });
+        assert!(prompt.contains("Someone is in this conversation"));
+        assert!(prompt.contains("never\nstart another Session to reach them"));
     }
 
     #[test]
@@ -2025,7 +1967,7 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_default_components_has_headless_surface() {
+    fn format_prompt_default_components_are_headless() {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
@@ -2033,35 +1975,6 @@ mod tests {
         assert!(prompt.contains("say what is missing and stop"));
         assert!(prompt.contains("For a reversible choice"));
         assert!(prompt.contains("Stop\nany server or watcher you started"));
-    }
-
-    #[test]
-    fn surface_parser_unknown_defaults_to_headless() {
-        let parsed = "unknown_surface"
-            .parse::<Surface>()
-            .expect("surface parsing is infallible");
-        assert_eq!(parsed, Surface::Headless);
-    }
-
-    #[test]
-    fn surface_parser_preserves_historical_ide() {
-        let parsed = "ide"
-            .parse::<Surface>()
-            .expect("surface parsing is infallible");
-        assert_eq!(parsed, Surface::Ide);
-    }
-
-    #[test]
-    fn chat_surface_speaks_plainly_and_is_distinct_from_headless() {
-        assert_eq!(
-            "chat".parse::<Surface>().expect("infallible"),
-            Surface::Chat
-        );
-        let chat = Surface::Chat.instructions();
-        assert!(chat.contains("live chat channel"));
-        assert!(chat.contains("Don't narrate how you work"));
-        assert_ne!(chat, Surface::Headless.instructions());
-        assert_ne!(chat, Surface::Cli.instructions());
     }
 
     // ==========================================================================
@@ -2561,23 +2474,6 @@ mod tests {
         assert!(paths.contains(&"README.md"));
         assert!(paths.contains(&"docs/README.md"));
         assert!(paths.contains(&"docs/nested/README.md"));
-    }
-
-    #[test]
-    fn gather_context_surface_preserved() {
-        let temp = tempfile::tempdir().expect("create temp dir");
-        let repo = temp.path();
-
-        let opts = GatherContextOpts {
-            repo_root: repo.to_path_buf(),
-            surface: Surface::Cli,
-            ..Default::default()
-        };
-
-        let result = gather_context(&opts);
-        assert!(result.is_ok());
-        let components = result.unwrap();
-        assert_eq!(components.surface, Surface::Cli);
     }
 
     #[test]

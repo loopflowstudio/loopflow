@@ -644,6 +644,8 @@ pub enum TaskEventKind {
     /// direction immediately. A live run acts on interrupts issued after it
     /// launched; there is nothing to interrupt otherwise. Not a report out.
     Interrupt,
+    /// Hold Graph execution at its current step.
+    Paused,
     PrStarted {
         pr_id: TaskPrId,
         sequence: u32,
@@ -695,6 +697,7 @@ impl TaskEventKind {
                 | Self::GraphFinished { .. }
                 | Self::Steer { .. }
                 | Self::Interrupt
+                | Self::Paused
         )
     }
 }

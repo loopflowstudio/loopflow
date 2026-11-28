@@ -81,7 +81,7 @@ const EXCHANGE_FIRST: &[&[&str]] = &[&["wave", "sync"]];
 
 /// Commands that require a Wave on the command line and therefore never
 /// resolve ambient context.
-const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[&["wave", "rename"], &["discord", "serve"]];
+const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[&["wave", "rename"]];
 
 const COMMANDS: &[Cmd] = &[
     // ── Reads ────────────────────────────────────────────────────────────

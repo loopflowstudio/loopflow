@@ -72,8 +72,7 @@ fn print_defaults(defaults: &[CapacityDefault]) {
 }
 
 pub fn run_pool(cmd: &PoolCommand) -> anyhow::Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = open_store(&runtime)?;
+    let store = open_store()?;
     let sqlite = &store.sqlite;
     match cmd {
         PoolCommand::Add { name } => {
@@ -163,8 +162,7 @@ struct RentalListing {
 }
 
 pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = open_store(&runtime)?;
+    let store = open_store()?;
     let sqlite = &store.sqlite;
     match cmd {
         OndemandCommand::Add {
@@ -262,7 +260,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd,
             json,
         } => {
-            let (rental, machine) = rent(&runtime, sqlite, name, *hours, *max_usd, true)?;
+            let (rental, machine) = rent(sqlite, name, *hours, *max_usd, true)?;
             if *json {
                 println!("{}", serde_json::to_string(&rental)?);
             } else {
@@ -389,7 +387,6 @@ fn print_ondemand(listing: &OndemandListing) {
 
 /// Admit, create once, then install lf and add the sandbox as a Machine.
 pub(crate) fn rent(
-    runtime: &tokio::runtime::Runtime,
     sqlite: &SqliteStore,
     name: &str,
     hours: Option<f64>,
@@ -430,7 +427,7 @@ pub(crate) fn rent(
     let usd_per_hour = sandbox.usd_per_hour.unwrap_or(rental.usd_per_hour);
     let rental = sqlite.confirm_rental(&rental.id, &sandbox.id, usd_per_hour)?;
     let route = sandbox.route.expect("a created sandbox has a route");
-    let machine = match attach(runtime, sqlite, &rental, &route, linux_lf.as_deref()) {
+    let machine = match attach(sqlite, &rental, &route, linux_lf.as_deref()) {
         Ok(machine) => machine,
         Err(error) => {
             // Nothing ran on it yet, so nothing is lost by giving it back now.
@@ -536,7 +533,6 @@ chmod 755 "$dir/lf"
 /// Wait for SSH, install lf (published, or `LF_RENT_LINUX_BIN`), then add it
 /// as a Machine.
 fn attach(
-    runtime: &tokio::runtime::Runtime,
     sqlite: &SqliteStore,
     rental: &Rental,
     route: &str,
@@ -601,7 +597,9 @@ fn attach(
         "the selected Linux lf is not serving {}",
         rental.provider_name
     );
-    let probe = runtime.block_on(loopflow_execution::machine::connection::probe(route, false))?;
+    let probe = loopflow_execution::runtime::block_on(
+        loopflow_execution::machine::connection::probe(route, false),
+    )?;
     let label = next_label(sqlite, &rental.ondemand)?;
     let machine =
         loopflow_execution::store::machines::add_machine(sqlite, &probe.id?, route, &label)?;
@@ -661,16 +659,15 @@ pub fn place(
     if placement.pool.is_none() && placement.rent.is_none() {
         return Err(anyhow!("--quote needs --pool or --rent"));
     }
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = open_store(&runtime)?;
+    let store = open_store()?;
     let sqlite = &store.sqlite;
     if placement.quote {
         quote(sqlite, placement)?;
         return Ok(true);
     }
-    let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
-        repo, None, issue,
-    ))?;
+    let (_, task) = loopflow_execution::runtime::block_on(
+        loopflow_execution::ops::task::resolve_saved_task(repo, None, issue),
+    )?;
     let local = loopflow_execution::store::machines::local_machine(sqlite)?.id;
     let ownership = loopflow_execution::store::ownership::task_ownership(sqlite, &task.id)?;
     if let Some(owner) = ownership.owner_elsewhere(&local) {
@@ -696,7 +693,7 @@ pub fn place(
     }
     let name = placement.rent.expect("checked: a pool or an on-demand");
     let forwarded = forward::read(repo)?;
-    let logins = sign_ins(&runtime, &require_ondemand(sqlite, name)?.logins)?;
+    let logins = sign_ins(&require_ondemand(sqlite, name)?.logins)?;
     if !forwarded.carries_env(login::CLAUDE_TOKEN_ENV) && !logins.contains(&LoginProvider::Codex) {
         return Err(anyhow!(
             "a rental from {name} would have no agent login: forward {token} \
@@ -705,9 +702,9 @@ pub fn place(
             token = login::CLAUDE_TOKEN_ENV,
         ));
     }
-    let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
+    let (rental, machine) = rent(sqlite, name, None, None, false)?;
     let label = machine.name();
-    if let Err(error) = prepare(&runtime, &machine, &logins, repo, &task, sqlite, batch) {
+    if let Err(error) = prepare(&machine, &logins, repo, &task, sqlite, batch) {
         // Nothing ran on it yet, so nothing is lost by giving it back now.
         let cleanup = Sandboxes::from_env(rental.provider)
             .and_then(|api| delete_sandbox(sqlite, &api, &rental));
@@ -788,11 +785,10 @@ fn git_config(repo: &std::path::Path, key: &str) -> Option<String> {
 /// An unowned Task whose Wave or repository names a pool or on-demand goes
 /// there, as `--pool` or `--rent` would send it. Claimed Tasks stay put.
 pub fn place_by_default(repo: &std::path::Path, issue: &str, batch: bool) -> anyhow::Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
     // A Task not saved yet has no scope; the run itself reports why.
-    let Ok((store, task)) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
-        repo, None, issue,
-    )) else {
+    let Ok((store, task)) = loopflow_execution::runtime::block_on(
+        loopflow_execution::ops::task::resolve_saved_task(repo, None, issue),
+    ) else {
         return Ok(());
     };
     let sqlite = &store.sqlite;
@@ -838,17 +834,15 @@ fn hand_off(repo: &Path, issue: &str, label: &str) -> anyhow::Result<()> {
 
 /// What a rental signs in to at prepare: the template's `logins`, else every
 /// provider signed in here, in `sign_in_order`.
-fn sign_ins(
-    runtime: &tokio::runtime::Runtime,
-    logins: &[LoginProvider],
-) -> anyhow::Result<Vec<LoginProvider>> {
+fn sign_ins(logins: &[LoginProvider]) -> anyhow::Result<Vec<LoginProvider>> {
     if !logins.is_empty() {
         return Ok(sign_in_order(logins.iter().copied()));
     }
-    let here = runtime.block_on(loopflow_execution::machine::connection::local_machine())?;
+    let here = loopflow_execution::runtime::block_on(
+        loopflow_execution::machine::connection::local_machine(),
+    )?;
     Ok(sign_in_order(
-        runtime
-            .block_on(login::logins(&here))?
+        loopflow_execution::runtime::block_on(login::logins(&here))?
             .into_iter()
             .filter(|row| row.state == login::LoginState::SignedIn)
             .map(|row| row.provider),
@@ -858,7 +852,6 @@ fn sign_ins(
 /// Sign in to the selected providers and the services checkout and planning
 /// need, then prepare the Task's repository and Wave on the rental.
 fn prepare(
-    runtime: &tokio::runtime::Runtime,
     machine: &Machine,
     logins: &[LoginProvider],
     repo: &Path,
@@ -879,7 +872,7 @@ fn prepare(
         linear.then_some(LoginProvider::Linear),
     ];
     for provider in sign_in_order(logins.iter().copied().chain(required.into_iter().flatten())) {
-        runtime.block_on(login::login(machine, provider, None, false, batch))?;
+        loopflow_execution::runtime::block_on(login::login(machine, provider, None, false, batch))?;
     }
     if let Some(wave_id) = task.wave_id.as_ref().filter(|_| linear) {
         let wave = sqlite.get_wave(wave_id)?;
@@ -963,11 +956,10 @@ fn checkout_script(
 
 /// `lf machine end`: give a rented machine back now.
 pub fn end(label: &str, force: bool) -> anyhow::Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = open_store(&runtime)?;
-    let machine = runtime.block_on(loopflow_execution::machine::connection::find_machine(
-        &store, label,
-    ))?;
+    let store = open_store()?;
+    let machine = loopflow_execution::runtime::block_on(
+        loopflow_execution::machine::connection::find_machine(&store, label),
+    )?;
     let sqlite = &store.sqlite;
     let rental = sqlite.rental_for_machine(&machine.id)?.ok_or_else(|| {
         anyhow!("{label} is owned, and owned machines are never deleted; `lf machine remove {label}` forgets it")

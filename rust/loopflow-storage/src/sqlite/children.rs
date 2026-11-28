@@ -529,7 +529,7 @@ impl SqliteStore {
 
     pub fn task_checkout_paths(&self) -> StoreResult<Vec<(TaskId, PathBuf)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare("SELECT task_id, worktree FROM task_checkouts")?;
+        let mut statement = conn.prepare_cached("SELECT task_id, worktree FROM task_checkouts")?;
         let rows = statement.query_map([], |row| {
             Ok((
                 TaskId::from_raw(row.get::<_, String>(0)?),
@@ -710,6 +710,7 @@ impl SqliteStore {
             [id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
+        super::task_pause::clear_in(&tx, id)?;
         if completed || abandoned || pending {
             tx.execute(
                 "UPDATE tasks SET abandoned_at=NULL,abandon_reason=NULL,completion_request=NULL,completion_error=NULL WHERE id=?1",
@@ -1393,7 +1394,7 @@ impl SqliteStore {
     /// events, and the attempt count only ever looks at the recent tail.
     pub fn recent_task_events(&self, task_id: &TaskId, limit: u32) -> StoreResult<Vec<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT id, task_id, kind_json, created_at
              FROM task_events WHERE task_id = ?1 ORDER BY id DESC LIMIT ?2",
         )?;
@@ -1624,7 +1625,7 @@ pub(super) fn tracker_states_in(
         .filter(|task| task.tracker_id.is_some())
         .map(|task| &task.id)
         .collect();
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
             "SELECT t.id,i.observed_at,
          COALESCE(i.needs_refresh,0) OR COALESCE(observed.archived,0)
          OR COALESCE(parent.archived,0)
@@ -1798,12 +1799,9 @@ pub(super) fn task_checkout_in(
 pub(super) const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL";
 /// Present locally known Linear identity, otherwise the shortest unique local hex prefix.
 pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Option<String>> {
-    let identifier: Option<String> = conn
-        .query_row(
-            "SELECT issue_identifier FROM tasks WHERE id=?1",
-            [id.as_str()],
-            |row| row.get(0),
-        )
+    let mut query = conn.prepare_cached("SELECT issue_identifier FROM tasks WHERE id=?1")?;
+    let identifier: Option<String> = query
+        .query_row([id.as_str()], |row| row.get(0))
         .optional()?;
     let Some(identifier) = identifier else {
         return Ok(None);
@@ -1814,8 +1812,8 @@ pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Optio
     }
     // Task IDs are canonical lowercase hex, so the six-character prefix is a
     // primary-key range rather than a scan of every Task.
-    let mut query =
-        conn.prepare("SELECT substr(id,6) FROM tasks WHERE id!=?1 AND id>=?2 AND id<?2||'~'")?;
+    let mut query = conn
+        .prepare_cached("SELECT substr(id,6) FROM tasks WHERE id!=?1 AND id>=?2 AND id<?2||'~'")?;
     let others = query
         .query_map(params![id.as_str(), format!("task_{}", &hex[..6])], |row| {
             row.get::<_, String>(0)
@@ -1850,7 +1848,7 @@ pub(super) struct TaskIdentifiers {
 impl TaskIdentifiers {
     pub(super) fn read(conn: &Connection) -> StoreResult<Self> {
         let mut statement =
-            conn.prepare("SELECT lower(substr(id,6)),issue_identifier FROM tasks")?;
+            conn.prepare_cached("SELECT lower(substr(id,6)),issue_identifier FROM tasks")?;
         let rows = statement
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -2128,7 +2126,7 @@ fn task_candidates_in(
     repository: Option<&RepositoryId>,
 ) -> StoreResult<Vec<(TaskId, String, Option<String>)>> {
     let selector = loopflow_model::id::TaskSelector::parse(issue);
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
          JOIN repository_plans w ON w.id=t.repository_id
          WHERE (?5 IS NULL OR t.repository_id=?5)
@@ -2200,13 +2198,11 @@ fn unique_task_id(
 }
 
 pub(super) fn task_on(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<Task>> {
-    conn.query_row(
-        &format!("{TASK_COLUMNS} WHERE t.id=?1"),
-        [task_id.as_str()],
-        |row| map_task_row(conn, row),
-    )
-    .optional()
-    .map_err(StoreError::from)
+    let mut query = conn.prepare_cached(&format!("{TASK_COLUMNS} WHERE t.id=?1"))?;
+    query
+        .query_row([task_id.as_str()], |row| map_task_row(conn, row))
+        .optional()
+        .map_err(StoreError::from)
 }
 
 fn task_pr_on(conn: &Connection, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
@@ -2549,7 +2545,7 @@ pub(super) fn task_events_after_in(
     task_id: &TaskId,
     cursor: i64,
 ) -> StoreResult<Vec<TaskEvent>> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         "SELECT id, task_id, kind_json, created_at
          FROM task_events WHERE task_id=?1 AND id>?2 ORDER BY id",
     )?;
@@ -2713,6 +2709,7 @@ fn clear_completion_request(conn: &Connection, task: &TaskId) -> StoreResult<()>
 }
 
 fn record_task_completion(conn: &Connection, task: &TaskId, note: Option<&str>) -> StoreResult<()> {
+    super::task_pause::clear_in(conn, task)?;
     clear_completion_request(conn, task)?;
     super::task_state::decide_in(conn, task, "completed")?;
     insert_task_event_in(

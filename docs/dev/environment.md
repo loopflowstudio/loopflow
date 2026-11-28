@@ -82,7 +82,6 @@ Session shells scrub transient credentials.
 | `LF_SETTINGS` | User-supplied YAML preference mapping; below explicit CLI and above database/files. Inherited by child commands and forwarded remotely. Never include credentials. |
 | `LF_AGENT_OVERRIDE` | User-supplied agent preference inherited by children and remote commands. Explicit CLI wins; Loopflow never exports a CLI or resolved default through this variable. Cleared for independent Session shells. Contains no credential. |
 | `LF_TASK_SOURCE` | One SSH invocation's saved Task ID, identifier, optional tracker issue ID, branch and required commit. Contains no planning payload, local paths or execution authority. |
-| `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |
 | `LF_CREDENTIAL_SOCKET` | Local service credential broker. |
 | `GH_TOKEN`, `OPENCODE_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY` | Provider credentials, applied per program. Exported API-key variables are removed from Claude and Codex launches. |
 | `CODEX_HOME`, `CLAUDE_CONFIG_DIR` | Native provider homes inherited from the caller. |

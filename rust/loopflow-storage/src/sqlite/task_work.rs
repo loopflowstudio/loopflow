@@ -128,7 +128,7 @@ fn completed_graph_steps(
     conn: &rusqlite::Connection,
     tasks: &[&TaskId],
 ) -> StoreResult<HashMap<TaskId, HashSet<LfProcessId>>> {
-    let mut query = conn.prepare(
+    let mut query = conn.prepare_cached(
         "SELECT g.task_id, gs.lf_process_id FROM graph_processes g
          JOIN graph_process_steps gs ON gs.graph_lf_process_id=g.lf_process_id
          WHERE g.task_id IN (SELECT value FROM json_each(?1)) AND gs.ended_at IS NOT NULL",
@@ -148,6 +148,13 @@ fn completed_graph_steps(
     Ok(completed)
 }
 
+/// Cleanup can outlive the worker that originally held the Graph cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseStage {
+    Stopping,
+    Held,
+}
+
 /// The Task's Graph row: the graph it took up, the step it stands at or its
 /// run left, and that run with the cursor its next attempt sets out from: where
 /// it began, then the step after the last one it finished.
@@ -158,6 +165,7 @@ pub struct SavedTaskGraphRow {
     pub run: Option<(String, crate::graph_process::TaskCarrier)>,
     /// The Task's auto state, which names who takes part next.
     pub auto: Option<AutoState>,
+    pub pause: Option<PauseStage>,
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
@@ -174,29 +182,30 @@ fn task_graph_row(
     conn: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<Option<SavedTaskGraphRow>> {
-    let Some((graph, step, start, carrier)) = conn
-        .query_row(
-            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at
-             FROM task_graphs WHERE task_id=?1",
-            [task.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<LfProcessId>>(3)?
-                        .map(|id| -> rusqlite::Result<_> {
-                            Ok(crate::graph_process::TaskCarrier {
-                                id,
-                                pid: row.get(4)?,
-                                os_started_at: row.get(5)?,
-                                died_at: row.get(6)?,
-                            })
+    let mut query = conn.prepare_cached(
+        "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at,
+                (SELECT stopping_sessions IS NOT NULL FROM task_pauses WHERE task_id=?1)
+         FROM task_graphs WHERE task_id=?1",
+    )?;
+    let Some((graph, step, start, carrier, stopping)) = query
+        .query_row([task.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<LfProcessId>>(3)?
+                    .map(|id| -> rusqlite::Result<_> {
+                        Ok(crate::graph_process::TaskCarrier {
+                            id,
+                            pid: row.get(4)?,
+                            os_started_at: row.get(5)?,
+                            died_at: row.get(6)?,
                         })
-                        .transpose()?,
-                ))
-            },
-        )
+                    })
+                    .transpose()?,
+                row.get::<_, Option<bool>>(7)?,
+            ))
+        })
         .optional()?
     else {
         return Ok(None);
@@ -208,6 +217,13 @@ fn task_graph_row(
         step,
         run,
         auto,
+        pause: stopping.map(|stopping| {
+            if stopping {
+                PauseStage::Stopping
+            } else {
+                PauseStage::Held
+            }
+        }),
     }))
 }
 
@@ -328,18 +344,16 @@ fn write_auto_in(
 }
 
 pub(super) fn auto_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<Auto>> {
-    let Some((state, at, by)) = conn
-        .query_row(
-            "SELECT state,set_at,set_by FROM task_auto WHERE task_id=?1",
-            [task.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )
+    let mut query =
+        conn.prepare_cached("SELECT state,set_at,set_by FROM task_auto WHERE task_id=?1")?;
+    let Some((state, at, by)) = query
+        .query_row([task.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
         .optional()?
     else {
         return Ok(None);
@@ -353,7 +367,8 @@ pub(super) fn auto_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult
 
 /// The run `carrier` started stopped at `step`, or reached `end`: put the
 /// Task there. A Task another run or a person moved meanwhile stays put.
-/// Returns whether this put the Task at `end`, which requests completion.
+/// Returns whether this put the Task at `end`, which requests completion
+/// unless the Task is paused.
 fn arrive_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
@@ -373,13 +388,17 @@ fn arrive_in(
         ],
     )? > 0;
     let ended = arrived && step == END;
-    if ended {
+    if ended && !super::task_pause::is_paused_in(tx, task)? {
         super::children::request_completion_in(tx, task, None)?;
     }
     Ok(ended)
 }
 
-fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> StoreResult<bool> {
+pub(super) fn set_step_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    step: &str,
+) -> StoreResult<bool> {
     Ok(tx.execute(
         "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
              run_died_at=NULL,
@@ -564,7 +583,7 @@ impl SqliteStore {
         wave: &loopflow_model::id::WaveId,
     ) -> StoreResult<std::collections::HashSet<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare_cached(
             "SELECT t.id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE p.wave_id=?1",
         )?;
         let rows = statement.query_map([wave], |row| row.get::<_, String>(0))?;
@@ -904,8 +923,9 @@ impl SqliteStore {
     /// process, or was found dead.
     pub fn local_task_runs(&self) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let mut query = conn.prepare_cached(
             "SELECT task_id FROM task_graphs WHERE (run_pid IS NOT NULL OR run_died_at IS NOT NULL)
+             AND NOT EXISTS(SELECT 1 FROM task_pauses p WHERE p.task_id=task_graphs.task_id)
              AND task_id IN (SELECT task_id FROM task_checkouts)",
         )?;
         let rows = query.query_map([], |row| row.get::<_, String>(0))?;

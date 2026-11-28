@@ -1,7 +1,6 @@
 name: with_docs
 repo: tests/parity/fixtures/with_docs
 skill: test
-surface: headless
 docs:
   - "*.md"
 diff_files: false

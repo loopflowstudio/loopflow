@@ -404,6 +404,7 @@
           "outlook": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "pr": {
@@ -437,6 +438,7 @@
         "graph_source": null,
         "section": "backlog",
         "lifecycle": "unstarted",
+        "working_group": null,
         "selection_states": [
           "open",
           "unstarted",
@@ -592,12 +594,14 @@
           "outlook": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "pr": null,
         "graph_source": null,
         "section": "backlog",
         "lifecycle": "unstarted",
+        "working_group": null,
         "selection_states": [
           "unstarted",
           "backlog"

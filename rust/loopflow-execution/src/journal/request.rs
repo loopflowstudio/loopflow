@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn observations_follow_nested_workers_without_leaking_into_writes() {
-        let cache = crate::observe::Cache::shared();
+        let cache = std::sync::Arc::new(crate::observe::Cache::default());
         let repo = loopflow_test_support::TestRepo::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let status = || {
@@ -188,7 +188,7 @@ mod tests {
                 .unwrap()
             })
         };
-        cache.capture(|| assert_eq!(status(), ""));
+        let ((), _held) = cache.capture(|| assert_eq!(status(), ""));
         std::fs::write(repo.path().join("new.txt"), "text").unwrap();
         cache.capture(|| assert_eq!(status(), ""));
         let seen = run(&TraceId::default(), &serde_json::json!({}), || Ok(status())).unwrap();

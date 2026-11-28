@@ -217,6 +217,7 @@ high as `agents`.
 | Clipboard | `-c, --clipboard` | `context: {paste: true}` |
 | Claude Chrome tool | `--chrome on` / `--chrome off` | `chrome: true` / `false` |
 | Permission prompts | `--yolo` (skip) · `--setting yolo=false` (ask) | `yolo: false` (ask when attended; default skips) |
+| Graph build job cap | — | `machine.jobs: 4` (overrides automatic core sharing across Graph steps) |
 | Merge method | — | `merge_method: squash` (`merge`, `squash`, `rebase`) |
 | Display name | — | `user.name` (defaults to Git `user.name`) |
 
@@ -428,6 +429,34 @@ prunes only those (`--no-prune` keeps the stale ones); a skill you or another
 tool put under the same name is kept and counted as skipped. Graph exports
 carry `disable-model-invocation: true`, so a harness that honors the key
 (Claude Code, Pi) runs a Graph only when you name it.
+
+## Concurrent build jobs
+
+```bash
+lf set --global machine.jobs 4        # cap build jobs per Graph step on this Machine
+lf unset --global machine.jobs        # return to automatic core sharing
+```
+
+```yaml
+# ~/.lf/config.yaml
+machine:
+  jobs: 4
+```
+
+When a Task Graph starts an agent step, Loopflow divides this Machine's CPU
+cores across the Graph steps currently running here (`max(2, cores ÷ running
+steps)`) and runs the step at lower scheduling priority (`nice 5`). On a 16-core
+Machine with 8 Graph steps running at once, each step gets `2` jobs instead of
+competing for all 16 cores.
+
+Each step receives `CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`, `MAKEFLAGS=-jN`,
+and `LF_JOBS` set to that budget; any variable already set in the environment is
+left untouched. Set `machine.jobs` in `~/.lf/config.yaml` to override the
+automatic count with a fixed positive integer on this Machine. `machine.jobs` is
+host-local (it never forwards to remote Machines or rentals) and sits beside
+`machine` placement settings (`lf set --global machine.jobs 4` preserves an
+existing `machine: mini` shorthand by expanding it to `tasks` and `session`).
+Interactive conversations opened in a terminal or Desktop are not throttled.
 
 ## Remote work
 

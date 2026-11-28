@@ -110,8 +110,7 @@ not resolve either from the planning store.
 
 ## External transport
 
-The CLI talks to trackers and model providers. The independent Discord bridge
-uses outbound REST requests. Remote execution reaches the target Machine through
+The CLI talks to trackers and model providers. Remote execution reaches the target Machine through
 `lf --machine`; see [Machines and processes](machines.md).
 
 ## Add a provider

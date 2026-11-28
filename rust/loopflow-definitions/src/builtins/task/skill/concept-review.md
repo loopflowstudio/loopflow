@@ -49,28 +49,27 @@ When a finding turns on a design choice, show it on the page as a
 recommendation with what was passed over and why, flagging any choice that
 can't be undone once shipped.
 
-Show it. Write `scratch/concept-review.html`, built around one question: do
-the concepts people work with and the code's concepts line up?
+Show it. Write `scratch/concept-review.page.html` following `lf help page`,
+built around one question: do the concepts people work with and the code's
+concepts line up?
 
 - the domain concepts: what a person knows about and the actions they take;
 - the code concepts: the types, records and APIs behind them;
 - each pairing marked yes or no, with what is wrong where it is no: a concept
   the code has and the person never sees, one idea under two names, one name
   for two ideas, an action with no single owner in the code;
-- the biggest mismatch called out, and the recommendation explained, before
-  and after.
+- the biggest mismatch called out, and the recommendation explained with
+  `<lf-component name="before-after">` and real `<lf-diff>` / `<lf-file>`
+  excerpts;
+- findings and numbered questions at the end.
 
-One self-contained file, readable in light and dark, that shows the thing
-instead of describing it, marks proposed apart from existing, and ends with
-numbered questions so "2b" is a complete answer. When the repository has a
-visual language (a design system, the app, its docs, internal tools), borrow
-its palette, type and layout. Present it with
-`lf desktop files scratch/concept-review.html` and give its path.
+Compile with `lf page build scratch/concept-review.page.html` and present with
+`lf page open scratch/concept-review.html`.
 
-`scratch/concept-review.html` is the only file this skill writes; it does not
-edit `scratch/plan.md`, code or docs, and it does not decide a loop. With
-nobody there, the questions stay on the page; the reply gives its path and
-what it found.
+`scratch/concept-review.page.html` (compiled to `scratch/concept-review.html`)
+is the only artifact this skill writes; it does not edit `scratch/plan.md`, code
+or docs, and it does not decide a loop. With nobody there, the questions stay on
+the page; the reply gives its path and what it found.
 
 ## With a person
 

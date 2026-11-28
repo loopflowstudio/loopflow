@@ -169,20 +169,15 @@ pub(super) fn after(after: After, waker: super::wake::Waker) {
         After::TurnEnd(ended) => ended.session.clone(),
         After::Reachable(session) => Some(session.clone()),
     };
-    let ran = (|| -> Result<()> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        runtime.block_on(async {
-            let Some(store) = loopflow_execution::store::open_existing_store().await? else {
-                return Ok(());
-            };
-            match after {
-                After::TurnEnd(ended) => turn_end(std::sync::Arc::new(store), ended, waker).await,
-                After::Reachable(session) => waker.after_boundary(&store.sqlite, &session).await,
-            }
-        })
-    })();
+    let ran = loopflow_execution::runtime::block_on(async {
+        let Some(store) = loopflow_execution::store::open_existing_store().await? else {
+            return Ok(());
+        };
+        match after {
+            After::TurnEnd(ended) => turn_end(std::sync::Arc::new(store), ended, waker).await,
+            After::Reachable(session) => waker.after_boundary(&store.sqlite, &session).await,
+        }
+    });
     if let Err(error) = ran {
         tracing::warn!(?session, error = %format!("{error:#}"), "boundary follow-up failed");
     }

@@ -35,7 +35,6 @@ caller's process.
 | Resume a bound or primary Session, or open a Task, Wave or repository conversation | work session | held interactive terminal, independent of its viewer |
 | Open a conversation in a held terminal through a Desktop pane or framed `lf --machine` view | work session | held interactive terminal, independent of its viewer |
 | Headless steps of `lf task run` or `lf task auto on`, and the `ci-fix` run landing starts | worker | headless until the step or repair ends |
-| A Discord answer for a Wave | worker | returns the answer to the bridge |
 | Desktop Task shells | held shell | independent of its viewer, no hooks |
 
 `lf task run` and `lf task auto on` start no agent themselves. `transport::detach_current`

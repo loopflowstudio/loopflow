@@ -1,6 +1,7 @@
 //! Task routing and what a command or operation sent over SSH carries.
 use crate::durable::TaskExecutionRoute;
 use crate::ops::task::remote::TaskSource;
+use crate::store::ownership::{task_execution_route, task_pause_route, TaskRoute};
 use anyhow::{anyhow, Result};
 use loopflow_model::durable::TaskId;
 use loopflow_storage::sqlite::SqliteStore;
@@ -116,8 +117,7 @@ impl crate::machine::wire::Selection {
     /// What this `lf` runs with in `directory`, for a request it sends to
     /// another Machine.
     pub fn capture(directory: &Path, source: Option<TaskSource>) -> Result<Self> {
-        let origin =
-            tokio::runtime::Runtime::new()?.block_on(crate::machine::connection::local_machine())?;
+        let origin = crate::runtime::block_on(crate::machine::connection::local_machine())?;
         Ok(Self {
             profile: crate::config::remote::outgoing(Some(directory), origin.id.as_str())?,
             participant: crate::config::participant_name_in(directory)?,
@@ -164,16 +164,32 @@ impl crate::machine::wire::Selection {
 /// The route of the Task `selector` names, when its Work lives on another
 /// Machine. Reads records only.
 pub fn remote_task(selector: &str, directory: Option<&Path>) -> Result<Option<TaskExecutionRoute>> {
+    remote_task_via(selector, directory, task_execution_route)
+}
+
+pub fn remote_pause(
+    selector: &str,
+    directory: Option<&Path>,
+) -> Result<Option<TaskExecutionRoute>> {
+    remote_task_via(selector, directory, task_pause_route)
+}
+
+fn remote_task_via(
+    selector: &str,
+    directory: Option<&Path>,
+    resolve: TaskRoute,
+) -> Result<Option<TaskExecutionRoute>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    remote_task_in(&store, selector, directory)
+    remote_task_in(&store, selector, directory, resolve)
 }
 
 fn remote_task_in(
     store: &SqliteStore,
     selector: &str,
     directory: Option<&Path>,
+    resolve: TaskRoute,
 ) -> Result<Option<TaskExecutionRoute>> {
     // Short IDs and tracker labels can name different Tasks in different
     // repositories. A client outside a repository can still address a Task.
@@ -190,7 +206,7 @@ fn remote_task_in(
             None => return Ok(None),
         },
     };
-    let route = crate::store::ownership::task_execution_route(store, &task)?;
+    let route = resolve(store, &task)?;
     Ok((route.machine_id != crate::store::machines::local_machine(store)?.id).then_some(route))
 }
 
@@ -226,7 +242,7 @@ pub fn remote_ownership_writer(
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let Some(route) = remote_task_in(&store, selector, directory)? else {
+    let Some(route) = remote_task_in(&store, selector, directory, task_execution_route)? else {
         return Ok(None);
     };
     Ok((!move_awaiting_arrival(&store, &route.task_id)?).then_some(route))

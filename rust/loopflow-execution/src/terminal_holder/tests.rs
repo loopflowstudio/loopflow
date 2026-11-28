@@ -404,3 +404,62 @@ fn a_holder_started_from_a_replaced_executable_fails_at_once_naming_both_builds(
     assert!(error.contains(&BUILD[..12]), "{error}");
     assert!(error.contains(&executable.display().to_string()), "{error}");
 }
+
+#[test]
+fn a_holder_exits_and_hangups_children_when_its_home_is_removed() {
+    let runtime = tempfile::Builder::new()
+        .prefix("lfh")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let home = tempfile::Builder::new()
+        .prefix("lfh-home")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let place = Place {
+        socket: runtime.path().join("holder.sock"),
+        lock: runtime.path().join("holder.lock"),
+        state: home.path().join("state"),
+    };
+    let (ready, listening) = std::sync::mpsc::channel();
+    let served = place.clone();
+    let home_path = home.path().to_path_buf();
+    let holder = std::thread::spawn(move || {
+        super::serve_for_home(&served, BUILD, Some(&home_path), move || {
+            ready.send(()).unwrap();
+        })
+        .unwrap()
+    });
+    listening.recv_timeout(Duration::from_secs(5)).unwrap();
+
+    let armed = runtime.path().join("armed");
+    let hup = runtime.path().join("hup");
+    let script = format!(
+        "trap 'printf got-hup > \"{}\"; exit 0' HUP; printf armed > \"{}\"; while :; do sleep 1; done",
+        hup.display(),
+        armed.display()
+    );
+    let mut client = Client::connect(&place).unwrap();
+    client.start(shell("t1", "r1", &script)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !armed.exists() {
+        assert!(Instant::now() < deadline, "child did not arm HUP trap");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Live home keeps the holder running past multiple HOME_CHECK intervals.
+    std::thread::sleep(Duration::from_millis(350));
+    assert_eq!(client.list().unwrap().len(), 1);
+    drop(client);
+
+    drop(home);
+    assert_eq!(holder.join().unwrap(), Served::Finished);
+    assert!(!place.socket.exists());
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while std::fs::read_to_string(&hup).as_deref().ok() != Some("got-hup") {
+        assert!(
+            Instant::now() < deadline,
+            "child did not receive SIGHUP after home removal"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}

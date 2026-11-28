@@ -4408,12 +4408,6 @@
               "query": {
                 "kind": "machine.self"
               }
-            },
-            {
-              "kind": "performance.read",
-              "query": {
-                "kind": "machine.self"
-              }
             }
           ],
           "properties": {
@@ -5064,6 +5058,19 @@
           "type": "string"
         }
       ]
+    },
+    "PageUrl": {
+      "additionalProperties": false,
+      "description": "What `page.url` answers.",
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
     },
     "PlacementStrategy": {
       "enum": [
@@ -8474,6 +8481,16 @@
         },
         "task": {
           "$ref": "#/$defs/TaskSummary"
+        },
+        "working_group": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkingGroup"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -8492,6 +8509,7 @@
         "run_control",
         "pr",
         "section",
+        "working_group",
         "owned_by_you",
         "runs_on"
       ],
@@ -8932,6 +8950,7 @@
             "idle",
             "active",
             "moving",
+            "paused",
             "working",
             "done"
           ],
@@ -8982,6 +9001,43 @@
         "repository",
         "selection",
         "secrets"
+      ],
+      "type": "object"
+    },
+    "ServerDiagnostics": {
+      "additionalProperties": false,
+      "description": "What `server.diagnostics` answers: live counters for the serving process.",
+      "properties": {
+        "held_facts": {
+          "description": "External facts currently held by open subscriptions.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "spawns": {
+          "description": "Cumulative subprocesses spawned by the server.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "store_opens": {
+          "description": "Cumulative SQLite connections opened since this server started.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "threads": {
+          "description": "Live OS threads in the server process.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "threads",
+        "store_opens",
+        "spawns",
+        "held_facts"
       ],
       "type": "object"
     },
@@ -9797,6 +9853,27 @@
         },
         {
           "additionalProperties": false,
+          "description": "A capability URL for a local review page served over loopback; same-user\nlocal socket only.",
+          "properties": {
+            "kind": {
+              "const": "page.url",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PageUrl"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "A ticket for a connection that carries one request of `bytes` bytes,\nlarger than `limits.max_message`; answers `{ticket}`. The uploaded\nrequest is answered here under its own id.",
           "examples": [
             {
@@ -9998,6 +10075,34 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/PlanChanges"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Live runtime counters for the serving process: OS threads, cumulative\nSQLite opens, spawned subprocesses, and held observation facts.",
+          "examples": [
+            {
+              "kind": "server.diagnostics"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "server.diagnostics",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/ServerDiagnostics"
+          },
+          "x-result-example": {
+            "held_facts": 11,
+            "spawns": 2,
+            "store_opens": 4,
+            "threads": 16
           }
         }
       ]
@@ -13426,6 +13531,19 @@
           "type": "object"
         },
         {
+          "description": "Hold Graph execution at its current step.",
+          "properties": {
+            "kind": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
           "properties": {
             "base_commit": {
               "type": "string"
@@ -13912,6 +14030,9 @@
     "TaskGraph": {
       "description": "One Task's Graph as `lf task status --json` carries it.",
       "properties": {
+        "control": {
+          "$ref": "#/$defs/WorkflowControl"
+        },
         "current_step": {
           "description": "The index in `steps` of the step the Task stands in; null at `start`\nand at `end`.",
           "format": "uint32",
@@ -13946,6 +14067,7 @@
         }
       },
       "required": [
+        "control",
         "name",
         "interactive_steps",
         "position",
@@ -14803,6 +14925,10 @@
     },
     "TaskRunControl": {
       "properties": {
+        "pausing": {
+          "description": "A pause is still stopping work. Unpause must wait.",
+          "type": "boolean"
+        },
         "unavailable": {
           "type": [
             "string",
@@ -14811,7 +14937,8 @@
         }
       },
       "required": [
-        "unavailable"
+        "unavailable",
+        "pausing"
       ],
       "type": "object"
     },
@@ -14918,7 +15045,7 @@
         },
         {
           "const": "working",
-          "description": "Someone's idle, active or moving Task, or a Task owned on another Machine.",
+          "description": "Someone's idle, active, moving or paused Task, or a Task owned on another Machine.",
           "type": "string"
         }
       ]
@@ -15213,6 +15340,11 @@
         {
           "const": "moving",
           "description": "A Graph runs for it. Its auto setting says whether the run stands in\nat interactive steps or stops there for a person.",
+          "type": "string"
+        },
+        {
+          "const": "paused",
+          "description": "Execution is held until explicitly unpaused.",
           "type": "string"
         },
         {
@@ -15792,9 +15924,20 @@
         },
         "work": {
           "$ref": "#/$defs/WorkWorkspaceKey"
+        },
+        "working_group": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkingGroup"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
+        "working_group",
         "work",
         "title",
         "states",
@@ -16760,6 +16903,34 @@
       ],
       "type": "string"
     },
+    "WorkflowAction": {
+      "enum": [
+        "run",
+        "pause",
+        "pausing",
+        "unpause",
+        "resume",
+        "wait",
+        "done"
+      ],
+      "type": "string"
+    },
+    "WorkflowControl": {
+      "description": "The workflow track's primary action and current-step chip label.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/WorkflowAction"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "label"
+      ],
+      "type": "object"
+    },
     "WorkflowOutline": {
       "description": "A Graph as the workflow line shows it before any Task stands on it.",
       "properties": {
@@ -16774,6 +16945,9 @@
           "description": "\"You take part at explore and ship-review.\" or \"Runs on its own.\"",
           "type": "string"
         },
+        "start": {
+          "$ref": "#/$defs/WorkflowControl"
+        },
         "steps": {
           "description": "The Graph's top-level steps in order, as `TaskGraph.steps` carries them.",
           "items": {
@@ -16783,6 +16957,7 @@
         }
       },
       "required": [
+        "start",
         "steps",
         "interactive_steps",
         "sentence"
@@ -16805,6 +16980,15 @@
         "interactive"
       ],
       "type": "object"
+    },
+    "WorkingGroup": {
+      "description": "The groups inside Working, in sidebar order.",
+      "enum": [
+        "active",
+        "shipping",
+        "paused"
+      ],
+      "type": "string"
     },
     "Write": {
       "description": "A typed mutation with the same defaults and effects as its CLI spelling.\nOn the wire each write is a resource-named `kind` (`task.complete`);\n`desktop.*` writes are Desktop's own arrangement state.",
@@ -17382,6 +17566,82 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/TaskComments"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Stop work and hold the Task on its execution Machine. Returns the pause receipt.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.pause"
+            }
+          ],
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.pause",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue"
+          ],
+          "type": "object",
+          "x-result": {
+            "type": "string"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Lift the hold. With run, resume automatic work. Return the run or null when the Task stays at its step.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.unpause",
+              "run": true
+            }
+          ],
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.unpause",
+              "type": "string"
+            },
+            "run": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue",
+            "run"
+          ],
+          "type": "object",
+          "x-result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         {
@@ -19531,7 +19791,7 @@
   ],
   "title": "Loopflow server protocol",
   "x-min-revision": 10,
-  "x-revision": 10,
+  "x-revision": 11,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

@@ -296,6 +296,30 @@ writes! {
     } => loopflow_model::comment::TaskComments;
     { issue, message, .. } => task::report(directory, issue, None, message)?,
 
+    /// Stop work and hold the Task on its execution Machine. Returns the pause receipt.
+    #[serde(rename = "task.pause")]
+    TaskPause { directory: PathBuf, issue: String } => String;
+    { issue, .. } => match remote {
+        Some(remote) => remote.call()?,
+        None => loopflow_execution::ops::task::pause::pause(issue)?,
+    },
+
+    /// Lift the hold. With run, resume automatic work. Return the run or null when the Task stays at its step.
+    #[serde(rename = "task.unpause")]
+    TaskUnpause { directory: PathBuf, issue: String, run: bool } => Option<task::TaskRun>;
+    { issue, run, .. } => match remote {
+        Some(remote) => remote.call()?,
+        None => task::unpause(
+            directory,
+            issue,
+            *run,
+            None,
+            false,
+            environment,
+            crate::lf::navigation::command_merges,
+        )?,
+    },
+
     /// `lf task interrupt <issue> --json`.
     #[serde(rename = "task.interrupt")]
     TaskInterrupt { directory: PathBuf, issue: String } => loopflow_execution::ops::task::TaskControlResult;
@@ -359,7 +383,7 @@ writes! {
             (None, Some(wave)) => SteerScope::Wave(wave),
             (None, None) => SteerScope::Repository,
         };
-        tokio::runtime::Runtime::new()?.block_on(async {
+        loopflow_execution::runtime::block_on(async {
             let store = super::session::open_shared_store().await?;
             anyhow::Ok(loopflow_execution::engine::session::steer(&store, directory, scope, message).await?)
         })?
@@ -389,7 +413,7 @@ writes! {
     } => super::session::StatusRecorded;
     {
         id, terminal, agent_process, stream, sequence, records, ..
-    } => tokio::runtime::Runtime::new()?.block_on(super::session::status_recorded(
+    } => loopflow_execution::runtime::block_on(super::session::status_recorded(
         id,
         terminal,
         agent_process.as_deref(),
@@ -444,7 +468,7 @@ writes! {
         wave: String,
         name: String,
     } => loopflow_execution::ops::wave_lifecycle::WaveRenamed;
-    { wave, name, .. } => tokio::runtime::Runtime::new()?.block_on(
+    { wave, name, .. } => loopflow_execution::runtime::block_on(
         loopflow_execution::ops::wave_lifecycle::rename(directory, wave, Some(name), None),
     )?,
 
@@ -498,7 +522,7 @@ writes! {
     } => {
         let repo = loopflow_execution::repo::require_repo_root(directory, "this command")?;
 
-        tokio::runtime::Runtime::new()?.block_on(loopflow_execution::ops::wave_lifecycle::add(
+        loopflow_execution::runtime::block_on(loopflow_execution::ops::wave_lifecycle::add(
             &repo,
             wave,
             objective.as_deref(),
@@ -1118,6 +1142,8 @@ macro_rules! directory_of {
             | Write::TrackerAnswer { directory, .. }
             | Write::TaskSteer { directory, .. }
             | Write::TaskReport { directory, .. }
+            | Write::TaskPause { directory, .. }
+            | Write::TaskUnpause { directory, .. }
             | Write::TaskInterrupt { directory, .. }
             | Write::TaskMove { directory, .. }
             | Write::TaskSave { directory, .. }
@@ -1198,12 +1224,20 @@ impl Write {
     /// elsewhere, with the write naming that Work exactly. `None` runs it here.
     /// A steer handles its carrier fallback inside `steer_task` instead.
     fn remote(&self) -> anyhow::Result<Option<Remote>> {
-        use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
+        use loopflow_execution::machine::task::{
+            remote_ownership_writer, remote_pause, remote_task,
+        };
         let (route, launching) = match self {
             Self::SessionResume { .. } | Self::SessionNew { .. } => return self.remote_session(),
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
                 (remote_task(issue, None)?, true)
             }
+            Self::TaskUnpause {
+                issue,
+                run,
+                directory,
+            } => (remote_task(issue, Some(directory))?, *run),
+            Self::TaskPause { issue, directory } => (remote_pause(issue, Some(directory))?, false),
             Self::TaskSave {
                 issue, directory, ..
             } => (remote_task(issue, Some(directory))?, false),
@@ -1219,7 +1253,7 @@ impl Write {
         // The Task's Linear mapping resolves on the destination, whose own
         // Task ID may differ.
         let source = match self {
-            Self::TaskAutoOn { .. } => tokio::runtime::Runtime::new()?.block_on(
+            Self::TaskAutoOn { .. } => loopflow_execution::runtime::block_on(
                 loopflow_execution::machine::task::resolve_task_source(
                     Some(route.task_id.as_str()),
                     self.directory(),
@@ -1232,6 +1266,8 @@ impl Write {
             *issue = route.peer_selector;
         } else if let Self::TaskRun { issue, .. }
         | Self::TaskAutoOn { issue, .. }
+        | Self::TaskPause { issue, .. }
+        | Self::TaskUnpause { issue, .. }
         | Self::TaskAutoOff { issue, .. }
         | Self::TaskClaim { issue, .. }
         | Self::TaskUnassign { issue, .. } = &mut write
@@ -1492,17 +1528,23 @@ pub(super) fn steer_task(
 
     loopflow_execution::ops::task::validate_task_comment_input(message)
         .map_err(|error| Error::new(ErrorCode::Invalid, error.to_string()))?;
-    let rt = tokio::runtime::Runtime::new()?;
-    let (store, task) = rt
-        .block_on(loopflow_execution::ops::task::resolve_saved_task(
-            repo, wave, issue,
-        ))
-        .with_context(|| format!("resolving Task {issue}"))?;
+    let (store, task) = loopflow_execution::runtime::block_on(
+        loopflow_execution::ops::task::resolve_saved_task(repo, wave, issue),
+    )
+    .with_context(|| format!("resolving Task {issue}"))?;
     let participant = match sender {
         Some(sender) => sender.selection.participant.clone(),
         None => loopflow_execution::config::participant_name_in(repo)?,
     };
-    let save = |fallback| rt.block_on(task::steer(&store, &task, message, participant, fallback));
+    let save = |fallback| {
+        loopflow_execution::runtime::block_on(task::steer(
+            &store,
+            &task,
+            message,
+            participant,
+            fallback,
+        ))
+    };
     let Some(peer) = TaskPeer::resolve(&store.sqlite, &task.id)? else {
         return save(None);
     };
@@ -1557,8 +1599,9 @@ pub(super) fn run_task(
 }
 
 pub(crate) fn find_machine(selector: &str) -> anyhow::Result<loopflow_model::durable::Machine> {
-    tokio::runtime::Runtime::new()?
-        .block_on(loopflow_execution::machine::connection::find_registered_machine(selector))
+    loopflow_execution::runtime::block_on(
+        loopflow_execution::machine::connection::find_registered_machine(selector),
+    )
 }
 
 #[cfg(test)]

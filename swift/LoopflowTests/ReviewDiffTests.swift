@@ -215,10 +215,10 @@ struct ReviewDiffTests {
         +nueve
 
         """).files[0]
-        let moved = kept.anchored(in: kept.selection.numbered(in: edited))
-        #expect(moved.selection.range == "L11-12" && !moved.detached)
-        let detached = gone.anchored(in: gone.selection.numbered(in: edited))
-        #expect(detached.detached && detached.selection.range == "L8")
+        let moved = kept.anchored(in: try #require(kept.selection).numbered(in: edited))
+        #expect(moved.selection?.range == "L11-12" && !moved.detached)
+        let detached = gone.anchored(in: try #require(gone.selection).numbered(in: edited))
+        #expect(detached.detached && detached.selection?.range == "L8")
         // A file that left the comparison detaches its comments; none is dropped.
         #expect(kept.anchored(in: [:]).detached)
         let message = ReviewComment.message([moved, detached])
@@ -226,6 +226,16 @@ struct ReviewDiffTests {
             + "(2) `a.swift:L8` (before, working tree on abc1234) · lines since changed keep this ")
         #expect(!message.unicodeScalars.contains { $0.value < 0x20 })
         #expect(kept.anchored(in: [1: "eight", 2: "nueve", 3: "eight", 4: "nueve"]).detached)
+
+        // Page comments skip line re-anchoring and format onto the same single line with zero control characters.
+        let pageNote = ReviewComment(pagePath: "scratch/ship-review.html",
+                                     reference: "`scratch/ship-review.html` § Flow › \"drag\tto note\"\ncheck\u{0007}this")
+        #expect(pageNote.selection == nil && pageNote.original == nil && !pageNote.detached)
+        #expect(pageNote.anchored(in: [:]) == pageNote)
+        let combined = ReviewComment.message([moved, pageNote], receipts: ["task.create → LOO-1200"])
+        #expect(combined == "(1) `a.swift:L11-12` (after, working tree on abc1234) why Spanish? say so "
+            + "(2) `scratch/ship-review.html` § Flow › \"drag to note\" check this [already ran: task.create → LOO-1200] ")
+        #expect(!combined.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f })
     }
 
     @Test func aTourPutsItsFilesFirstAndTheRestByGroup() throws {

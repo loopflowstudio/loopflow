@@ -222,6 +222,12 @@ public enum TaskSection: String, Decodable, Sendable, Hashable {
     case backlog, working, done, abandoned
 }
 
+public enum WorkingGroup: String, Codable, CaseIterable, Sendable {
+    case active, shipping, paused
+
+    public var title: String { rawValue.capitalized }
+}
+
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public var id: String { task.id }
 
@@ -229,8 +235,9 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let reference: TaskReferenceSnapshot
     /// Effective lifecycle, including planning withdrawal of never-started work.
     public internal(set) var lifecycle: TaskState
+    public internal(set) var workingGroup: WorkingGroup?
     /// The same states Rust uses for Task selections and conversation activity.
-    public let selectionStates: Set<WorkSelectionState>
+    public internal(set) var selectionStates: Set<WorkSelectionState>
     public internal(set) var runtime: TaskRuntimeSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
@@ -247,6 +254,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr, lifecycle
+        case workingGroup = "working_group"
         case selectionStates = "selection_states"
         case ownedByYou = "owned_by_you"
         case graphName = "graph_name"
@@ -254,6 +262,27 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
         case nextMove = "next_move"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        task = try c.decode(TaskPlanningSnapshot.self, forKey: .task)
+        reference = try c.decode(TaskReferenceSnapshot.self, forKey: .reference)
+        lifecycle = try c.decode(TaskState.self, forKey: .lifecycle)
+        workingGroup = try c.decode(WorkingGroup?.self, forKey: .workingGroup)
+        selectionStates = try c.decode(Set<WorkSelectionState>.self, forKey: .selectionStates)
+        runtime = try c.decodeIfPresent(TaskRuntimeSnapshot.self, forKey: .runtime)
+        nextMove = try c.decode(WorkNextMove.self, forKey: .nextMove)
+        condition = try c.decode(TaskConditionSnapshot.self, forKey: .condition)
+        actions = try c.decode(TaskActionModel.self, forKey: .actions)
+        graphName = try c.decodeIfPresent(String.self, forKey: .graphName)
+        graphSource = try c.decodeIfPresent(String.self, forKey: .graphSource)
+        latestGraphProcess = try c.decodeIfPresent(GraphProcessDetail.self, forKey: .latestGraphProcess)
+        execution = try c.decodeIfPresent(TaskExecutionSnapshot.self, forKey: .execution)
+        runControl = try c.decode(TaskRunControl.self, forKey: .runControl)
+        pr = try c.decodeIfPresent(PrSnapshot.self, forKey: .pr)
+        section = try c.decode(TaskSection.self, forKey: .section)
+        ownedByYou = try c.decode(Bool.self, forKey: .ownedByYou)
     }
 
     /// A started Task nobody owns: nothing moves it until someone claims it.
@@ -287,11 +316,11 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// Task parked at a step has run, one that was only opened has not.
     public var graphHasRun: Bool { latestGraphProcess != nil }
 
-    /// Whether the Task needs someone, and how: nil when its condition is clear,
-    /// when it waits only for its first run, which its row offers as Start, or
-    /// when it is finished and so waits for nobody.
+    /// Whether the Task needs someone. A pause takes effect while the Machine
+    /// is still returning the condition from before the hold.
     public var need: TaskConditionState? {
-        switch condition.state {
+        guard lifecycle != .paused else { return nil }
+        return switch condition.state {
         case .clear: nil
         case .waiting: isCompleted || (!graphHasRun && actions.recommended == .run) ? nil : .waiting
         case .blocked: .blocked
@@ -302,7 +331,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// Where a Task that never ran its Graph stands, as the server reads it:
     /// starting that Graph, or why its setup stopped.
     public var setupPosition: String? {
-        guard let execution, [.starting, .blocked].contains(execution.state) else { return nil }
+        guard lifecycle != .paused, let execution, [.starting, .blocked].contains(execution.state) else { return nil }
         return execution.reason
     }
 

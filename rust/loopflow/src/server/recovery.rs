@@ -6,7 +6,6 @@
 //! terminal, one at a time. The store counts each start, so a server restart
 //! forgets nothing and one death never starts two providers.
 
-use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -31,35 +30,61 @@ const PACE: Duration = Duration::from_secs(3);
 /// records its end, and nothing writes after that.
 const ENDING: Duration = Duration::from_secs(1);
 
-/// Start the Machine's one recovery watcher. It runs as long as the server.
-pub(super) fn start(terminals: Arc<Registry>) {
+/// Start the Machine's single store-watching thread for recovery and steer/Task
+/// update wakes. It runs as long as the server.
+pub(super) fn start(terminals: Option<Arc<Registry>>) -> super::wake::Waker {
+    let path = loopflow_execution::store::default_db_path();
+    let changes = loopflow_storage::changes::StoreChanges::watch(&path);
+    let (wake, waker) = super::wake::Watcher::new(terminals.clone(), changes.waker());
     let spawned = std::thread::Builder::new()
-        .name("recovery".into())
+        .name("recovery-wake".into())
         .spawn(move || {
-            loopflow_execution::journal::request::isolate(|| watch(&terminals));
+            loopflow_execution::journal::request::isolate(|| watch(path, changes, terminals, wake));
         });
     if let Err(error) = spawned {
-        tracing::warn!(%error, "Task conversations that die stay down until resumed");
+        tracing::warn!(
+            %error,
+            "Task conversations that die stay down until resumed and Task updates wait for the next turn"
+        );
     }
+    waker
 }
 
-fn watch(terminals: &Registry) {
-    let path = loopflow_execution::store::default_db_path();
-    let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
-    let mut watcher = Watcher::default();
+fn watch(
+    path: std::path::PathBuf,
+    mut changes: loopflow_storage::changes::StoreChanges,
+    terminals: Option<Arc<Registry>>,
+    mut wake: super::wake::Watcher,
+) {
+    let mut recovery = Watcher::default();
     loop {
-        watcher.read(&path, terminals);
-        changes.wait(watcher.wait(SystemTime::now()));
+        if path.exists() {
+            match loopflow_execution::store::open_sqlite(&path) {
+                Ok(store) => {
+                    if let Some(terminals) = terminals.as_deref() {
+                        recovery.read_with(&store, terminals);
+                    }
+                    wake.read_with(&store);
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "recovery/wake watcher has no store");
+                }
+            }
+        }
+        let mut wait = wake.wait_timeout();
+        if terminals.is_some() {
+            wait = wait.min(recovery.wait(SystemTime::now()));
+        }
+        changes.wait(wait);
     }
 }
 
-/// The watcher's store, what it read last and when, when it last settled,
-/// and when the pass must read again though nothing moved: a
-/// due conversation's terminal was still ending, a backoff comes due, or
-/// settlement was throttled when run records changed.
+/// What the recovery watcher read last and when, when it last settled, and
+/// when the pass must read again though nothing moved: a due conversation's
+/// terminal was still ending, a backoff comes due, or settlement was throttled
+/// when run records changed.
 #[derive(Default)]
 struct Watcher {
-    store: Option<SqliteStore>,
     seen: Option<(StoreRevisions, SystemTime)>,
     settled: Option<SystemTime>,
     agents_checked_at: Option<SystemTime>,
@@ -92,20 +117,11 @@ impl Watcher {
     /// Run the pass if the revisions moved, a minute passed or a wake came
     /// due. The first reading runs it: after a reboot or a server restart,
     /// that is when what died meanwhile comes back.
-    fn read(&mut self, path: &Path, terminals: &Registry) {
-        if self.store.is_none() && path.exists() {
-            self.store = loopflow_execution::store::open_sqlite(path)
-                .inspect_err(|error| tracing::warn!(%error, "recovery pass has no store"))
-                .ok();
-        }
-        let Some(store) = &self.store else {
-            return;
-        };
+    fn read_with(&mut self, store: &SqliteStore, terminals: &Registry) {
         let revisions = match store.revisions() {
             Ok(revisions) => revisions,
             Err(error) => {
                 tracing::warn!(%error, "recovery pass cannot read store revisions");
-                self.store = None;
                 return;
             }
         };

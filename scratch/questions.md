@@ -55,3 +55,5 @@ to `c3742012`. That conversation may show those two sends.
 # Ship-review answers (2026-11-27)
 
 - Jack Heart: `"1b 2a 3a 4a"` (drop Claude cross-session steer framing Task, drop `lf session steers | head` broken-pipe Task, keep 2s quiet pause, sync with `main` and deliver PR #2045).
+
+- **Sync with `main`:** Use main's shared recovery watcher for Antigravity retry nudges and retain the history WAL watch. Carry the terminal wake handle with the local Unix socket authority, matching the existing local boundary path.

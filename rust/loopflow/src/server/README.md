@@ -16,13 +16,20 @@ plus existing terminal attachment. It links no embedded Loopflow library. Deskto
 `install server` bridge is for local clients, not a separate setup workflow.
 
 On macOS the signed selected app bundles `com.loopflow.server.plist` and
-registers it with SMAppService. Explicit development Machines use separately
-named launchd jobs. Linux uses a systemd user service when its manager is available.
-Without a user manager, the first connection starts a detached `lf server run`
-and writes its output to `logs/server.log`. Closing Desktop does not
+registers it with SMAppService for the default Machine (`~/.lf`). Linux uses a
+systemd user service for the default Machine when its manager is available, or a
+detached `lf server run` without one. Custom `LF_HOME` Machines are never
+registered with launchd or systemd: `lf install server` boots out any legacy
+hashed job for that home, starts a detached `lf server run` logging to
+`logs/server.log`, and replaces an older build by pinning the listener via
+`LOCAL_PEERPID`/`SO_PEERCRED` before sending `SIGTERM`. A custom-home server
+exits when its home directory is removed or after 10 minutes with no connected
+clients, held terminals, or unfinished Graphs or agents; a holder also closes
+its PTYs and exits when its home directory is removed. Closing Desktop does not
 stop the service. Work sessions and Desktop shells run in a holder the service starts with
 `setsid` and controls ([Held terminals](../../../loopflow-execution/src/transport/README.md#held-terminals));
-stopping or replacing the service leaves holders and their agents running.
+stopping or replacing the service leaves holders and their agents running in an
+existing home.
 This service holds no PTY itself and hosts no Graphs: those run as
 [plain detached processes](../../../loopflow-execution/src/transport/README.md#headless-work). Logout/reboot do not
 preserve live processes; the [recovery pass](#recovery-pass) starts them again.
@@ -30,7 +37,7 @@ Disabled Background Items remain disabled. Upgrade
 retires the previous
 `com.loopflow.machine` registration before starting `com.loopflow.server`.
 The old bundled plist remains only for SMAppService approval inspection/removal.
-Development jobs and Linux units migrate their hashed labels the same way;
+Default-home Linux units migrate their hashed labels the same way;
 existing disabled/masked units require explicit enablement. The `machine.sock`
 address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
@@ -132,6 +139,24 @@ over WebSocket on the host's Tailscale address: one text frame per message on
 `/v1/machine`, ticketed connections on `/v1/ticket`, binary frames for terminal
 bytes. Setup saves the endpoint, owner and enabled choice in Machine-local
 `mobile.yaml`.
+
+The loopback carrier (`loopback.rs`, `lf page open`) binds a `127.0.0.1`
+listener (a port derived from the socket path, so pages keep their origin and
+`localStorage` across restarts; ephemeral when taken) with a 32-byte random token held only in memory (never
+written to disk or printed by `lf server status`). `GET /<token>/f/<absolute path>`
+serves files capped at `MAX_BULK` with `Referrer-Policy: no-referrer`,
+`Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. HTML and
+SVG responses also get a content security policy that limits connections to
+their origin and blocks framing, form submissions and base URL overrides.
+`GET /<token>/machine` upgrades same-origin WebSockets into `service::session`
+reusing `Messages<S>` (`Admission::Local`, `local_authority: None`). Every
+request checks `Host: 127.0.0.1:<port>` and the token in constant time; upgrades
+also require `Origin: http://127.0.0.1:<port>`. Anything else answers `404` with
+an empty body and no CORS headers. There is no `/ticket` route on loopback.
+`page.url` mints a capability URL over the local Unix socket only and is refused
+on both Tailscale and loopback connections.
+If the loopback listener cannot bind, the Unix socket and other carriers still
+serve. `lf page open` reports the bind error when it asks for a browser URL.
 
 `mobile/tailscale.rs` uses the Tailscale LocalAPI. On macOS it discovers the
 App Store endpoint via `IPNExtension` and the Standalone endpoint via
@@ -481,6 +506,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.auto.off` | `lf task auto off <issue>` | `engine::task` |
 | `task.steer` | `lf steer <issue> <message>` | `engine::task`; the saved steer ID and delivery receipt |
 | `task.report` | `lf task report <issue> <message>` | `engine::task` |
+| `task.pause` | `lf task pause <issue>` | Stop work on the execution Machine and return its receipt |
+| `task.unpause` | `lf task unpause <issue> [--run]` | Lift the hold there. With `run`, resume automatic work. Return the run or `null` when the Task stays at its step |
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
@@ -536,7 +563,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
 | `view.select` | `lf desktop view list --all` | read |
 | `session.continue` | the phone's Continue | held-terminal launch |
-| `mobile.status`, `.configure` | `lf server mobile` | remote endpoint setup |
+| `mobile.status`, `.configure` | `lf server mobile` | remote endpoint setup (local Unix socket only) |
+| `page.url` | `lf page open` | mint a loopback capability URL for a local review page (local Unix socket only) |
 | `request.upload` | none | upload ticket for an oversized request |
 
 "CLI handler; not served" is an operation only the CLI dispatcher runs today;
@@ -811,9 +839,8 @@ commands launched in the caller's terminal or pipe. `lf -b steer <ID> TEXT`
 is a batch. A Graph's correction turn in a Task run remains a worker.
 Interactive Task, Wave, repository and bound conversations are work sessions,
 as are conversations opened in a held terminal through Desktop or a framed
-`lf --machine` view. Workers run headless Task Graph steps, the `ci-fix` run
-landing starts, and Discord answers for a Wave. The checkout, `--task` and
-`LF_AS` only decide Task membership: accounting and Task steers always travel
+`lf --machine` view. Workers run headless Task Graph steps and the `ci-fix` run
+landing starts. The checkout, `--task` and `LF_AS` only decide Task membership: accounting and Task steers always travel
 together. Resume retains a Session's bare or managed lifetime, reading its
 binding and primary scope once before delegation; attribution alone leaves it
 bare. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).

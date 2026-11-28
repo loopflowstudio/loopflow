@@ -5,11 +5,13 @@ static ROWS: AtomicU64 = AtomicU64::new(0);
 static VM: AtomicU64 = AtomicU64::new(0);
 static OPENS: AtomicU64 = AtomicU64::new(0);
 static CLOSES: AtomicU64 = AtomicU64::new(0);
-pub(crate) fn observe(connection: &rusqlite::Connection) -> bool {
+pub(crate) fn observe(connection: &rusqlite::Connection, count_open: bool) -> bool {
     if !super::SUBSCRIPTION_ENABLED.load(Relaxed) {
         return false;
     }
-    OPENS.fetch_add(1, Relaxed);
+    if count_open {
+        OPENS.fetch_add(1, Relaxed);
+    }
     // Use the SQLite callback directly to reset VM status after every execution,
     // including cached statements. rusqlite's StmtRef has no reset method.
     unsafe extern "C" fn trace(

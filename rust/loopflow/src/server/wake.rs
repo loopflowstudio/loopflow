@@ -40,7 +40,8 @@ const SEND_DEADLINE: Duration = Duration::from_secs(2);
 /// A provider's turn start loads nothing new; it answers once the turn exists.
 const TURN_START_DEADLINE: Duration = Duration::from_secs(15);
 
-/// Instance-owned nudge handle for one `task-update-wake` watcher. Calling
+/// Nudge handle shared by boundary follow-ups and the recovery/wake watcher.
+/// Calling
 /// [`retry_deferred`](Self::retry_deferred) flags a deferred turn-end wake and
 /// breaks the watcher's `StoreChanges::wait` out of `UNSIGNALLED` immediately.
 #[derive(Debug, Clone)]
@@ -100,52 +101,11 @@ impl Waker {
     }
 }
 
-/// Start the Machine's one watcher. It runs as long as the server; without
-/// `terminals` it starts no stopped Session and cannot wake held terminals.
-pub(super) fn start(terminals: Option<Arc<Registry>>) -> Waker {
-    let path = loopflow_execution::store::default_db_path();
-    let changes = loopflow_storage::changes::StoreChanges::watch(&path);
-    let nudge = WakeNudge::new(changes.waker());
-    let watcher_nudge = nudge.clone();
-    let watcher_terminals = terminals.clone();
-    let nudge = match std::thread::Builder::new()
-        .name("task-update-wake".into())
-        .spawn(move || {
-            loopflow_execution::journal::request::isolate(|| {
-                watch(path, changes, watcher_terminals, watcher_nudge)
-            });
-        }) {
-        Ok(_) => Some(nudge),
-        Err(error) => {
-            tracing::warn!(%error, "Task updates wait for each conversation's next turn");
-            None
-        }
-    };
-    Waker { terminals, nudge }
-}
-
-fn watch(
-    path: std::path::PathBuf,
-    mut changes: loopflow_storage::changes::StoreChanges,
-    terminals: Option<Arc<Registry>>,
-    nudge: WakeNudge,
-) {
-    let mut watcher = Watcher {
-        terminals,
-        nudge: Some(nudge),
-        ..Watcher::default()
-    };
-    loop {
-        watcher.read(&path);
-        changes.wait(watcher.wait_timeout());
-    }
-}
-
-/// The watcher's store, the revisions it last woke conversations for, and
-/// the held terminals it starts stopped Sessions in or wakes when idle.
+/// The revisions this watcher last woke conversations for, and the held
+/// terminals it starts stopped Sessions in. Driven by `recovery`'s single
+/// store-watching thread.
 #[derive(Default)]
-struct Watcher {
-    store: Option<SqliteStore>,
+pub(super) struct Watcher {
     seen: Option<(i64, i64)>,
     terminals: Option<Arc<Registry>>,
     nudge: Option<WakeNudge>,
@@ -153,7 +113,24 @@ struct Watcher {
 }
 
 impl Watcher {
-    fn wait_timeout(&self) -> Duration {
+    pub(super) fn new(
+        terminals: Option<Arc<Registry>>,
+        signal: loopflow_storage::changes::StoreWaker,
+    ) -> (Self, Waker) {
+        let nudge = Some(WakeNudge::new(signal));
+        let waker = Waker {
+            terminals: terminals.clone(),
+            nudge: nudge.clone(),
+        };
+        let watcher = Self {
+            terminals,
+            nudge,
+            ..Self::default()
+        };
+        (watcher, waker)
+    }
+
+    pub(super) fn wait_timeout(&self) -> Duration {
         if self.deferred {
             DEFERRED_RETRY
         } else {
@@ -166,15 +143,7 @@ impl Watcher {
     /// The first reading wakes too: what arrived while no server ran reaches
     /// each idle conversation now. One that already heard it gets nothing;
     /// claimed updates and confirmed steers say so.
-    fn read(&mut self, path: &Path) {
-        if self.store.is_none() && path.exists() {
-            self.store = loopflow_execution::store::open_sqlite(path)
-                .inspect_err(|error| tracing::warn!(%error, "Task update watcher has no store"))
-                .ok();
-        }
-        let Some(store) = &self.store else {
-            return;
-        };
+    pub(super) fn read_with(&mut self, store: &SqliteStore) {
         match store
             .task_update_revision()
             .and_then(|updates| Ok((updates, store.steer_revision()?)))
@@ -205,8 +174,17 @@ impl Watcher {
             }
             Err(error) => {
                 tracing::warn!(%error, "steer and Task update revisions unread");
-                self.store = None;
             }
+        }
+    }
+
+    #[cfg(test)]
+    fn read(&mut self, path: &Path) {
+        if !path.exists() {
+            return;
+        }
+        if let Ok(store) = loopflow_execution::store::open_sqlite(path) {
+            self.read_with(&store);
         }
     }
 }
@@ -433,10 +411,7 @@ fn open_inbox(key: &Path, thread: &str) -> Result<Option<(UnixStream, String)>> 
 }
 
 fn start_codex_turn(endpoint: &Path, thread: &str, text: &str) -> Result<()> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         tokio::time::timeout(
             TURN_START_DEADLINE,
             loopflow_execution::harness::codex_connection::deliver_update(endpoint, thread, text),
@@ -1254,11 +1229,9 @@ printf '%s' "$line" > "{pasted}"
             .save_session_steer(session, "Fixture author", "nudge after turn end")
             .unwrap();
         let path = fixture.store_path();
-        let mut watcher = Watcher {
-            terminals: Some(registry.clone()),
-            ..Watcher::default()
-        };
-        watcher.read(&path);
+        let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
+        let (mut watcher, waker) = Watcher::new(Some(registry.clone()), changes.waker());
+        watcher.read_with(store);
         assert!(!watcher.deferred);
 
         // Turn ends: `session_activity` flips to yielded without moving either
@@ -1272,10 +1245,7 @@ printf '%s' "$line" > "{pasted}"
 
         // Arm `StoreChanges` after the Stop write so no WAL event is pending,
         // and confirm the watcher would otherwise wait `UNSIGNALLED` (60 s).
-        let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
         changes.wait(std::time::Duration::from_millis(1));
-        let nudge = super::WakeNudge::new(changes.waker());
-        watcher.nudge = Some(nudge.clone());
         assert_eq!(watcher.wait_timeout(), super::UNSIGNALLED);
 
         let watcher_path = path.clone();
@@ -1292,7 +1262,7 @@ printf '%s' "$line" > "{pasted}"
             "watcher should still be waiting in UNSIGNALLED"
         );
         let nudged_at = std::time::Instant::now();
-        nudge.retry_deferred();
+        waker.nudge.unwrap().retry_deferred();
         let still_deferred = worker.join().unwrap();
         assert!(!still_deferred);
         assert!(
@@ -1373,6 +1343,51 @@ printf '%s' "$line" > "{pasted}"
             !wire.contains("staging bucket") && !wire.contains("pr/1"),
             "delivered news is not repeated"
         );
+    }
+
+    #[test]
+    fn paused_task_delivers_steers_and_child_updates_to_its_idle_conversation() {
+        let session = "paused-inbox";
+        let fixture = fixture(session);
+        let store = &fixture.store;
+        store.choose_task_primary(&fixture.task, session).unwrap();
+        store
+            .take_up_task_graph(&fixture.task, r#"{"name":"code","steps":[]}"#)
+            .unwrap();
+        let (listener, _) = fixture.idle_claude();
+        listener.set_nonblocking(true).unwrap();
+        store
+            .begin_task_pause(
+                &fixture.task,
+                &loopflow_storage::process::Starter::Person { name: None },
+                vec![],
+            )
+            .unwrap();
+        let child = store
+            .create_task(&loopflow_storage::work::task::NewTask {
+                id: loopflow_model::durable::TaskId::new(),
+                parent_task_id: Some(fixture.task.clone()),
+                repository_id: store.task(&fixture.task).unwrap().unwrap().repository_id,
+                project_id: None,
+                title: "Child".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .abandon(
+                &loopflow_model::durable::WorkRef::Task(child.id),
+                "superseded",
+            )
+            .unwrap();
+        fixture.comment(store, "c-1", "Review the staged changes");
+        loopflow_execution::harness::task_updates::write(store, session).unwrap();
+        after_turn(store, session, None);
+        let frames = received(&listener);
+        let content = frames[1]["message"]["content"].as_str().unwrap();
+        assert!(content.contains("Review the staged changes"), "{content}");
+        assert!(content.contains("was abandoned"), "{content}");
+        assert_eq!(store.session_steers(session, 0, 8).unwrap().pending, 0);
     }
 
     #[test]

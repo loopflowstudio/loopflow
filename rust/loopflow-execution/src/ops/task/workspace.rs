@@ -4,45 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 
 use super::file_store;
 use loopflow_model::durable::{MachineId, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
-
-fn watch_checkout(
-    checkout: &Path,
-    mut changed: impl FnMut(notify::Result<Vec<String>>) + Send + 'static,
-) -> Result<notify::RecommendedWatcher> {
-    let metadata = crate::git::absolute_git_dir(checkout)?;
-    // Watchers report either the watched spelling or the resolved one.
-    let roots = EventRoots {
-        checkout: [checkout.to_path_buf(), checkout.canonicalize()?],
-        metadata: [metadata.clone(), metadata.canonicalize()?],
-    };
-    let mut watcher =
-        notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
-            Ok(event) if event.kind.is_access() => {}
-            Ok(event) if event.need_rescan() => changed(Ok(vec![String::new()])),
-            Ok(event) => {
-                let paths: Vec<_> = event
-                    .paths
-                    .iter()
-                    .filter_map(|path| roots.relative(path))
-                    .collect();
-                if !paths.is_empty() {
-                    changed(Ok(paths));
-                }
-            }
-            Err(error) => changed(Err(error)),
-        })?;
-    watcher.watch(checkout, RecursiveMode::Recursive)?;
-    if !metadata.starts_with(checkout) {
-        watcher.watch(&metadata, RecursiveMode::Recursive)?;
-    }
-    Ok(watcher)
-}
 
 /// One eligible Markdown or HTML page under `scratch/` with a metadata stamp
 /// derived from modification time and byte length.
@@ -88,7 +54,7 @@ impl std::fmt::Debug for TaskFilesWatch {
 
 #[derive(Debug)]
 struct CheckoutWatch {
-    _watcher: notify::RecommendedWatcher,
+    _watcher: crate::observe::CheckoutWatchGuard,
     pending: Arc<Mutex<PendingPaths>>,
     ignore_failed: bool,
 }
@@ -181,7 +147,7 @@ impl TaskFilesWatch {
         let pending = Arc::new(Mutex::new(PendingPaths::default()));
         let changes = pending.clone();
         let wake = self.wake.clone();
-        let watcher = watch_checkout(checkout, move |event| {
+        let watcher = crate::observe::watch_checkout_paths(checkout, move |event| {
             let mut batch = changes.lock().expect("file watch paths");
             match event {
                 Err(error) => batch.error = Some(error),
@@ -202,34 +168,6 @@ impl TaskFilesWatch {
             pending,
             ignore_failed: false,
         })
-    }
-}
-
-struct EventRoots {
-    checkout: [PathBuf; 2],
-    metadata: [PathBuf; 2],
-}
-
-impl EventRoots {
-    /// Report metadata as if it sat inside the checkout, as a main checkout's does.
-    fn relative(&self, path: &Path) -> Option<String> {
-        if let Some(inside) = self
-            .metadata
-            .iter()
-            .find_map(|root| path.strip_prefix(root).ok())
-        {
-            return Some(
-                Path::new(".git")
-                    .join(inside)
-                    .to_string_lossy()
-                    .into_owned(),
-            );
-        }
-        let inside = self
-            .checkout
-            .iter()
-            .find_map(|root| path.strip_prefix(root).ok())?;
-        Some(inside.to_string_lossy().into_owned())
     }
 }
 

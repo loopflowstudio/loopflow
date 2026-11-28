@@ -232,13 +232,8 @@ impl Drop for Pipe {
 pub(crate) fn outdated(machine: &loopflow_model::durable::Machine) -> String {
     let name = machine.label.as_deref().unwrap_or(machine.route.as_str());
     let update = super::connection::update_command(&machine.route);
-    let version = tokio::runtime::Runtime::new()
+    let version = crate::runtime::block_on(super::connection::probe(&machine.route, false))
         .ok()
-        .and_then(|runtime| {
-            runtime
-                .block_on(super::connection::probe(&machine.route, false))
-                .ok()
-        })
         .map(|probe| probe.version);
     match version {
         Some(version) => format!(

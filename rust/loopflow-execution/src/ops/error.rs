@@ -27,6 +27,8 @@ pub enum OpsError {
     CommandFailed { command: String, stderr: String },
     #[error("parse error: {0}")]
     Parse(String),
+    #[error("no Task exists for {0:?}")]
+    TaskNotFound(String),
     #[error("{0}")]
     Message(String),
     #[error("{0}")]

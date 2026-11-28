@@ -12,9 +12,8 @@ use std::time::{Duration, SystemTime};
 
 const STATISTICS_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 const RETENTION_EVERY: Duration = Duration::from_secs(60 * 60);
-/// How often the thread checks the wall-clock deadlines. `SystemTime`, unlike
-/// `Instant`, keeps counting while a Mac sleeps.
-const TICK: Duration = Duration::from_secs(10 * 60);
+/// Active repositories with no local claims receive new plans by Git on this cadence.
+const PLAN_EVERY: Duration = Duration::from_secs(60);
 
 pub(super) fn start() {
     let spawned = std::thread::Builder::new()
@@ -25,66 +24,69 @@ pub(super) fn start() {
     }
 }
 
-/// Repositories with no local claims still receive new plans by Git.
-const PLAN_EVERY: Duration = Duration::from_secs(60);
-
-pub(super) fn start_plan_exchange() {
-    let spawned = std::thread::Builder::new()
-        .name("plan-git".into())
-        .spawn(|| loopflow_execution::journal::request::isolate(exchange_plans));
-    if let Err(error) = spawned {
-        tracing::warn!(%error, "this server does not carry plans by Git");
-    }
-}
-
-fn exchange_plans() {
-    let path = loopflow_execution::store::default_db_path();
-    loop {
-        std::thread::sleep(PLAN_EVERY);
-        if !path.exists() {
-            continue;
-        }
-        let exchanged = loopflow_execution::store::open_sqlite(&path)
-            .map_err(anyhow::Error::from)
-            .and_then(|store| loopflow_execution::ops::plan_git::exchange_unowned(&store));
-        if let Err(error) = exchanged {
-            tracing::warn!(error = %format!("{error:#}"), "Git plan exchange did not run");
-        }
-    }
-}
-
 fn maintain() {
     let path = loopflow_execution::store::default_db_path();
-    let mut statistics_due = SystemTime::now();
-    let mut retention_due = SystemTime::now();
+    let now = SystemTime::now();
+    let mut statistics_due = now;
+    let mut retention_due = now;
+    let mut plan_due = now + PLAN_EVERY;
     loop {
-        if SystemTime::now() >= retention_due {
+        let now = SystemTime::now();
+        if now >= retention_due {
             match retain(&path) {
                 Ok(()) => retention_due = SystemTime::now() + RETENTION_EVERY,
-                Err(error) => tracing::warn!(%error, "store retention failed"),
+                Err(error) => {
+                    tracing::warn!(%error, "store retention failed");
+                    retention_due = SystemTime::now() + PLAN_EVERY;
+                }
             }
         }
         if SystemTime::now() >= statistics_due {
             match refresh(&path) {
                 Ok(()) => statistics_due = SystemTime::now() + STATISTICS_EVERY,
-                Err(error) => tracing::warn!(%error, "store statistics refresh failed"),
+                Err(error) => {
+                    tracing::warn!(%error, "store statistics refresh failed");
+                    statistics_due = SystemTime::now() + PLAN_EVERY;
+                }
             }
         }
-        std::thread::sleep(TICK);
+        if SystemTime::now() >= plan_due {
+            if path.exists() {
+                let exchanged = loopflow_execution::store::open_sqlite(&path)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|store| loopflow_execution::ops::plan_git::exchange_unowned(&store));
+                if let Err(error) = exchanged {
+                    tracing::warn!(error = %format!("{error:#}"), "Git plan exchange did not run");
+                }
+            }
+            plan_due = SystemTime::now() + PLAN_EVERY;
+        }
+        let next = retention_due.min(statistics_due).min(plan_due);
+        if let Ok(wait) = next.duration_since(SystemTime::now()) {
+            if !wait.is_zero() {
+                std::thread::sleep(wait);
+            }
+        }
     }
 }
 
 fn retain(path: &Path) -> anyhow::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let report = loopflow_execution::store::retention::prune(path, now)?;
-    tracing::info!(?report, "store retention");
+    if path.exists() {
+        let report = loopflow_execution::store::retention::prune(path, now)?;
+        tracing::info!(?report, "store retention");
+    }
+    let files = loopflow_execution::store::file_retention::prune(path, now)?;
+    if files.any() {
+        tracing::info!(?files, "file retention");
+    }
     Ok(())
 }
 
 fn refresh(path: &Path) -> anyhow::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
     loopflow_execution::store::open_sqlite(path)?.refresh_statistics()?;
     Ok(())
 }

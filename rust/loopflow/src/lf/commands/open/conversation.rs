@@ -112,13 +112,13 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     let routed = target.execution_machine.is_some();
     if routed && mode == Mode::Here {
         let opening = Opening::lock(target)?;
-        let (socket, session) = routed_terminal(target)?;
+        let routed = routed_terminal(target)?;
         drop(opening);
         let returns = loopflow_execution::transport::ReturnCommand::for_session(
-            session.as_str(),
+            routed.session.as_str(),
             fallback_text(&target.fallback_argv()),
         );
-        loopflow_execution::transport::relay_socket(socket, Some(&returns))?;
+        routed.relay(target, &returns)?;
         return Ok(target.receipt(Some(host), None, OpenStatus::Usable, None));
     }
     if routed && mode == Mode::Tab {
@@ -224,10 +224,53 @@ fn open_tab(
     Ok(receipt)
 }
 
+struct RoutedTerminal {
+    socket: UnixStream,
+    session: LfSessionId,
+    terminal_id: loopflow_model::id::TerminalId,
+    started: bool,
+}
+
+impl RoutedTerminal {
+    /// Relay this terminal, and when a started continuation ended because
+    /// another terminal won the Session's launch lock, join that running
+    /// terminal as a local relay does.
+    fn relay(
+        self,
+        target: &Resolved,
+        returns: &loopflow_execution::transport::ReturnCommand,
+    ) -> Result<()> {
+        loopflow_execution::transport::relay_socket(self.socket, Some(returns))?;
+        if !self.started || std::env::var_os("LF_SERVER_STATUS").is_some() {
+            return Ok(());
+        }
+        let Some(socket) = follow_running_terminal(target, &self.session, &self.terminal_id) else {
+            return Ok(());
+        };
+        loopflow_execution::transport::relay_socket(socket, Some(returns))
+    }
+}
+
+fn follow_running_terminal(
+    target: &Resolved,
+    session: &LfSessionId,
+    ended: &loopflow_model::id::TerminalId,
+) -> Option<UnixStream> {
+    let socket = loopflow_execution::machine::socket_path().ok()?;
+    let mut client = Connection::open_at(&socket).ok()?;
+    let task = target.task.as_ref().map(|task| task.id.as_str());
+    let machine = target.url.machine.as_ref();
+    let issued = client.session_ticket(session, None, task, machine).ok()?;
+    if issued.terminal_id == *ended {
+        return None;
+    }
+    loopflow_execution::machine::client::redeem_terminal(&socket, issued).ok()
+}
+
 /// Select the conversation on the owner. A missing running terminal, or an
 /// `--agent` on another harness than the Session's, calls for a continuation;
 /// a peer outage leaves the Session alone.
-fn routed_terminal(target: &Resolved) -> Result<(UnixStream, LfSessionId)> {
+fn routed_terminal(target: &Resolved) -> Result<RoutedTerminal> {
     use loopflow_execution::engine::{Error, ErrorCode};
     use loopflow_execution::machine::{
         client,
@@ -267,12 +310,16 @@ fn routed_terminal(target: &Resolved) -> Result<(UnixStream, LfSessionId)> {
         )?;
         client.session_ticket(&session, Some(started.terminal_id), task, machine)
     };
-    // A running terminal on the Session's own harness is attached as it is.
-    let switching = agent.as_deref().is_some_and(|agent| {
-        provider.as_deref() != Some(loopflow_execution::config::parse_agent(agent).0.as_str())
-    });
-    let issued = if switching {
-        continuing(&mut client)?
+    // A running terminal on the Session's own harness (or one that has not
+    // bound a provider yet) is attached as it is.
+    let switching = agent
+        .as_deref()
+        .zip(provider.as_deref())
+        .is_some_and(|(agent, provider)| {
+            provider != loopflow_execution::config::parse_agent(agent).0.as_str()
+        });
+    let (issued, started) = if switching {
+        (continuing(&mut client)?, true)
     } else {
         match client.session_ticket(&session, None, task, machine) {
             Err(error)
@@ -282,12 +329,18 @@ fn routed_terminal(target: &Resolved) -> Result<(UnixStream, LfSessionId)> {
                             == Some(session.as_str())
                 }) =>
             {
-                continuing(&mut client)?
+                (continuing(&mut client)?, true)
             }
-            answer => answer?,
+            answer => (answer?, false),
         }
     };
-    Ok((client::redeem_terminal(&socket, issued)?, session))
+    let terminal_id = issued.terminal_id.clone();
+    Ok(RoutedTerminal {
+        socket: client::redeem_terminal(&socket, issued)?,
+        session,
+        terminal_id,
+        started,
+    })
 }
 
 /// The Task's Session on its owner and, for its primary, the harness it last ran.
@@ -394,8 +447,7 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
     if !prepare && existing.is_none() {
         return Ok(());
     }
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = std::sync::Arc::new(
             loopflow_execution::store::open_store(
                 &loopflow_execution::store::storage_config_from_env()?,

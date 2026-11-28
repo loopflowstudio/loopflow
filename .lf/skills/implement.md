@@ -4,6 +4,10 @@ docs: scripts/testing.md
 ---
 ## In this repository
 
+**App writes go through `PendingChanges.make`.** Flip the control in the click
+and revert on refusal; use `PendingChanges.request` only for writes with no
+visible state, never Task actions or `"… requested"` waits.
+
 **A number on screen holds still.** Show progress while loading, then draw the
 final count once.
 

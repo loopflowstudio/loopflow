@@ -127,7 +127,7 @@ pub fn link_wave_project_in(
         // The live-owner check above leaves only a retired owner to release;
         // its Tasks that never reached the tracker now never will.
         let released = tx
-            .prepare(
+            .prepare_cached(
                 "UPDATE projects SET external_project_id=NULL WHERE external_project_id=?1
                  RETURNING wave_id",
             )?
@@ -435,7 +435,7 @@ fn observe_order<'a>(
     let mut items = items.collect::<Vec<_>>();
     items.sort_by_key(|i| i.rank);
     // An older list must not order a mixture of old and retained newer facts.
-    let mut retained = conn.prepare(
+    let mut retained = conn.prepare_cached(
         "SELECT t.id FROM tracker_items i JOIN tasks t ON t.external_issue_id=i.id
          WHERE i.repo=?1 AND i.tracker=?2 AND i.id=?3 AND i.needs_refresh=0
            AND t.project_id=?4 AND t.planning_deleted_at IS NULL
@@ -575,7 +575,7 @@ fn apply_items(
     tracker: &str,
 ) -> StoreResult<()> {
     let item_ids = serde_json::to_string(&items.iter().map(|item| &item.id).collect::<Vec<_>>())?;
-    let mut query = tx.prepare(
+    let mut query = tx.prepare_cached(
         "SELECT i.id,i.revision,i.name,i.description,i.assignee,p.id,i.assignee_observed,i.project_id_observed,i.claimed_project_id
          FROM tracker_items i LEFT JOIN projects p ON p.external_project_id=i.project_id
              AND EXISTS(SELECT 1 FROM waves WHERE id=p.wave_id AND retired_at IS NULL)
@@ -696,7 +696,7 @@ fn observe_parents(
     tracker: &str,
     item_ids: &str,
 ) -> StoreResult<()> {
-    let mut query = tx.prepare(
+    let mut query = tx.prepare_cached(
         "WITH arriving AS (SELECT value FROM json_each(?3))
          SELECT t.id, parent.id, i.revision FROM tracker_items i
          JOIN tasks t ON t.external_issue_id=i.id

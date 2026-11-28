@@ -605,7 +605,21 @@ impl Driver {
         // Codex's shell policy need not inherit arbitrary app-server environment.
         // Pass only explicit launch and freshly resolved lf executable/Machine
         // values as configuration.
-        let tool_environment = super::conversation_environment(command.as_std(), launch);
+        let mut tool_environment = super::conversation_environment(command.as_std(), launch);
+        // Carry Graph-step build-job budgets into Codex tool shells even when a
+        // user's shell_environment_policy restricts inherited variables.
+        for key in [
+            "CARGO_BUILD_JOBS",
+            "NEXTEST_TEST_THREADS",
+            "MAKEFLAGS",
+            "LF_JOBS",
+        ] {
+            if !tool_environment.contains_key(key) {
+                if let Ok(value) = std::env::var(key) {
+                    tool_environment.insert(key.into(), value);
+                }
+            }
+        }
         // Caller/capture provenance reaches tools only through that policy.
         crate::agent::remove_caller_session_env(command.as_std_mut());
         let native = self.approval == ApprovalPolicy::NativeClient;
@@ -1140,13 +1154,10 @@ impl super::Launcher for loopflow_harness::Codex {
             let opened = std::thread::scope(|scope| {
                 scope
                     .spawn(|| {
-                        tokio::runtime::Builder::new_current_thread()
-                            .enable_all()
-                            .build()?
-                            .block_on(open_native(&super::Launch {
-                                config: &config,
-                                ..*launch
-                            }))
+                        crate::runtime::block_on(open_native(&super::Launch {
+                            config: &config,
+                            ..*launch
+                        }))
                     })
                     .join()
                     .map_err(|_| anyhow!("Codex startup worker panicked"))?

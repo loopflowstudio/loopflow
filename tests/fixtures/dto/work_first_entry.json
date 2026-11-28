@@ -205,6 +205,7 @@
             }
           },
           "run_control": {
+            "pausing": false,
             "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
           },
           "runtime": {
@@ -253,6 +254,7 @@
           "graph_name": "feature",
           "graph_source": null,
           "lifecycle": "unstarted",
+          "working_group": null,
           "selection_states": [
             "open",
             "unstarted",

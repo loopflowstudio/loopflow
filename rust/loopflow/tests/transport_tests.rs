@@ -2666,67 +2666,81 @@ fn wait_server_status(status: &ConnectionStatus, state: &str, generation: u64) {
     }
 }
 
-#[cfg(target_os = "macos")]
 #[test]
-#[ignore = "uses the login launchd domain with isolated development jobs"]
-fn server_registration_migrates_old_job_and_respects_disabled_choice() {
-    struct Jobs(Vec<String>);
-    impl Drop for Jobs {
-        fn drop(&mut self) {
-            for target in &self.0 {
-                for action in ["bootout", "enable"] {
-                    let _ = Command::new("/bin/launchctl")
-                        .args([action, target])
-                        .output();
-                }
-            }
-        }
-    }
+fn custom_home_ensure_starts_replaces_and_exits_on_home_removal() {
     let fixture = Fixture::new();
     let home = fixture.home.path().canonicalize().unwrap();
-    let digest = hex::encode(Sha256::digest(home.as_os_str().as_encoded_bytes()));
-    // SAFETY: geteuid has no preconditions.
-    let domain = format!("gui/{}", unsafe { libc::geteuid() });
-    let old_label = format!("com.loopflow.machine.{}", &digest[..16]);
-    let new_label = format!("com.loopflow.server.{}", &digest[..16]);
-    let old = format!("{domain}/{old_label}");
-    let new = format!("{domain}/{new_label}");
-    let _jobs = Jobs(vec![old.clone(), new.clone()]);
-    let launchctl = |args: &[&str]| {
-        let output = Command::new("/bin/launchctl").args(args).output().unwrap();
+    let binaries = tempfile::Builder::new()
+        .prefix("lf-bins")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let lf_a = binaries.path().join("lf-a");
+    let lf_b = binaries.path().join("lf-b");
+    std::fs::copy(env!("CARGO_BIN_EXE_lf"), &lf_a).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_lf"), &lf_b).unwrap();
+    #[cfg(target_os = "macos")]
+    {
+        let signed = Command::new("codesign")
+            .args([
+                "--force",
+                "--sign",
+                "-",
+                "--identifier",
+                "com.loopflow.test.replacement-b",
+            ])
+            .arg(&lf_b)
+            .output()
+            .unwrap();
         assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
+            signed.status.success(),
+            "codesign lf-b: {}",
+            String::from_utf8_lossy(&signed.stderr)
         );
-    };
-    launchctl(&["disable", &old]);
-    let refused = fixture.command(&["install", "server"]).output().unwrap();
-    assert!(!refused.status.success());
-    assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("disabled"),
-        "{}",
-        String::from_utf8_lossy(&refused.stderr)
-    );
-    assert!(!fixture.endpoint("machine").exists());
-    launchctl(&["enable", &old]);
-    let legacy_plist = home.join("server.plist");
-    std::fs::write(
-        &legacy_plist,
-        format!(
-            r#"<?xml version="1.0"?>
-<plist version="1.0"><dict><key>Label</key><string>{old_label}</string>
-<key>ProgramArguments</key><array><string>/bin/sleep</string><string>120</string></array>
-<key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>"#
-        ),
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&lf_b)
+            .unwrap();
+        file.write_all(b"\n# second build\n").unwrap();
+    }
+    let sha_a = loopflow_execution::installation::ArtifactIdentity::capture(
+        loopflow_execution::installation::ArtifactRole::Cli,
+        &lf_a,
     )
-    .unwrap();
-    launchctl(&["bootstrap", &domain, legacy_plist.to_str().unwrap()]);
-    std::fs::write(fixture.endpoint("machine"), "retired endpoint").unwrap();
+    .unwrap()
+    .sha256;
+    let sha_b = loopflow_execution::installation::ArtifactIdentity::capture(
+        loopflow_execution::installation::ArtifactRole::Cli,
+        &lf_b,
+    )
+    .unwrap()
+    .sha256;
+    assert_ne!(
+        sha_a, sha_b,
+        "replacement binary must have a distinct digest"
+    );
+
+    // Ensure cleanup if an assertion fails before home removal.
+    struct RemoveHome(PathBuf);
+    impl Drop for RemoveHome {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = RemoveHome(home.clone());
+
+    let ensure_with = |binary: &Path| {
+        let mut command = fixture.command_from(binary, &["install", "server"]);
+        command.env("LF_BIN", binary);
+        command.output().unwrap()
+    };
+
+    // Concurrent custom-home ensure calls start one detached server with no OS registration.
     let results = std::thread::scope(|scope| {
-        let ensure = || fixture.command(&["install", "server"]).output().unwrap();
-        let first = scope.spawn(ensure);
-        let second = scope.spawn(ensure);
+        let first = scope.spawn(|| ensure_with(&lf_a));
+        let second = scope.spawn(|| ensure_with(&lf_a));
         [first.join().unwrap(), second.join().unwrap()]
     });
     let readings = results.map(|result| {
@@ -2738,19 +2752,69 @@ fn server_registration_migrates_old_job_and_respects_disabled_choice() {
         serde_json::from_slice::<Value>(&result.stdout).unwrap()
     });
     assert_eq!(readings[0]["ready"], true);
+    assert_eq!(readings[0]["executable_sha256"], sha_a);
     assert_eq!(readings[0]["instance"], readings[1]["instance"]);
-    assert!(!Command::new("/bin/launchctl")
-        .args(["print", &old])
-        .output()
-        .unwrap()
-        .status
-        .success());
-    launchctl(&["print", &new]);
-    assert!(!legacy_plist.exists());
-    assert!(fixture.endpoint("machine").exists());
-    // The retired executable's lock cannot admit a second listener.
-    let lock = std::fs::File::open(fixture.endpoint("machine").with_extension("lock")).unwrap();
-    assert!(fs2::FileExt::try_lock_exclusive(&lock).is_err());
+    let first_instance = readings[0]["instance"].as_str().unwrap().to_owned();
+    assert!(!home.join("server.plist").exists());
+    #[cfg(target_os = "macos")]
+    {
+        let digest = hex::encode(Sha256::digest(home.as_os_str().as_encoded_bytes()));
+        // SAFETY: geteuid has no preconditions.
+        let target = format!(
+            "gui/{}/com.loopflow.server.{}",
+            unsafe { libc::geteuid() },
+            &digest[..16]
+        );
+        assert!(
+            !Command::new("/bin/launchctl")
+                .args(["print", &target])
+                .output()
+                .unwrap()
+                .status
+                .success(),
+            "custom home must not register a launchd job ({target})"
+        );
+    }
+
+    // Replacing with a different build retires the detached server cleanly.
+    let replaced = ensure_with(&lf_b);
+    assert!(
+        replaced.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replaced.stderr)
+    );
+    let second: Value = serde_json::from_slice(&replaced.stdout).unwrap();
+    assert_eq!(second["ready"], true);
+    assert_eq!(second["executable_sha256"], sha_b);
+    assert_ne!(second["instance"].as_str().unwrap(), first_instance);
+
+    // Deleting the custom home makes its detached server exit on its own.
+    // Retry on ENOTEMPTY if SQLite creates a -wal/-shm file mid-removal.
+    let lock_path = fixture.endpoint("machine").with_extension("lock");
+    for attempt in 0..10 {
+        match std::fs::remove_dir_all(&home) {
+            Ok(()) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty && attempt < 9 => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => panic!("remove_dir_all({}): {error}", home.display()),
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Ok(lock) = std::fs::File::open(&lock_path) {
+            if fs2::FileExt::try_lock_exclusive(&lock).is_ok() {
+                let _ = fs2::FileExt::unlock(&lock);
+                break;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "detached custom-home server did not exit after home removal"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 #[test]

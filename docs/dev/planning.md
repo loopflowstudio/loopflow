@@ -213,12 +213,14 @@ conflict state between Loopflow Machines and no Machine owns the plan.
   bumps its record; so does an arriving value that wins. An arrival that
   changes nothing bumps nothing, which is what ends an exchange.
 - **`plan_carriers`** holds one row per repository and carrier (`git`, `hub`):
-  the peer, how far into `plan_changes` the carrier has taken (`sent_seq`), the
-  hub's watermark read to (`seen_seq`), the last error, and how many records
-  its last read brought that this Machine could not write, with why
-  (`not_taken`, `not_taken_reason`). A carrier's
-  unsent records are those past its `sent_seq`. Sending one twice changes nothing, so
-  there is no per-field queue and no sent-but-unconfirmed phase.
+  the peer, how far into `plan_changes` the carrier has taken (`sent_seq`),
+  whether this Machine has read that peer (`seen_seq`: the hub's watermark read
+  to, or `0` for Git once a fetch was read, since Git keeps per-Machine tips in
+  `plan_refs`), the last error, and how many records its last read brought that
+  this Machine could not write, with why (`not_taken`, `not_taken_reason`). A
+  carrier's unsent records are those past its `sent_seq`. Sending one twice
+  changes nothing, so there is no per-field queue and no sent-but-unconfirmed
+  phase.
 
 Comments, ownership entries and created records only append. Deletion is a
 field. Arriving comments carry ownership entries into the Task's log and steer
@@ -266,31 +268,47 @@ through its own clone. The carrier is `ssh <hub> lf server connect`
 nothing.
 
 **When they run.** `plan_carriers::send` follows every
-save, from the CLI or the server: the hub takes the records past its cursor and
-Git pushes this Machine's ref as last fetched, with no fetch, both within five
-seconds. While Git holds something not taken the save fetches and reads as
-well, since the save may be the rename that lets it arrive. A push that fails, runs out of time or is refused (the remote's copy
-of the ref is ahead of the one fetched) leaves its records unsent. `sync` reads
-and sends by each carrier: `lf task sync`, `lf wave status --sync`, before a
-claim, before `lf wave create` or `lf task create --wave` makes a Wave (five
-seconds at most, so a Wave of that name made elsewhere is joined, not made
-twice), on a Task lookup that misses, and after each command the server
-answers, one exchange per repository at a time and at most one every five
-seconds after the last. While this Machine owns open Tasks, the server and
-running Graph steps share one background attempt per repository every 30 s.
-The hub and Git run concurrently, each with a five-second deadline. The
-server fetches Git refs every minute for repositories with no local claims.
-The first `lf task list` or `lf repo tracker` in a clone the Machine
-has saved nothing in does one exchange before it reads, which registers the
-clone for the server's minute. A served read of such a clone answers with an
-empty plan once and exchanges after its reply. Task creation reads
+save, from the CLI or the server: the hub sends and reads, and Git pushes this
+Machine's ref as last fetched, with no fetch, both within five seconds. While
+Git holds something not taken the save fetches and reads as well, since the save
+may be the rename that lets it arrive. A push that fails, runs out of time or is
+refused (the remote's copy of the ref is ahead of the one fetched) leaves its
+records unsent. `sync` reads and sends by each carrier: `lf task sync`,
+`lf wave status --sync`, before a claim, before `lf wave create` or
+`lf task create --wave` makes a Wave (five seconds at most, so a Wave of that
+name made elsewhere is joined, not made twice), on a Task lookup that misses,
+and after each command the server answers, one exchange per repository at a time
+and at most one every five seconds after the last. While this Machine owns open
+Tasks, the server and running Graph steps share one background attempt per
+repository every 30 s. The hub and Git run concurrently, each with a five-second
+deadline. The server fetches Git refs every minute for repositories with an open
+Task or a non-retired Wave and no local claims; empty clones stay quiet.
+Before a non-subscribing plan-reading CLI command (`lf task list`,
+`lf repo tracker`, `lf plan list`, `lf plan board`, `lf wave list`,
+`lf wave show`, `lf wave status`, `lf wave plan`) opens the store,
+`before_first_read` checks whether this clone has read from either current
+carrier (on a Machine with no store yet, it fetches the Git remote's plan refs
+first and creates the store only when the remote carries a plan; otherwise it
+checks whether the Git remote's row or, when a hub is set and the clone has a
+repository id, the hub's row has `seen_seq` set). Once either has read, later
+reads skip it. Otherwise it runs the eligible carriers together, each up to
+five seconds. A clone that already saved locally still reads on its first list
+because `plan_git::send` pushes without fetching and leaves `seen_seq` NULL;
+any full exchange marks it once every ref reads cleanly. If every carrier that
+ran fails or times out, the clone stays unread and `plan-first-read:<repo>` in
+`planning_scope_checks` skips retries for 60 s so offline reads do not stall
+every time; the wait applies only while every eligible carrier's row records an
+error, so a hub that is still off does not hold back a Git remote that came
+back. `lf task status <id>`, `lf task detail <id>` and `lf task show <id>` ask
+the plan when the Task is not in the store. A served request for an unread clone answers from the store once
+and exchanges after its reply; subscriptions (both served and `--subscribe`)
+read the store alone and do not trigger an exchange. Task creation reads
 nothing first: the send after its save takes in what changed at the hub. A
-provider exit reads the hub only; `lf repo tracker --subscribe` reads the
-store alone. Every
-exchange a command waits on without asking for it (a save, a claim, a first
-read, a read of the hub) is stopped at five seconds: Git is killed and the
-hub's answer is waited for until then, and the next exchange carries the
-rest. `lf task sync` waits as long as the carriers take.
+provider exit reads the hub only. Every exchange a command waits on without
+asking for it (a save, a claim, a first read, a read of the hub) is stopped at
+five seconds: Git is killed and the hub's answer is waited for until then, and
+the next exchange carries the rest. `lf task sync` waits as long as the
+carriers take.
 
 A change costs one small commit per Machine on the remote; sized for about ten
 Machines per repository. Tracker repositories use none of this:
@@ -701,8 +719,9 @@ Inspect live and unfinished processes before launching more work.
 
 Task status and `plan list` separate the Task's graph position from `execution`,
 which describes its latest Graph as `idle`, `starting`, `running`, `stalled`,
-`blocked` or `unknown`. `run_control` describes the available action; recorded
-history alone is not permission to start a competing Graph. See
+`blocked` or `unknown`. `run_control.unavailable` explains a run refusal.
+While a pause is stopping work, `run_control.pausing` is true and the same
+reason explains why Unpause must wait. See
 [interactive steps and Task states](../orchestration.md#where-a-person-takes-part).
 
 Automatic provider retries within one Process retain earlier failure and usage and

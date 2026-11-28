@@ -28,8 +28,7 @@ pub fn run(cmd: Option<&RepoTrackerCommand>, json: bool, subscribe: bool) -> Res
         return subscribe_status(&repo, loopflow_execution::read_stream::Transport::Stdio)
             .map(drop);
     }
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(run_async(&repo, cmd, json))
+    loopflow_execution::runtime::block_on(run_async(&repo, cmd, json))
 }
 
 /// The repository whose planning `directory` reads. A Work folder without Git
@@ -49,7 +48,7 @@ pub(crate) fn status_repository(directory: &Path) -> Result<std::path::PathBuf> 
 /// `lf wave status --sync` in a repository without Linear or Asana: one
 /// exchange by each carrier its plan has.
 pub(super) fn refresh(repo: &Path) -> Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = open_store().await?;
         loopflow_execution::ops::plan_carriers::sync(&store, &repo.to_string_lossy()).await
     })
@@ -219,7 +218,7 @@ fn remote_transport(repo: &str) -> Result<Option<TrackerKind>> {
 /// What `lf --cwd <directory> repo tracker --json` prints.
 pub(crate) fn read_status(directory: &Path) -> Result<TrackerStatus> {
     let repo = status_repository(directory)?;
-    tokio::runtime::Runtime::new()?.block_on(async {
+    loopflow_execution::runtime::block_on(async {
         let store = open_store().await?;
         status(Some(&store), &repo.to_string_lossy())
     })

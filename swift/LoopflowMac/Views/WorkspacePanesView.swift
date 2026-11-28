@@ -349,6 +349,7 @@ struct SessionPaneView: View {
     @State private var bellRinging = false
     @State private var terminalTitle: String?
     @State private var copyConfirmation: String?
+    @State private var externalLink: URL?
 
     private var item: SessionItem? {
         guard case .session(let id?, _) = pane.content else { return nil }
@@ -404,6 +405,21 @@ struct SessionPaneView: View {
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
         .modifier(CreationPresentation(recovery: .shared, resource: .session(item?.id ?? ""), visible: item != nil))
+        .background {
+            Color.clear.sheet(isPresented: Binding(
+                get: { externalLink != nil },
+                set: { if !$0 { externalLink = nil } }
+            )) {
+                if let externalLink {
+                    TerminalExternalLinkSheet(url: externalLink, cancel: { self.externalLink = nil }, open: {
+                        self.externalLink = nil
+                        if !NSWorkspace.shared.open(externalLink) {
+                            paneFailed(RegistryQueryError("No app could open the link."))
+                        }
+                    })
+                }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyTerminalBell)) { notification in
             guard let terminal = notification.object as? TerminalIdentity,
                   terminal == _terminalIdentity else { return }
@@ -811,7 +827,7 @@ struct SessionPaneView: View {
             VStack(spacing: 0) {
                 if !showsStrip { shellTabs.padding(PaneGeometry.inset) }
                 if let tab = pane.content.selectedShell,
-                          tab.location != nil, let terminal = tab.terminal {
+                          let location = tab.location, let terminal = tab.terminal {
                     if workspace.notStartedShells.contains(tab.id) {
                         EmptyState(title: "Not started", sentence: "This Task has no checkout on its Machine yet.") {
                             Button("Reconnect") { workspace.reconnectShell(tab) }
@@ -828,13 +844,14 @@ struct SessionPaneView: View {
                         }
                     } else if let command = try? workspace.shellAttachment(tab) {
                         GhosttyTerminalView(
-                repository: sessions.repoPath,
+                            repository: sessions.repoPath,
                             workingDirectory: NSHomeDirectory(),
                             argv: command,
                             terminal: terminal,
                             surfacePool: sessions.surfaces,
                             isFocused: isFocused,
-                            onFocus: focusPane
+                            onFocus: focusPane,
+                            onOpenLink: { openTerminalLink($0, at: location) }
                         )
                         .id(tab.id)
                     } else {
@@ -974,11 +991,39 @@ struct SessionPaneView: View {
                 onSurfaceFailed: { reason in
                     sessions.recordPaneFailure(item, reason: reason)
                 },
-                onFocus: focusPane
+                onFocus: focusPane,
+                onOpenLink: { openTerminalLink($0, at: location) }
             )
             .id(item.launchId)
         } else {
             EmptyState(title: "Session location unavailable")
+        }
+    }
+
+    private func openTerminalLink(_ link: TerminalLink, at location: WorkspaceIdentity) -> String? {
+        switch link {
+        case .web(let url), .mail(let url):
+            return NSWorkspace.shared.open(url) ? nil : "No app could open the link."
+        case .externalScheme(let url):
+            externalLink = url
+            return nil
+        case .work:
+            return "Work links are unavailable in this pane."
+        case .file(let file):
+            guard location.machineId == workspace.localMachineId, file.isLocal() else {
+                return "File is on another Machine."
+            }
+            guard file.checkoutPath(in: location.worktree) == nil else {
+                return "Checkout links are unavailable in this pane."
+            }
+            do {
+                let url = try file.localDocument()
+                return NSWorkspace.shared.open(url) ? nil : "No app could open the file."
+            } catch {
+                return error.localizedDescription
+            }
+        case .refused(let reason):
+            return reason
         }
     }
 
@@ -1041,6 +1086,39 @@ struct SessionPaneView: View {
         case .browser:
             nil
         }
+    }
+}
+
+private struct TerminalExternalLinkSheet: View {
+    let url: URL
+    let cancel: () -> Void
+    let open: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            Text("Open link in another app?")
+                .font(Typography.lede)
+            ScrollView {
+                Text(url.absoluteString)
+                    .font(Typography.text)
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 120)
+            HStack {
+                Spacer()
+                Button("Cancel", action: cancel)
+                    .buttonStyle(LoopflowButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button("Open", action: open)
+                    .buttonStyle(LoopflowButtonStyle(.accent))
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 420)
+        .background(palette.background)
     }
 }
 

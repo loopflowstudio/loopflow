@@ -194,6 +194,7 @@ final class GhosttyManager: ObservableObject {
     macos-login-session = false
     shell-integration = detect
     scrollback-limit = 10000000
+    link-previews = true
     window-padding-x = \(Int(GhosttyTerminalPadding.x))
     window-padding-y = \(Int(GhosttyTerminalPadding.y))
     window-padding-balance = false
@@ -269,10 +270,12 @@ final class GhosttyManager: ObservableObject {
             }
         }
         runtimeConfig.action_cb = { _, target, action in
-            guard target.tag == GHOSTTY_TARGET_SURFACE else { return false }
-            guard let surface = target.target.surface,
+            // Every URL goes through Desktop's link routing. Ghostty falls
+            // back to a system opener when the embedder returns false.
+            guard target.tag == GHOSTTY_TARGET_SURFACE,
+                  let surface = target.target.surface,
                   let userdata = ghostty_surface_userdata(surface)
-            else { return false }
+            else { return action.tag == GHOSTTY_ACTION_OPEN_URL }
             // Resolve identity while the callback's surface is valid. Deferred
             // notifications carry values, never an unowned terminal pointer.
             let (view, terminal) = MainActor.assumeIsolated {
@@ -280,6 +283,22 @@ final class GhosttyManager: ObservableObject {
                 return (view, view.terminal)
             }
             switch action.tag {
+            case GHOSTTY_ACTION_OPEN_URL:
+                let request = action.action.open_url
+                let target = copyLinkTarget(request.url, count: Int(request.len))
+                let link = TerminalLink(target: target, allowsBarePath: request.kind != GHOSTTY_ACTION_OPEN_URL_KIND_OSC8)
+                Task { @MainActor [weak view] in view?.openLink(link) }
+                return true
+            case GHOSTTY_ACTION_MOUSE_SHAPE:
+                MainActor.assumeIsolated { view.setMouseShape(action.action.mouse_shape) }
+                return true
+            case GHOSTTY_ACTION_MOUSE_OVER_LINK:
+                let request = action.action.mouse_over_link
+                let target = copyLinkTarget(request.url, count: request.len)
+                MainActor.assumeIsolated {
+                    view.showLinkTarget(target.flatMap { TerminalLink.hasUnsafeCharacters($0) ? nil : $0 })
+                }
+                return true
             case GHOSTTY_ACTION_START_SEARCH:
                 let needle = action.action.start_search.needle.map { String(cString: $0) }
                 Task { @MainActor [weak view] in
@@ -468,6 +487,11 @@ final class GhosttyManager: ObservableObject {
         for (_, config) in themeConfigs.values { ghostty_config_free(config) }
         if let baseline { ghostty_config_free(baseline) }
     }
+}
+
+private func copyLinkTarget(_ bytes: UnsafePointer<CChar>?, count: Int) -> String? {
+    guard let bytes, count > 0 else { return nil }
+    return String(validating: UnsafeRawBufferPointer(start: bytes, count: count), as: UTF8.self)
 }
 
 private func withOptionalCString<Result>(_ text: String?, _ body: (UnsafePointer<CChar>?) -> Result) -> Result {

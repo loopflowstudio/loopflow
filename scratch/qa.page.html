@@ -1,0 +1,42 @@
+<h1>QA: the whole-branch <code>compress</code></h1>
+
+<p>I ran the branch-built <code>lf -b compress</code> (Claude Sonnet, private <code>LF_HOME</code>) on a fixture branch made of three "pass" commits that left these for it to find:</p>
+<ul>
+  <li><code>summary.py</code> copying <code>export._quote</code> as <code>_escape_field</code> (a seam between passes)</li>
+  <li><code>cli._do_export</code>, a wrapper that only forwards</li>
+  <li><code>to_csv(sep=",")</code>, where every caller passes the default</li>
+  <li><code>export.debug_dump</code>, used only by its own test</li>
+  <li>an item in the plan's "What goes" list (<code>legacy_format</code>) whose removal changes what <code>python cli.py</code> prints. This one should be deferred.</li>
+</ul>
+
+<h2>1. <code>lf help compress</code> and <code>lf help ship-review</code></h2>
+<p>Both rendered the new text. <code>ship-review</code> no longer names one writer of <code>## Deferred findings</code>.</p>
+
+<h2>2. First run: right cuts, all in one commit</h2>
+<p>It found all four cuts and deferred <code>legacy_format</code> correctly. <code>--csv</code> output and plain output stayed byte-identical, and the tests passed. Two things went wrong:</p>
+<pre>8e1da2d Compress: one CSV quoting path, drop unused sep, debug_dump and wrapper</pre>
+<ul>
+  <li>All four cuts went into <b>one commit</b>. The transcript shows one <code>python3</code> script making every edit. Step 5's "Commit each cut separately" came at the end of a step about checking, after steps 2–4 had already set up batch work.</li>
+  <li><code>## Deferred findings</code> also got a bullet for a cut it <i>did</i> take ("Removed the <code>sep</code> parameter and <code>debug_dump</code>…"). "Record each cut and what it would take" doesn't say the cut has to be one it didn't take.</li>
+</ul>
+
+<h2>Fix</h2>
+<lf-diff path="rust/loopflow-definitions/src/builtins/task/skill/compress.md"></lf-diff>
+
+<h2>3. Second run, rebuilt with the fix, same fixture</h2>
+<pre>9a83fe4 Record deferred legacy_format cut
+a0feee2 Inline forwarding _do_export wrapper
+4f937fe Drop unused sep param and duplicate _escape_field; TOTAL goes through to_csv
+3832fe2 Remove debug_dump: only its own test used it</pre>
+<pre>## Deferred findings
+
+- Remove `legacy_format` and make bare `python cli.py` print CSV: changes what people
+  running it today see. Needs a decision that the plain-text output can go.</pre>
+<p>Each cut has its own commit and reverts alone, and only the cut it didn't take is in Deferred findings. Output was unchanged and the tests passed after every cut. The reply listed the cuts but also leaked one line of mid-run narration ("Nothing ran; I'll redo it…") ahead of the summary.</p>
+
+<h2>Where it stands</h2>
+<ul>
+  <li><b>Works:</b> it reads the whole branch, merges a duplicate across passes, removes a test-only function and a forwarding wrapper, drops a parameter every caller passes the same, commits one cut at a time, and defers a "What goes" item that would change what people see.</li>
+  <li><b>Not reached:</b> a run with no plan (deferred cuts go in the reply), inside a real <code>build</code> Graph (with <code>qa</code> and <code>ship-review</code> after it), and the <code>optimize</code> case where a measured number has to hold.</li>
+  <li><b>Still rough:</b> commit 2 combines two cuts (removing <code>sep</code> and removing the duplicate quoting), because the dedupe made <code>sep</code> easy to remove at the same time. One sample per wording is too few to say how reliably the per-cut rule holds.</li>
+</ul>

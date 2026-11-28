@@ -26,17 +26,18 @@ Simplify everything this branch touches until it is easy to understand and chang
    boundaries. Remove repeated work, needless state and dependencies.
    Clarity beats line count.
 
-5. **Check each cut before committing it.** For code, build the narrowest
-   changed target or run its focused test. Skip builds for prose and reruns
-   without an edit. Leave release builds, workspace-wide linters and full
-   suites to CI. Commit each cut separately, saying what it removed and why.
+5. **Take one cut at a time: make it, check it, commit it.** Then start the
+   next, so any one cut reverts without the others. For code, build the
+   narrowest changed target or run its focused test. Skip builds for prose
+   and reruns without an edit. Leave release builds, workspace-wide linters
+   and full suites to CI. Each commit says what it removed and why.
 
 6. **Rewrite the reading order** when `scratch/tour.yaml` exists, as
    `lf help tour` describes.
 
 Defer cuts that would change visible behavior, people's data or a
-measured result the branch was built to achieve. Record each cut and what
-it would take under `## Deferred findings` in `scratch/plan.md`. Put questions
+measured result the branch was built to achieve. Record each one you didn't
+take, with what it would take, under `## Deferred findings` in `scratch/plan.md`. Put questions
 only a person can answer in `scratch/questions.md`. Without a plan, report
 deferred cuts in your reply and include questions there unless the questions
 file already exists.

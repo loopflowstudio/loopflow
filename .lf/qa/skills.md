@@ -71,3 +71,16 @@ In zsh, an unset list in a variable needs `env ${=U}` to split. A bare
 files, so `diff_files:` is visible only from a Task step.
 Cycles and missing targets refuse at launch and in `lf graph show` of a Graph
 that names the skill.
+
+To see how a builtin skill's wording steers a real agent, plant what it should
+find in a fixture branch (e.g. for `compress`: a helper duplicated across
+"pass" commits, a forwarding wrapper, a parameter every caller passes the
+same, a function only its test uses, and a `scratch/plan.md` "What goes" item
+whose removal changes visible output) and run `lf -b compress` under a private
+`LF_HOME` with `default_agent: claude:sonnet` (about two minutes). Builtins are
+embedded at build time: rebuild `lf` after editing one. `git reset --hard` the
+fixture to the last pass commit before each rerun. Read the agent's tool calls
+from the newest `~/.claude/projects/-private-tmp-<repo path>/*.jsonl` to see
+why it did what it did (2026-11-27: a single `python3` script applying every
+cut showed why "commit each cut separately" at the end of a step came out as
+one commit).

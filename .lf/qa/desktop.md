@@ -738,3 +738,41 @@ Start `lf server run` from that environment and open the bundle with
 `open -n --env …` for each variable. Building the bundle runs
 `scripts/third_party.py package`, which fails when `swift/Package.swift`
 changed without `uv run python scripts/third_party.py refresh`.
+
+# Terminal links (⌘-hover and ⌘-click)
+
+Works on an unlocked display with the window behind others; no real pointer.
+
+- Private Machine, disposable repository with the `qa` Graph, and
+  `.lf/qa/link-standin.py` as `bin/claude` (set `LINK_QA_MK` in the provider's
+  environment or edit its `MK`). Write `$MK/links.txt` before the Task starts:
+  a stand-in that finds no file exits 1, and the conversation restarts a minute
+  later. `touch $MK/print` reprints after an edit.
+- `lf task create '<words>' --run` started from an `env -i` wrapper gives a
+  held terminal with no inherited `TERM_PROGRAM`; line 1 then shows what the
+  held terminal set (`ps -E -ww -p <pid>` shows it too).
+- Build the isolated bundle with `QAHook.swift`; open the Task by link and
+  `lf --task <id> desktop focus -p session`. `link hover <col> <row> [pane]`
+  and `link click …` drive the view's own `mouseMoved`/`mouseDown`/`mouseUp`
+  with ⌘ and print the preview (`feedback=`), the cursor (`hand`,
+  `not-allowed`) and whether the terminal kept first responder. `linkstate`
+  lists every terminal. A notice lasts four seconds: read it right after the
+  click, after a `link leave 0 0` so the hover preview doesn't hide it.
+- Rows: the hook estimates cells from padding and cell size. In zoomed panes
+  and Dashboard tiles it can be one row off, since the reflowed grid differs
+  from the background window's stale frame. Hover first and read `feedback=`
+  before clicking. A soft-wrapped link answers on either row.
+- `desktop capture -p session` reads the grid; `screencapture -l` of a window
+  behind others can show garbled or stale glyphs. `caffeinate -u -t 2` before
+  a capture that fails with "could not create image from window".
+- A web or plain-URL click opens the person's default browser; keep those to
+  one. An external scheme (`x-lfqa://…`) opens a sheet: `snap` lists it as its
+  own window and `click <sheet> <x> <y>` presses Cancel or Open.
+- Remote: a second private home ("mini") behind a stand-in `ssh` (see
+  [remote Task workspace](remote-task-workspace.md)); `lf task move` the
+  unstarted Task, then `lf task run`. Edit mini's checkout before a click to
+  tell its bytes from a laptop copy. For skew, point mini's `lf` wrapper at a
+  copy of the installed `lf` and restart only mini's server.
+- Teardown: the app by PID, then each stand-in, `server connect`, holder and
+  server under the private paths, children first. A held step on mini can
+  start a fresh holder while its server stops; list again before deleting.

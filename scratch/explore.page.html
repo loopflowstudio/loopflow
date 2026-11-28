@@ -1,0 +1,138 @@
+<h1>LOO-1125 · Route <code>realign</code> fixes back through <code>implement</code> and <code>concept-review</code></h1>
+
+<p>
+  <strong>Decision needed:</strong> Pick how strictly <code>realign</code> stops editing code, tests, and docs—prompt-only everywhere, split by loop vs standalone, or paired with a mechanical freshness check so <code>scratch/concept-review.html</code> cannot go stale silently.
+</p>
+
+<h2>What happens today</h2>
+
+<p>
+  In the builtin <code>build</code> graph, <code>realign</code> runs immediately after read-only <code>concept-review</code> and decides whether the outer loop iterates or advances to <code>compress</code>, <code>qa</code>, and <code>pr-publish</code>:
+</p>
+
+<lf-file path="rust/loopflow-definitions/src/builtins/task/graph/build.yaml" lines="1-11"></lf-file>
+
+<p>
+  Three lines in <code>realign.md</code> currently tell the agent to patch "small, clear mismatches" directly in code, tests, or docs and return <code>advance</code>:
+</p>
+
+<lf-file path="rust/loopflow-definitions/src/builtins/task/skill/realign.md" lines="28-36"></lf-file>
+<lf-file path="rust/loopflow-definitions/src/builtins/task/skill/realign.md" lines="48-76"></lf-file>
+
+<p>
+  Across real runs (<code data-no-check>310ac1</code>, <code data-no-check>6db832</code>, <code>MTG-497</code>), that creates two failures:
+</p>
+<ol>
+  <li>Code edited in <code>realign</code> skips <code>concept-review</code> completely and goes straight to <code>compress</code> and <code>ship-review</code>.</li>
+  <li><code>scratch/concept-review.html</code> stays frozen on the pre-fix commit, so <code>ship-review</code> displays "No" rows that were already fixed.</li>
+</ol>
+
+<p>
+  Notice that the evaluation contract in <code>scripts/evals/instruction_levels.json</code> already omits <code>implement</code> from <code>realign</code>'s allowed actions (even standalone), while <code>docs/orchestration.md</code>, <code>refresh.yaml</code>, <code>AGENTS.md</code>, and <code>.lf/qa/skills.md</code> still echo the old "fix small mismatches inline" wording:
+</p>
+
+<lf-file path="docs/orchestration.md" lines="172-177"></lf-file>
+<lf-file path="rust/loopflow-definitions/src/builtins/task/graph/refresh.yaml" lines="1-4"></lf-file>
+
+<lf-component name="before-after">
+  <div slot="before">
+    <h4>Current loop</h4>
+    <pre>implement ──▶ concept-review (finds 2 mismatches, writes "No" rows)
+                    │
+                    ▼
+              realign (edits code inline, returns advance)
+                    │
+                    ▼
+              compress ──▶ qa ──▶ ship-review
+              (unreviewed edits + stale concept-review.html)</pre>
+  </div>
+  <div slot="after">
+    <h4>Proposed loop (when any in-scope fix exists)</h4>
+    <pre>implement ──▶ concept-review (finds 2 mismatches)
+     ▲              │
+     │              ▼
+     └─────── realign (writes fixes into plan.md, returns iterate)
+
+implement ──▶ concept-review (all "Yes" or deferred only)
+                    │
+                    ▼
+              realign (0 in-scope fixes, returns advance)
+                    │
+                    ▼
+              compress ──▶ qa ──▶ ship-review
+              (final code verified + fresh concept-review.html)</pre>
+  </div>
+</lf-component>
+
+<h2>Visions</h2>
+
+<h3>Vision A · Plan-only <code>realign</code> everywhere (recommended baseline)</h3>
+<p>
+  <strong>What is true:</strong> One single rule across every caller (<code>build</code>, <code>plan</code>, <code>refresh</code>, standalone)—<code>concept-review</code> is read-only, <code>realign</code> edits only <code>scratch/</code> (and Wave memory when asked), and <code>implement</code> owns code, tests, and docs.
+</p>
+<ul>
+  <li><strong>Mechanism:</strong> Rewrite <code>realign.md</code> so any in-scope mismatch (code, tests, or docs) goes into <code>scratch/plan.md</code> as remaining work and returns <code>iterate</code> when deciding a loop; zero in-scope fixes (all "Yes" or only <code>## Deferred findings</code>) returns <code>advance</code> immediately. Update <code>tests/goldens/builtin_realign.md</code>, <code>docs/orchestration.md</code>, <code>refresh.yaml</code> description, <code>AGENTS.md</code>, and <code>.lf/qa/skills.md</code>.</li>
+  <li><strong>Demo:</strong> Run the <code>build</code> outer-loop fixture (or <code>lf -b -a claude:haiku realign</code>) against a <code>scratch/concept-review.html</code> with one small code mismatch and one separate-outcome finding. <code>git diff</code> shows zero code/doc edits, <code>scratch/plan.md</code> queues the mismatch as the next pass and lists the separate outcome under <code>## Deferred findings</code>, and the decider returns <code>iterate</code>. Once <code>implement</code> fixes it and <code>concept-review</code> turns all rows to "Yes", <code>realign</code> returns <code>advance</code> without extra passes.</li>
+  <li><strong>Appeal:</strong> Smallest, cleanest system. No conditional loopholes for an agent to rationalize around, and matches <code>instruction_levels.json</code> already.</li>
+  <li><strong>Cost &amp; risk:</strong> Even a 2-line naming or doc fix surfaced by <code>concept-review</code> pays one extra <code>sync → implement → concept-review → realign</code> pass (~4 steps). Outside a loop (<code>refresh</code> / standalone), mismatches land in <code>scratch/plan.md</code> rather than being patched on the spot. Enforcement is prompt discipline rather than a runtime check.</li>
+</ul>
+
+<h3>Vision B · Loop-gated split (plan-only in loops, inline fixes outside)</h3>
+<p>
+  <strong>What is true:</strong> Inside a loop (<code>build</code>), <code>realign</code> never edits code/tests/docs and always iterates; outside a loop (<code>refresh</code>, standalone <code>lf realign</code>), it may still patch small, clear mismatches inline.
+</p>
+<ul>
+  <li><strong>Mechanism:</strong> Keep the inline-fix clause scoped explicitly to non-loop invocations, and add an explicit prohibition in <code>## After a review</code> and <code>## Deciding a loop</code> so loop runs always write fixes to <code>scratch/plan.md</code> and return <code>iterate</code>.</li>
+  <li><strong>Demo:</strong> In <code>build</code>, behaves identically to Vision A (queues small fixes and iterates). In <code>lf graph refresh</code> after a small upstream rename, <code>realign</code> can still patch the 1-line import without needing a separate <code>implement</code> step.</li>
+  <li><strong>Appeal:</strong> Keeps <code>refresh</code> and manual <code>lf realign</code> one-shot for tiny upstream drift.</li>
+  <li><strong>Cost &amp; risk:</strong> Two conflicting permissions in one prompt invite backsliding—under headless loop pressure, seeing "fix small mismatches yourself" anywhere in <code>realign.md</code> makes models rationalize inline edits during <code>build</code>. Also conflicts with <code>standalone_realign</code> in <code>instruction_levels.json</code>.</li>
+</ul>
+
+<h3>Vision C · Radical success: Plan-only <code>realign</code> + mechanical freshness guarantee</h3>
+<p>
+  <strong>What is true:</strong> <code>realign</code> is plan-only everywhere (everything in Vision A), <em>and</em> the runtime makes unreviewed code edits after <code>concept-review</code> structurally impossible to miss or silently advance past.
+</p>
+<ul>
+  <li><strong>Mechanism:</strong> Everything in Vision A, plus two small runtime additions:
+    <ol>
+      <li><code>lf page build</code> records the reviewed <code>HEAD</code> SHA in the compiled page metadata (or <code>concept-review</code> stamps it), so <code>ship-review</code> and humans can immediately see whether <code>scratch/concept-review.html</code> matches the pre-<code>compress</code> code or is stale.</li>
+      <li>Optional loop guard: if a loop's decider step (<code>realign</code>) modified tracked non-<code>scratch/</code> files and returns <code>advance</code>, the loop runner either rejects the decision with a correction turn ("non-scratch files changed; iterate or revert") or forces an iteration.</li>
+    </ol>
+  </li>
+  <li><strong>Demo:</strong> Seed a fixture where a stand-in <code>realign</code> edits <code>src/lib.rs</code> and returns <code>{"decision":"advance",...}</code>; the graph runner refuses to advance past unreviewed edits (or stamps <code>concept-review.html</code> as stale vs HEAD in <code>ship-review</code>).</li>
+  <li><strong>Appeal:</strong> Turns a prompt hope into a verified invariant—even a customized <code>realign</code> skill or a stubborn model cannot ship unreviewed post-review edits with a stale <code>concept-review.html</code>.</li>
+  <li><strong>Cost &amp; risk:</strong> Expands scope from prompt/docs/goldens into Rust loop-runner and/or page-builder code and tests. A hard guard in the loop runner also needs care so legitimate deciders that <em>do</em> edit code (like <code>implement</code> in <code>build</code>'s inner loop or <code>quick</code>) are not affected—meaning the constraint would need to be declared on the step or skill (e.g. a skill/step capability or narrow rule) rather than hardcoded by skill name.</li>
+</ul>
+
+<h2>Decisions</h2>
+
+<div data-choice="q1" data-label="Q1 · Vision">
+  <h4>1. Which vision should we build?</h4>
+  <button data-value="a">A · Plan-only realign everywhere (prompt, goldens, docs)</button>
+  <button data-value="b">B · Loop-gated split (plan-only in loops, inline fixes outside)</button>
+  <button data-value="c">C · Plan-only + mechanical freshness (commit stamp and/or loop guard)</button>
+</div>
+
+<div data-choice="q2" data-label="Q2 · Docs-only mismatches in build">
+  <h4>2. When <code>concept-review</code> flags a docs-only or comment-only mismatch in <code>build</code>:</h4>
+  <button data-value="a">A · Route it through plan.md + iterate too (zero exceptions; concept-review.html stays 100% current)</button>
+  <button data-value="b">B · Allow realign to edit docs inline (only code/tests force iterate)</button>
+</div>
+
+<div data-choice="q3" data-label="Q3 · Refresh and standalone realign">
+  <h4>3. Outside a loop (<code>refresh</code> and standalone <code>lf realign</code>):</h4>
+  <button data-value="a">A · Update refresh.yaml, AGENTS.md, and docs/orchestration.md to plan-only too</button>
+  <button data-value="b">B · Leave refresh/standalone wording allowing small inline code fixes</button>
+</div>
+
+<div data-choice="q4" data-label="Q4 · If Vision C, which freshness mechanism">
+  <h4>4. Only if choosing Vision C — how far should mechanical freshness go?</h4>
+  <button data-value="a">A · Commit stamp on compiled review pages only (visible in concept-review.html / ship-review)</button>
+  <button data-value="b">B · Commit stamp + skill/step read-only-code guard in loop runner</button>
+  <button data-value="c">C · Skip mechanical enforcement for this Task (file separate Task if wanted later)</button>
+</div>
+
+<div data-question="q5" data-label="Q5 · Other direction or constraints">
+  <h4>5. Anything else to keep fixed, drop, or vary?</h4>
+  <textarea rows="3" placeholder="Optional notes, or reply in chat like: 1a 2a 3a"></textarea>
+</div>

@@ -85,6 +85,22 @@
     ]
   },
   {
+    "id": "build_realign_small_code_fix",
+    "skill": "realign",
+    "no_loopflow": false,
+    "context": "Realign decides the build loop after concept-review. The review found one small in-scope code mismatch: the command still returns exit code 0 for an invalid input the plan says it must reject. All other rows passed. Iterating repeats sync, implement, concept-review and realign.",
+    "request": "Reconcile the review with the plan and decide whether build needs another pass.",
+    "required": [
+      "write_scratch",
+      "reply"
+    ],
+    "allowed": [
+      "inspect_work",
+      "write_scratch",
+      "reply"
+    ]
+  },
+  {
     "id": "guided_memory_maintenance",
     "skill": "realign",
     "no_loopflow": false,

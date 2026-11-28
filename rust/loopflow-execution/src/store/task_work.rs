@@ -124,6 +124,7 @@ mod tests {
     fn a_run_reads_running_while_its_carrier_lives() {
         let row = |pid: Option<u32>| TaskGraphRow {
             stored_graph: String::new(),
+            converted: false,
             breakpoint: None,
             graph: CapturedGraph {
                 name: "proof".into(),
@@ -233,6 +234,7 @@ mod tests {
 #[derive(Debug)]
 pub struct TaskGraphRow {
     stored_graph: String,
+    converted: bool,
     pub breakpoint: Option<BreakpointArrival>,
     pub graph: CapturedGraph,
     pub step: String,
@@ -244,7 +246,7 @@ pub struct TaskGraphRow {
 impl TaskGraphRow {
     /// Resolve a released wait in its original coordinates before expanding
     /// the capture and every saved cursor together. Reads alone do not write.
-    pub(crate) fn prepare_continuation(&mut self) -> (bool, Option<ExecutionCursor>) {
+    pub(crate) fn prepare_continuation(&mut self) -> Option<ExecutionCursor> {
         let mut pending = if self.run.is_none() && self.breakpoint.is_none() {
             self.graph
                 .interactive_step(&self.step)
@@ -252,7 +254,7 @@ impl TaskGraphRow {
         } else {
             None
         };
-        let converted = self.graph.expand_interactive(
+        self.converted |= self.graph.expand_interactive(
             self.run
                 .iter_mut()
                 .map(|(cursor, _)| cursor)
@@ -263,7 +265,7 @@ impl TaskGraphRow {
                 )
                 .chain(pending.iter_mut()),
         );
-        (converted, pending)
+        pending
     }
 }
 
@@ -304,6 +306,7 @@ fn decode_row(row: SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
             .transpose()?,
         graph: serde_json::from_str(&row.graph)?,
         stored_graph: row.graph,
+        converted: false,
         step: row.step,
         run: row
             .run
@@ -378,7 +381,6 @@ pub fn start_task_graph_run(
     task: &TaskId,
     row: &TaskGraphRow,
     cursor: &ExecutionCursor,
-    converted: Option<&CapturedGraph>,
     carrier: (&LfProcessId, &ExecutionStart),
 ) -> StoreResult<bool> {
     store.start_task_graph_run(
@@ -391,7 +393,10 @@ pub fn start_task_graph_run(
         },
         (
             &serde_json::to_string(cursor)?,
-            converted.map(serde_json::to_string).transpose()?.as_deref(),
+            row.converted
+                .then(|| serde_json::to_string(&row.graph))
+                .transpose()?
+                .as_deref(),
         ),
         carrier,
     )

@@ -2633,7 +2633,6 @@ fn auto_off_while_paused_at_a_landing_cursor_settles_on_unpause() {
             id,
             &row,
             &cursor,
-            None,
             (&carrier, &ExecutionStart::reserved(1)),
         )
         .unwrap());

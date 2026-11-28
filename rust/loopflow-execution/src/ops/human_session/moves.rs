@@ -460,7 +460,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<Option<StoppedG
         graph
             .latest()
             .filter(|step| live(&step.run))
-            .map(|step| graph.label(step))
+            .map(|step| step.label(&graph.compiled))
     });
     let processes: Vec<Execution> = graphs
         .into_iter()

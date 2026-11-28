@@ -675,10 +675,10 @@ impl SqliteStore {
                 |row| {
                     Ok((
                         read_run(row)?,
-                        row.get::<_, LfProcessId>(7)?,
-                        row.get::<_, u32>(8)?,
-                        row.get::<_, String>(9)?,
-                        row.get::<_, String>(10)?,
+                        row.get::<_, LfProcessId>("graph_lf_process_id")?,
+                        row.get::<_, u32>("node")?,
+                        row.get::<_, String>("iterations")?,
+                        row.get::<_, String>("compiled")?,
                     ))
                 },
             )
@@ -687,24 +687,12 @@ impl SqliteStore {
             return Ok(None);
         };
         let compiled: CompiledGraph = serde_json::from_str(&compiled)?;
-        let label = compiled
-            .node_at(key)
-            .map(|node| node.label.clone())
-            .unwrap_or_default();
-        Ok(Some((
-            graph_id,
-            crate::execution::GraphStepProcess {
-                lf_process_id: run.id.clone(),
-                label,
-                key,
-                iterations: serde_json::from_str(&iterations)?,
-                started_at: run.started_at,
-                completed_at: run.ended_at,
-                outcome: run.result().outcome().map(str::to_owned),
-                exit_code: run.exit_code,
-                error: run.error,
-            },
-        )))
+        let step = GraphStep {
+            run,
+            key,
+            iterations: serde_json::from_str(&iterations)?,
+        };
+        Ok(Some((graph_id, step.detail(&compiled))))
     }
 
     /// Execution facts of `graphs`: their latest steps' captured inputs, and
@@ -1138,7 +1126,7 @@ mod tests {
             graph
                 .steps
                 .iter()
-                .map(|step| graph.label(step))
+                .map(|step| step.label(&graph.compiled))
                 .collect::<Vec<_>>(),
             ["design", "implement"]
         );

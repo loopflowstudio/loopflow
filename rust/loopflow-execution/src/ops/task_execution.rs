@@ -326,7 +326,7 @@ fn project_execution(
     }
     // A Graph that has started no step is its only run so far.
     let (label, process) = match graph.latest() {
-        Some(latest) => (graph.label(latest), &latest.run),
+        Some(latest) => (latest.label(&graph.compiled), &latest.run),
         None => (graph.name.clone(), &graph.run),
     };
     let label = &label;

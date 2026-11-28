@@ -103,7 +103,6 @@ fn defer_holds_the_lifecycle_and_a_run_is_moving_whatever_its_auto_setting() {
         &task,
         &row,
         &start,
-        None,
         (&by, &carrier),
     )
     .unwrap());
@@ -113,7 +112,6 @@ fn defer_holds_the_lifecycle_and_a_run_is_moving_whatever_its_auto_setting() {
         &task,
         &row,
         &start,
-        None,
         (&LfProcessId::new(), &carrier),
     )
     .unwrap());

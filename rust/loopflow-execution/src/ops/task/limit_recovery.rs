@@ -55,7 +55,7 @@ pub fn ended_step_recovery(
     }
     Ok(store
         .agent_limit_recovery(&step.run.id)?
-        .map(|recovery| (graph.label(step), recovery)))
+        .map(|recovery| (step.label(&graph.compiled), recovery)))
 }
 
 /// Whether the sweep starts a waiting run again without anyone asking: the

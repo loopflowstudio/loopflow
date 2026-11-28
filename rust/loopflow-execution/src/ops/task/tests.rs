@@ -3237,7 +3237,6 @@ async fn breakpoint_edges_cover_launch_failure_terminal_auto_race_and_named_rest
         &fx.task.id,
         &row,
         &start.cursor,
-        None,
         (
             &dead_carrier,
             &loopflow_storage::graph_process::ExecutionStart::reserved(1)
@@ -3323,7 +3322,6 @@ async fn breakpoint_edges_cover_launch_failure_terminal_auto_race_and_named_rest
         &fx.task.id,
         &snapshot,
         &restart_start.cursor,
-        None,
         (
             &winner,
             &loopflow_storage::graph_process::ExecutionStart::reserved(1)
@@ -3335,7 +3333,6 @@ async fn breakpoint_edges_cover_launch_failure_terminal_auto_race_and_named_rest
         &fx.task.id,
         &snapshot,
         &restart_start.cursor,
-        None,
         (
             &loser,
             &loopflow_storage::graph_process::ExecutionStart::reserved(1)

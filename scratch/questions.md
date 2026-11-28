@@ -10,3 +10,4 @@
 - Pass 6 uses the shared workflow bar from main. A standalone marker gets the person icon and an accessible name. Blocked reviews also show the worker’s reason beside the track.
 - Keep linked scratch artifacts in the fallback listing. The directory walker skips cycles so a link back to scratch cannot repeat a file.
 - Pass 7 checks a same-name stage and stop through a released-style workflow fixture. The Graph compiler rejects ambiguous breakpoint names in newly authored Graphs.
+- Compression assumes chat recipes render freshly compiled Graphs. The recipe tests cover the released YAML spelling as a worker followed by its review.

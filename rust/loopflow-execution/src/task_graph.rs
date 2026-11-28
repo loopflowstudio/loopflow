@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
-use crate::graph::{compile_graph, load_authored_graph, return_target, ConcreteStep};
+use crate::graph::{compile_graph, load_authored_graph, occurrences, return_target, ConcreteStep};
 use loopflow_storage::sqlite::task_work::PauseStage;
 use loopflow_storage::sqlite::{Auto, AutoState};
 
@@ -108,18 +108,6 @@ pub fn landing_name(
     }
 }
 
-/// Visit each occurrence in execution order, including alternatives in name order.
-fn visit_steps<'a>(steps: &'a [ConcreteStep], visit: &mut impl FnMut(&'a ConcreteStep)) {
-    for step in steps {
-        visit(step);
-        if let ConcreteStep::Xor(branch) = step {
-            for path in branch.paths.values() {
-                visit_steps(&path.steps, visit);
-            }
-        }
-    }
-}
-
 fn find_place(
     steps: &[ConcreteStep],
     matches: &mut impl FnMut(&ConcreteStep) -> bool,
@@ -202,33 +190,15 @@ impl CapturedGraph {
     /// The first breakpoint a run from `place` reaches, looking into
     /// every XOR path in name order; `None` when it runs to the end.
     pub fn next_breakpoint(&self, place: &Place) -> Option<&str> {
-        fn scan(body: &[ConcreteStep], from: usize) -> Option<&str> {
-            body[from..].iter().find_map(|step| match step {
-                ConcreteStep::Xor(branch) => {
-                    branch.paths.values().find_map(|path| scan(&path.steps, 0))
-                }
-                step => stop_name(step),
-            })
-        }
         let mut path = place.path.clone();
         let mut from = place.index;
         loop {
-            if let Some(step) = scan(body(&self.steps, &path), from) {
+            if let Some(step) = occurrences(&body(&self.steps, &path)[from..]).find_map(stop_name) {
                 return Some(step);
             }
             let (index, _) = path.pop()?;
             from = index + 1;
         }
-    }
-
-    fn has_landing(steps: &[ConcreteStep], merges: &mut dyn FnMut(&[String]) -> bool) -> bool {
-        steps.iter().any(|step| match step {
-            ConcreteStep::Xor(branch) => branch
-                .paths
-                .values()
-                .any(|path| Self::has_landing(&path.steps, merges)),
-            _ => landing_name(step, &mut *merges).is_some(),
-        })
     }
 
     /// Could any remaining path need a person before or at its next landing?
@@ -274,7 +244,7 @@ impl CapturedGraph {
         auto: Option<AutoState>,
         mut merges: impl FnMut(&[String]) -> bool,
     ) -> bool {
-        if !Self::has_landing(&self.steps, &mut merges) {
+        if !occurrences(&self.steps).any(|step| landing_name(step, &mut merges).is_some()) {
             return false;
         }
         let place = if let Some(cursor) = cursor {
@@ -461,12 +431,12 @@ impl CapturedGraph {
     /// Steps a person would name for `--from`, for messages.
     pub fn describe_steps(&self) -> String {
         let mut seen: Vec<&str> = Vec::new();
-        visit_steps(&self.steps, &mut |step| {
+        for step in occurrences(&self.steps) {
             let name = names(step)[0];
             if !seen.contains(&name) {
                 seen.push(name);
             }
-        });
+        }
         if seen.is_empty() {
             "none".into()
         } else {
@@ -505,6 +475,7 @@ struct WorkflowTrack {
 }
 
 fn workflow(steps: &[ConcreteStep]) -> WorkflowTrack {
+    let mut seen = std::collections::HashSet::new();
     let mut breakpoints = Vec::new();
     let mut line: Vec<WorkflowStep> = Vec::new();
     let mut indices = Vec::with_capacity(steps.len());
@@ -516,22 +487,17 @@ fn workflow(steps: &[ConcreteStep]) -> WorkflowTrack {
             ConcreteStep::Xor(branch) => &branch.sources,
         };
         let name = sources.get(1).cloned().unwrap_or_else(|| step_name(step));
-        let mut breakpoint = false;
-        visit_steps(std::slice::from_ref(step), &mut |node| {
-            if let Some(name) = stop_name(node) {
-                breakpoint = true;
-                if !breakpoints.iter().any(|seen| seen == name) {
-                    breakpoints.push(name.to_owned());
-                }
-            }
-        });
+        let mut stops = occurrences(std::slice::from_ref(step))
+            .filter_map(stop_name)
+            .peekable();
         let kind = if sources.get(1).is_none() && matches!(step, ConcreteStep::Breakpoint(_)) {
             WorkflowStepKind::Breakpoint
-        } else if breakpoint {
+        } else if stops.peek().is_some() {
             WorkflowStepKind::StageWithBreakpoint
         } else {
             WorkflowStepKind::Stage
         };
+        breakpoints.extend(stops.filter(|&name| seen.insert(name)).map(str::to_owned));
         match line.last_mut() {
             Some(last)
                 if last.name == name

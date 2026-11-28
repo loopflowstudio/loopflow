@@ -239,7 +239,7 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
             run_in_progress = true;
             continue;
         };
-        let step = graph.latest().map(|step| graph.step_detail(step));
+        let step = graph.latest().map(|step| step.detail(&graph.compiled));
         let id = graph.run.id;
         let run = RunObservation {
             name: graph.name,

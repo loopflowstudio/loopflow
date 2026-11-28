@@ -1008,14 +1008,14 @@ mod tests {
         };
         sync_skills(&options).unwrap();
         let local = repo.path().join(".claude/skills/pursue/SKILL.md");
-        assert!(fs::read_to_string(&local)
-            .unwrap()
-            .contains("1. Execute the skill `demo` in this conversation."));
+        let reviewed = fs::read_to_string(&local).unwrap();
+        assert!(reviewed.contains(" skill -- demo`."));
+        assert!(reviewed.contains("2. At after-review, present the completed work"));
         fs::write(&graph, "- compress\n").unwrap();
         sync_skills(&options).unwrap();
         let updated = fs::read_to_string(local).unwrap();
         assert!(updated.contains(" skill -- compress`."));
-        assert!(!updated.contains("Execute the skill `demo`"));
+        assert!(!updated.contains("after-review"));
         assert_eq!(fs::read_to_string(global).unwrap(), original);
     }
 

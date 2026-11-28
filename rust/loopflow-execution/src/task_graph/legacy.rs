@@ -3,9 +3,9 @@
 use std::collections::{BTreeMap, HashSet};
 
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
-use crate::graph::{breakpoint_name, Breakpoint, ConcreteStep};
+use crate::graph::{breakpoint_name, occurrences, Breakpoint, ConcreteStep};
 
-use super::{find_place, names, visit_steps, CapturedGraph};
+use super::{names, CapturedGraph};
 
 /// Entry and exit boundaries of each old step in one body, including its end.
 /// A worker keeps its entry, and its loop decision moves to its final node.
@@ -101,21 +101,18 @@ impl CapturedGraph {
         &mut self,
         cursors: impl IntoIterator<Item = &'a mut ExecutionCursor>,
     ) -> bool {
-        if find_place(
-            &self.steps,
-            &mut |step| matches!(step, ConcreteStep::Skill(skill) if skill.interactive),
-        )
-        .is_none()
+        if !occurrences(&self.steps)
+            .any(|step| matches!(step, ConcreteStep::Skill(skill) if skill.interactive))
         {
             return false;
         }
         let mut used = HashSet::from(["start".into(), "end".into()]);
-        visit_steps(&self.steps, &mut |step| {
+        for step in occurrences(&self.steps) {
             used.extend(names(step).into_iter().map(str::to_owned));
             if let ConcreteStep::Command(command) = step {
                 used.insert(command.item.display_name());
             }
-        });
+        }
         let body = Body::expand(&mut self.steps, &mut used);
         for cursor in cursors {
             body.translate(cursor);

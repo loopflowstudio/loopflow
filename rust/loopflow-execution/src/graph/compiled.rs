@@ -10,7 +10,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::graph::{flatten_resolved, resolve_graph, return_target, ResolvedGraphItem};
+use crate::graph::{
+    flatten_resolved, occurrences, resolve_graph, return_target, ResolvedGraphItem,
+};
 
 use std::path::Path;
 
@@ -289,24 +291,11 @@ pub fn location(
     steps: &[ConcreteStep],
     cursor: &ExecutionCursor,
 ) -> anyhow::Result<(u32, Vec<Vec<u32>>)> {
-    fn count(steps: &[ConcreteStep]) -> usize {
-        steps
-            .iter()
-            .map(|step| {
-                1 + match step {
-                    ConcreteStep::Xor(branch) => {
-                        branch.paths.values().map(|path| count(&path.steps)).sum()
-                    }
-                    _ => 0,
-                }
-            })
-            .sum()
-    }
     fn locate(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> anyhow::Result<usize> {
         let step = steps
             .get(cursor.index)
             .ok_or_else(|| anyhow::anyhow!("cursor has no captured node"))?;
-        let mut index = count(&steps[..cursor.index]);
+        let mut index = occurrences(&steps[..cursor.index]).count();
         if let Some(child) = cursor.child.as_deref() {
             let (ConcreteStep::Xor(branch), NestedCursor::Xor { selected, cursor }) = (step, child)
             else {
@@ -317,7 +306,7 @@ pub fn location(
                 if name == selected {
                     return Ok(index + locate(&path.steps, cursor)?);
                 }
-                index += count(&path.steps);
+                index += occurrences(&path.steps).count();
             }
             anyhow::bail!("cursor selects an uncaptured XOR alternative");
         }

@@ -205,8 +205,8 @@ mod graph_instructions {
         assert!(plan.contains("repeat steps 3[repair].1 through 3[repair].1"));
         assert!(plan.contains("reassess at step 3[repair].2"));
         assert!(plan.contains("rejoin after step 3"));
-        assert!(plan.contains("5. Execute the skill `demo` in this conversation."));
-        assert!(plan.contains("Wait for the participant's response"));
+        assert!(plan.contains("5. Run `lf -b --skill-input /captures/demo.json skill -- demo`."));
+        assert!(plan.contains("6. At after-review, present the completed work and its proposed continuation. Wait for a reply."));
         assert!(plan.contains("Repair the findings"));
         assert!(plan.contains("A deferred check alone is not a blocker"));
         assert!(!plan.contains("Work body must not be bundled"));

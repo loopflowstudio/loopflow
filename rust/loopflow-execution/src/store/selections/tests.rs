@@ -1311,9 +1311,9 @@ fn a_moved_capture_changes_sidebar_coordinates_only_when_the_run_is_claimed() {
         .take_up_task_graph(&task, r#"{"name":"other","steps":[]}"#)
         .unwrap();
     store.set_task_graph_step(&task, "demo").unwrap();
-    assert!(!start_task_graph_run(&store, &task, &old, &cursor, None, (&by, &here)).unwrap());
+    assert!(!start_task_graph_run(&store, &task, &old, &cursor, (&by, &here)).unwrap());
     place_moved_task_graph(&store, &task, &imported, None).unwrap();
-    assert!(start_task_graph_run(&store, &task, &old, &cursor, None, (&by, &here)).unwrap());
+    assert!(start_task_graph_run(&store, &task, &old, &cursor, (&by, &here)).unwrap());
     let sidebar = || {
         selections::view_plan(&store, &repo, None, |_| false)
             .unwrap()
@@ -1326,7 +1326,7 @@ fn a_moved_capture_changes_sidebar_coordinates_only_when_the_run_is_claimed() {
     };
     assert_eq!(sidebar(), "implement");
     let mut next = task_graph_row(&store, &task).unwrap().unwrap();
-    assert!(next.prepare_continuation().0);
+    next.prepare_continuation();
     assert_eq!(next.run.as_ref().unwrap().0.index, 2);
     assert_eq!(
         task_graph_row(&store, &task)
@@ -1344,7 +1344,6 @@ fn a_moved_capture_changes_sidebar_coordinates_only_when_the_run_is_claimed() {
         &task,
         &next,
         &next.run.as_ref().unwrap().0,
-        Some(&next.graph),
         (&replacement, &here)
     )
     .unwrap());
@@ -1352,5 +1351,5 @@ fn a_moved_capture_changes_sidebar_coordinates_only_when_the_run_is_claimed() {
     let saved = task_graph_row(&store, &task).unwrap().unwrap();
     assert_eq!(saved.graph, next.graph);
     assert_eq!(saved.run.unwrap().0.index, 2);
-    assert!(!start_task_graph_run(&store, &task, &old, &cursor, None, (&by, &here)).unwrap());
+    assert!(!start_task_graph_run(&store, &task, &old, &cursor, (&by, &here)).unwrap());
 }

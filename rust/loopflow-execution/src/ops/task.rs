@@ -840,22 +840,24 @@ impl TaskRunMode {
 /// Where `lf task run` begins, chosen the same way for launch and
 /// explanation without writing anything.
 #[derive(Debug)]
-pub struct TaskRunSelection {
-    previous: Option<crate::store::task_work::TaskGraphRow>,
-    converted: bool,
-    pub graph: crate::task_graph::CapturedGraph,
-    /// Whether the Task takes `graph` up first: it has none, or named another.
-    pub take_up: bool,
+struct TaskRunSelection {
+    graph: SelectedGraph,
     /// Where the run begins; `None` when nothing remains before `end`.
-    pub start: Option<RunStart>,
+    start: Option<RunStart>,
+}
+
+#[derive(Debug)]
+enum SelectedGraph {
+    TakeUp(crate::task_graph::CapturedGraph),
+    Continue(Box<crate::store::task_work::TaskGraphRow>),
 }
 
 /// Where a Task run sets out: the step, and the cursor the Graph starts from.
 /// A stopped run's cursor keeps its loop passes, verdicts and routes.
-#[derive(Debug, Clone)]
-pub struct RunStart {
-    pub place: crate::task_graph::Place,
-    pub cursor: crate::graph::runner::ExecutionCursor,
+#[derive(Debug)]
+struct RunStart {
+    place: crate::task_graph::Place,
+    cursor: crate::graph::runner::ExecutionCursor,
 }
 
 impl From<crate::task_graph::Place> for RunStart {
@@ -979,7 +981,7 @@ pub fn load_graph(
 /// The graph a Task takes up when nothing else selects one.
 pub const DEFAULT_TASK_GRAPH: &str = "code";
 
-pub fn select_task_run(
+fn select_task_run(
     store: &SharedStore,
     task: &Task,
     checkout: &Path,
@@ -993,22 +995,28 @@ pub fn select_task_run(
     let mut row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .filter(|row| requested.is_none_or(|name| row.graph.name == name));
-    let take_up = row.is_none();
-    let (converted, pending) = row
+    let pending = row
         .as_mut()
-        .map(crate::store::task_work::TaskGraphRow::prepare_continuation)
-        .unwrap_or_default();
-    let graph = match (&row, requested) {
-        (Some(row), _) => row.graph.clone(),
-        (None, Some(name)) => load_graph(name, "", checkout)?,
+        .and_then(crate::store::task_work::TaskGraphRow::prepare_continuation);
+    let selected = match (row, requested) {
+        (Some(row), _) => SelectedGraph::Continue(Box::new(row)),
+        (None, Some(name)) => SelectedGraph::TakeUp(load_graph(name, "", checkout)?),
         (None, None) => {
             let (name, source) = task_graph_default(store, task)?;
             let repo = repository_for_task(store, task)?;
-            load_graph(&name, &format!("{} default ", source.as_str()), &repo)?
+            SelectedGraph::TakeUp(load_graph(
+                &name,
+                &format!("{} default ", source.as_str()),
+                &repo,
+            )?)
         }
     };
-    let step = row.as_ref().map_or(START, |row| row.step.as_str());
-    let parked = row.as_ref().and_then(|row| row.breakpoint.as_ref());
+    let (graph, row) = match &selected {
+        SelectedGraph::Continue(row) => (&row.graph, Some(row.as_ref())),
+        SelectedGraph::TakeUp(graph) => (graph, None),
+    };
+    let step = row.map_or(START, |row| row.step.as_str());
+    let parked = row.and_then(|row| row.breakpoint.as_ref());
     if let Some(expected) = &options.at_arrival {
         if parked.is_none_or(|arrival| arrival.id != *expected) {
             return Err(task_error(format!(
@@ -1022,7 +1030,7 @@ pub fn select_task_run(
             "choose a loop decision at the current breakpoint",
         ));
     }
-    if let Some((_, carrier)) = row.as_ref().and_then(|row| row.run.as_ref()) {
+    if let Some((_, carrier)) = row.and_then(|row| row.run.as_ref()) {
         if crate::store::task_work::carrier_may_run(carrier) {
             return Err(task_error(format!(
                 "Task {issue} is running graph {} from {step}; read `lf task status {issue}`, or `lf task interrupt {issue}` to stop it",
@@ -1041,7 +1049,7 @@ pub fn select_task_run(
         .reason
         .as_deref()
         .filter(|text| !text.trim().is_empty());
-    let start = match (from, row.as_ref().and_then(|row| row.run.as_ref()), parked) {
+    let start = match (from, row.and_then(|row| row.run.as_ref()), parked) {
         (Some(name), _, _) => {
             let place = graph.find(name).ok_or_else(|| task_error(format!(
                 "graph {} has no step {name:?}. Steps: {}",
@@ -1067,7 +1075,7 @@ pub fn select_task_run(
                 None => return Err(task_error("saved cursor is outside its captured graph")),
             }
         }
-        (None, None, Some(arrival)) => continue_from_breakpoint(&graph, arrival, options, reason)?,
+        (None, None, Some(arrival)) => continue_from_breakpoint(graph, arrival, options, reason)?,
         (None, None, None) if step == START => graph.find(START).map(RunStart::from),
         (None, None, None) if step == END => {
             return Err(task_error(format!(
@@ -1086,10 +1094,7 @@ pub fn select_task_run(
         }
     };
     Ok(TaskRunSelection {
-        previous: row,
-        converted,
-        graph,
-        take_up,
+        graph: selected,
         start,
     })
 }
@@ -1213,22 +1218,18 @@ async fn try_start_task_run(
         }
         _ => {}
     }
-    let selection = select_task_run(store, task, task.worktree()?, options, merges)?;
     let TaskRunSelection {
-        previous,
-        converted,
-        graph,
-        take_up,
+        graph: selected,
         start,
-    } = selection;
+    } = select_task_run(store, task, task.worktree()?, options, merges)?;
     let issue = task.identifier.clone();
     let (process, carrier) = crate::journal::current_lf_process_id()
         .zip(crate::journal::current_execution_start())
         .ok_or_else(|| task_error("a Task run requires a registered Process"))?;
     // This lf carries the run; it ends with this lf.
     crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::TaskCarrier);
-    if take_up {
-        let graph = serde_json::to_string(&graph).map_err(task_error)?;
+    if let SelectedGraph::TakeUp(graph) = &selected {
+        let graph = serde_json::to_string(graph).map_err(task_error)?;
         // A Task with no Graph takes its first one up once; naming another
         // replaces the one it has.
         if requested.is_some() {
@@ -1255,9 +1256,9 @@ async fn try_start_task_run(
         .map(|mark| mark.state);
     let through = mode == TaskRunMode::Headless
         || auto_state == Some(loopflow_storage::sqlite::AutoState::On);
-    let row = match previous {
-        Some(row) => row,
-        None => {
+    let row = match selected {
+        SelectedGraph::Continue(row) => *row,
+        SelectedGraph::TakeUp(graph) => {
             let Some(row) = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
                 .map_err(task_error)?
             else {
@@ -1269,6 +1270,7 @@ async fn try_start_task_run(
             row
         }
     };
+    let graph = &row.graph;
     let arrival = row.breakpoint.as_ref().map(|stop| &stop.id);
     let lost_claim =
         || -> OpsResult<Option<(TaskRunStart, Option<loopflow_model::id::LfProcessId>)>> {
@@ -1319,7 +1321,6 @@ async fn try_start_task_run(
         &task.id,
         &row,
         &start.cursor,
-        converted.then_some(&graph),
         (&process, &carrier),
     )
     .map_err(task_error)?

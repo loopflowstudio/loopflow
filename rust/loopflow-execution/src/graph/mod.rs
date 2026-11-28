@@ -290,6 +290,25 @@ pub enum ConcreteStep {
     Xor(ConcreteXor),
 }
 
+/// Preorder occurrences, including each XOR alternative in name order.
+pub(crate) fn occurrences(steps: &[ConcreteStep]) -> impl Iterator<Item = &ConcreteStep> {
+    let mut body = steps;
+    let mut remaining = Vec::new();
+    std::iter::from_fn(move || loop {
+        if let Some((step, tail)) = body.split_first() {
+            body = tail;
+            if let ConcreteStep::Xor(branch) = step {
+                for path in branch.paths.values().rev() {
+                    remaining.push(body);
+                    body = &path.steps;
+                }
+            }
+            return Some(step);
+        }
+        body = remaining.pop()?;
+    })
+}
+
 /// Resolved template composition. Flattening is the sole execution expansion.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) enum ResolvedGraphItem {

@@ -1,55 +1,49 @@
-at: cc73f2d81af9d321aecd4a4d0e59c7be31d07c4f
+at: 18870702e1a340ca4b91d28acda4a2a555d432e5
 first:
   - path: docs/orchestration.md
     why: Follow a worker through review and continuation.
   - path: docs/work.md
     why: See when a held Task receives its review.
-  - path: swift/README.md
-    why: See how stages and breakpoint markers appear in Desktop.
   - path: rust/loopflow-definitions/src/builtins/task/graph/feature.yaml
-    why: See where exploration and ship review finish.
+    why: Find the reviews in a complete Graph.
   - path: rust/loopflow-definitions/src/builtins/task/skill/task_session.md
-    why: Present artifacts and continue the reviewed visit.
+    why: Present the work and continue the reviewed visit.
   - path: rust/loopflow-execution/src/graph/mod.rs
-    why: Compile named and unnamed markers across composed Graphs.
+    why: Compile breakpoints and traverse occurrences across XOR alternatives.
   - path: rust/loopflow-execution/src/task_graph.rs
-    why: Project stage kinds, arrivals, and blockers for both surfaces.
-  - path: rust/loopflow-execution/src/store/task_work.rs
-    why: Identify a visit by its carrier and saved cursor.
-  - path: rust/loopflow-execution/src/task_graph/legacy.rs
-    why: Translate released captures and their pending workers together.
-  - path: rust/loopflow-execution/src/graph/transitions.rs
-    why: Scope review replies to the next step or loop.
+    why: Read workflow stages, stops, and the current visit.
+  - path: rust/loopflow-execution/src/graph/instructions.rs
+    why: See how a chat runs workers and presents reviews.
   - path: rust/loopflow-execution/src/graph/runner.rs
-    why: Carry the producer and verdict to the breakpoint.
+    why: Carry the producing process and verdict to review.
+  - path: rust/loopflow-execution/src/graph/transitions.rs
+    why: Apply the decision and carry the reply forward.
+  - path: rust/loopflow-storage/src/graph_process.rs
+    why: Read one recorded step for history and review.
   - path: rust/loopflow/src/lf/commands/graph.rs
-    why: Assemble the worker’s result and available artifacts.
+    why: Assemble the finished work and artifact links.
   - path: rust/loopflow-storage/src/sqlite/task_work.rs
-    why: Park and enqueue the handoff in one transaction.
+    why: Park and queue the review together.
   - path: rust/loopflow-storage/src/sqlite/steers.rs
-    why: Deliver the current visit to the unpaused primary.
+    why: Route the current visit to its primary conversation.
   - path: rust/loopflow-storage/src/sqlite/task_pause.rs
-    why: Queue unread reviews when lifting the hold.
+    why: Wake an unread review after unpause.
   - path: rust/loopflow-execution/src/harness/task_updates.rs
-    why: Keep generic Graph progress from waking a held review.
+    why: Keep progress updates quiet during a held review.
   - path: rust/loopflow-execution/src/ops/task.rs
-    why: Claim the arrival and apply the reply.
-  - path: rust/loopflow-execution/src/ops/task/pause.rs
-    why: Keep the visit when a Task is shelved.
+    why: Select a new Graph or continue its saved capture.
+  - path: rust/loopflow-execution/src/store/task_work.rs
+    why: Claim the saved position with its translated capture.
+  - path: rust/loopflow-execution/src/task_graph/legacy.rs
+    why: Translate released workers, return edges, and checkpoints together.
   - path: rust/loopflow-execution/src/ops/task_actions.rs
     why: Decide when a review owns the next action.
   - path: rust/loopflow/src/lf/commands/waves.rs
     why: Carry the review and its arrival to Roadmap.
-  - path: swift/Loopflow/Design/TaskActions.swift
-    why: Offer start actions for runnable stages.
   - path: swift/Loopflow/Design/TaskWorkflowControls.swift
-    why: Render static markers, pause chips, and the worker’s blocker.
-  - path: swift/Loopflow/Models/NowProjection.swift
-    why: Order Tasks waiting for review.
-  - path: rust/loopflow/src/server/wake.rs
-    why: Exercise the idle primary wake after unpause.
+    why: Render stages, breakpoint markers, and the worker’s blocker.
   - path: rust/loopflow/tests/work/graph_tests.rs
-    why: Exercise delivery to the primary and next worker.
+    why: Follow a reply from the primary to the worker.
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the server schema.

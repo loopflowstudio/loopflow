@@ -7,7 +7,7 @@ use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::ops::run::WorkSelection;
 use crate::store::SharedStore;
 
-use super::{select_task_run, TaskProcessOptions, TaskRunSelection};
+use super::{select_task_run, SelectedGraph, TaskProcessOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -152,14 +152,12 @@ async fn read_task_run(
             return Ok(());
         }
     };
-    let TaskRunSelection {
-        graph,
-        take_up,
-        start,
-        ..
-    } = choice;
+    let (graph, take_up) = match &choice.graph {
+        SelectedGraph::TakeUp(graph) => (graph, true),
+        SelectedGraph::Continue(row) => (&row.graph, false),
+    };
     let name = graph.name.clone();
-    report.action = Some(match start {
+    report.action = Some(match choice.start {
         None => {
             report.unavailable.push("Arrival requests planning completion; PR gates and eligible checkout cleanup are evaluated during settlement, not by this preview".into());
             TaskRunAction::End {
@@ -169,7 +167,7 @@ async fn read_task_run(
         }
         Some(start) => TaskRunAction::Run {
             from: graph.step_name(&start.place),
-            stops_at: mode.next_stop(&graph, &start.place).map(str::to_owned),
+            stops_at: mode.next_stop(graph, &start.place).map(str::to_owned),
             graph: name,
             take_up,
         },

@@ -72,7 +72,7 @@ struct SessionActionSheet: View {
                         .disabled(draft.submitting || draft.selector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityIdentifier("session-bind-preview")
                 }
-                Text("Creation keeps this conversation in place. Binding sets its directory to the Task worktree immediately. Already-running clients may keep their original directory. Files stay where they are.")
+                Text("This conversation and its files stay in their current directory.")
                 if let error = draft.error {
                     FailureLine("Not bound.", machine: error)
                         .accessibilityIdentifier("session-bind-error")

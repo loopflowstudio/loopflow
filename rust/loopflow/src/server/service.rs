@@ -1470,8 +1470,8 @@ async fn start_held(
 }
 
 /// What `session.continue` starts: `lf session resume` of exactly this
-/// Session, in its directory, with this server's environment and its own
-/// `LF_HOME` and `LF_BIN`.
+/// Session, from its directory or its repository's main checkout, with this
+/// server's environment and its own `LF_HOME` and `LF_BIN`.
 pub(super) fn continuing(
     session: loopflow_model::id::LfSessionId,
     request: String,
@@ -1499,6 +1499,18 @@ pub(super) fn continuing(
     {
         return Err(Error::new(ErrorCode::Conflict, reason));
     }
+    let cwd = if record.cwd.is_dir() {
+        record.cwd
+    } else {
+        // The exact Session's resume can only relocate it after the holder
+        // starts lf in a directory that still exists.
+        loopflow_execution::ops::human_session::primary::replacement_directory(
+            &registry.sqlite,
+            &record,
+        )
+        .map_err(unavailable)?
+        .unwrap_or(record.cwd)
+    };
     let (lf_bin, env) = held_env()?;
     let mut argv = vec![lf_bin.to_string_lossy().into_owned()];
     if let Some(agent) = agent {
@@ -1512,7 +1524,7 @@ pub(super) fn continuing(
     ]);
     Ok(loopflow_execution::transport::registry::Start {
         argv,
-        cwd: record.cwd.clone(),
+        cwd,
         session: Some(session),
         request,
         env,

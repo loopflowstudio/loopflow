@@ -2565,15 +2565,6 @@ pub(crate) fn detach_viewers() -> Result<()> {
     )
 }
 
-/// The Session's selected directory, which `lf session bind` can move after launch.
-fn selected_directory(record: &NativeExit) -> Option<PathBuf> {
-    crate::journal::process_ledger()
-        .and_then(|store| store.session(&record.session))
-        .ok()
-        .flatten()
-        .map(|session| session.cwd)
-}
-
 /// The native client has connected in this directory. The host serializes
 /// its OSC report with provider bytes and retains it for later viewers.
 pub(crate) fn report_directory(cwd: &Path) {

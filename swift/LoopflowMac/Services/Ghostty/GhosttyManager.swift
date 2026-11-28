@@ -295,9 +295,7 @@ final class GhosttyManager: ObservableObject {
             case GHOSTTY_ACTION_MOUSE_OVER_LINK:
                 let request = action.action.mouse_over_link
                 let target = copyLinkTarget(request.url, count: request.len)
-                MainActor.assumeIsolated {
-                    view.showLinkTarget(target.flatMap { TerminalLink.hasUnsafeCharacters($0) ? nil : $0 })
-                }
+                MainActor.assumeIsolated { view.showLinkTarget(TerminalLink.preview(target)) }
                 return true
             case GHOSTTY_ACTION_START_SEARCH:
                 let needle = action.action.start_search.needle.map { String(cString: $0) }

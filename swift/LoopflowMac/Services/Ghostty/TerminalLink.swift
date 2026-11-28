@@ -78,7 +78,14 @@ enum TerminalLink: Equatable {
         }
     }
 
-    static func hasUnsafeCharacters(_ text: String) -> Bool {
+    /// What ⌘-hover shows: the target a click would open, or why it won't.
+    static func preview(_ target: String?) -> String? {
+        guard let target, !target.isEmpty else { return nil }
+        if case .refused(let reason) = TerminalLink(target: target, allowsBarePath: true) { return reason }
+        return target
+    }
+
+    private static func hasUnsafeCharacters(_ text: String) -> Bool {
         text.unicodeScalars.contains {
             CharacterSet.controlCharacters.contains($0)
                 || $0.properties.isBidiControl

@@ -34,6 +34,13 @@ struct TerminalLinkTests {
         }
     }
 
+    @Test func hoverShowsWhyAClickWouldBeRefused() {
+        #expect(TerminalLink.preview("https://example.com/pr") == "https://example.com/pr")
+        #expect(TerminalLink.preview("https://example.com/%E2%80%AEtest") == "Invalid terminal link.")
+        #expect(TerminalLink.preview("https://github.com@evil.example/") == "Invalid web link.")
+        #expect(TerminalLink.preview("") == nil)
+    }
+
     @Test func checkoutFileLinksKeepTheirLineAndHostname() {
         let link = TerminalLink(target: "file://WORKSTATION.local/tmp/check%20out/scripts/test.py#L12")
         guard case .file(let file) = link else {

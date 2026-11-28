@@ -1,13 +1,13 @@
-at: 23467d441b9a4df834760a04f6e17580ebc06fed
+at: 3e3e90079a59f40310228c4eed55a4701582a3f2
 first:
   - path: docs/orchestration.md
-    why: How a code finding sends build around again.
+    why: How a small code fix gets reviewed before compress.
   - path: rust/loopflow-definitions/src/builtins/task/skill/realign.md
     why: Which findings realign fixes, queues, or defers.
   - path: rust/loopflow-execution/src/graph/output.rs
-    why: Shared loop defaults yield to skill rules.
+    why: When shared loop defaults apply.
   - path: .lf/qa/skills.md
-    why: How to verify the two-pass run.
+    why: Expected edits and verdicts across two passes.
 hide:
   - path: tests/goldens/builtin_realign.md
-    why: Regenerated copy of the standalone realign prompt.
+    why: Copy of the rendered standalone prompt.
